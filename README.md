@@ -179,7 +179,9 @@ MyMem 特别适合：
 
 ## 安装与启用
 
-将 MyMem 作为 OpenClaw 的 memory 插件安装，并在 OpenClaw 插件设置中填入所需的模型凭据。
+把本仓库链接发给你的 OpenClaw，从仓库克隆到 /root/.openclaw/workspace/plugins/mymem 安装。
+
+MyMem 作为 OpenClaw 的 memory 插件，需要在 OpenClaw 设置中填入下方的推荐配置。
 
 启用后，MyMem 会自动开始捕捉、治理和召回长期记忆。
 
