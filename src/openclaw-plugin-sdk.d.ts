@@ -45,6 +45,12 @@ declare module "openclaw/plugin-sdk" {
 
   export interface OpenClawPluginApi {
     logger: OpenClawLogger;
+    runtime?: {
+      agent?: {
+        runEmbeddedPiAgent?: (params: Record<string, unknown>) => Promise<unknown>;
+      };
+      [key: string]: unknown;
+    };
     resolvePath(path: string): string;
     registerTool(definition: OpenClawToolDefinition | OpenClawToolFactory, options?: unknown): void;
     registerCommand?(definition: any, options?: any): void;

@@ -11,11 +11,10 @@ import { unlink } from "node:fs/promises";
 import { clipDiagnostic, extractJsonObjectFromOutput, extractReflectionTextFromCliResult } from "./cli-utils.js";
 import { sha256Hex } from "./session-utils.js";
 import { buildReflectionPrompt, buildReflectionFallbackText } from "./session-recovery-utils.js";
-import { loadEmbeddedPiRunner } from "./openclaw-extension-utils.js";
 import { resolveAgentPrimaryModelRef, splitProviderModel } from "./agent-config-utils.js";
 import { withTimeout } from "./cli-utils.js";
 import { runWithReflectionTransientRetryOnce } from "./reflection-retry.js";
-import type { ReflectionThinkLevel, ReflectionErrorSignal } from "./plugin-types.js";
+import type { EmbeddedPiRunner, ReflectionThinkLevel, ReflectionErrorSignal } from "./plugin-types.js";
 
 /**
  * Runs reflection via CLI using openclaw agent command.
@@ -128,6 +127,7 @@ export async function generateReflectionText(params: {
   timeoutMs: number;
   thinkLevel: ReflectionThinkLevel;
   toolErrorSignals?: ReflectionErrorSignal[];
+  runEmbeddedPiAgent?: EmbeddedPiRunner;
   logger?: { info?: (message: string) => void; warn?: (message: string) => void };
 }): Promise<{ text: string; usedFallback: boolean; promptHash: string; error?: string; runner: "embedded" | "cli" | "fallback" }> {
   const prompt = buildReflectionPrompt(
@@ -149,54 +149,58 @@ export async function generateReflectionText(params: {
   };
 
   try {
-    const result: unknown = await runWithReflectionTransientRetryOnce({
-      scope: "reflection",
-      runner: "embedded",
-      retryState,
-      onLog: onRetryLog,
-      execute: async () => {
-        const runEmbeddedPiAgent = await loadEmbeddedPiRunner();
-        const modelRef = resolveAgentPrimaryModelRef(params.cfg, params.agentId);
-        const { provider, model } = modelRef ? splitProviderModel(modelRef) : {};
-        const embeddedTimeoutMs = Math.max(params.timeoutMs + 5000, 15000);
+    const runEmbeddedPiAgent = params.runEmbeddedPiAgent;
+    if (!runEmbeddedPiAgent) {
+      errors.push("embedded: OpenClaw runtime api.runtime.agent.runEmbeddedPiAgent unavailable");
+    } else {
+      const result: unknown = await runWithReflectionTransientRetryOnce({
+        scope: "reflection",
+        runner: "embedded",
+        retryState,
+        onLog: onRetryLog,
+        execute: async () => {
+          const modelRef = resolveAgentPrimaryModelRef(params.cfg, params.agentId);
+          const { provider, model } = modelRef ? splitProviderModel(modelRef) : {};
+          const embeddedTimeoutMs = Math.max(params.timeoutMs + 5000, 15000);
 
-        return await withTimeout(
-          runEmbeddedPiAgent({
-            sessionId: `reflection-${Date.now()}`,
-            sessionKey: "temp:memory-reflection",
-            agentId: params.agentId,
-            sessionFile: tempSessionFile,
-            workspaceDir: params.workspaceDir,
-            config: params.cfg,
-            prompt,
-            disableTools: true,
-            disableMessageTool: true,
-            timeoutMs: params.timeoutMs,
-            runId: `memory-reflection-${Date.now()}`,
-            bootstrapContextMode: "lightweight",
-            thinkLevel: params.thinkLevel,
-            provider,
-            model,
-          }),
-          embeddedTimeoutMs,
-          "embedded reflection run"
-        );
-      },
-    });
+          return await withTimeout(
+            runEmbeddedPiAgent({
+              sessionId: `reflection-${Date.now()}`,
+              sessionKey: "temp:memory-reflection",
+              agentId: params.agentId,
+              sessionFile: tempSessionFile,
+              workspaceDir: params.workspaceDir,
+              config: params.cfg,
+              prompt,
+              disableTools: true,
+              disableMessageTool: true,
+              timeoutMs: params.timeoutMs,
+              runId: `memory-reflection-${Date.now()}`,
+              bootstrapContextMode: "lightweight",
+              thinkLevel: params.thinkLevel,
+              provider,
+              model,
+            }),
+            embeddedTimeoutMs,
+            "embedded reflection run"
+          );
+        },
+      });
 
-    const payloads = (() => {
-      if (!result || typeof result !== "object") return [];
-      const maybePayloads = (result as Record<string, unknown>).payloads;
-      return Array.isArray(maybePayloads) ? maybePayloads : [];
-    })();
+      const payloads = (() => {
+        if (!result || typeof result !== "object") return [];
+        const maybePayloads = (result as Record<string, unknown>).payloads;
+        return Array.isArray(maybePayloads) ? maybePayloads : [];
+      })();
 
-    if (payloads.length > 0) {
-      const firstWithText = payloads.find((p) => {
-        if (!p || typeof p !== "object") return false;
-        const text = (p as Record<string, unknown>).text;
-        return typeof text === "string" && text.trim().length > 0;
-      }) as Record<string, unknown> | undefined;
-      reflectionText = typeof firstWithText?.text === "string" ? firstWithText.text.trim() : null;
+      if (payloads.length > 0) {
+        const firstWithText = payloads.find((p) => {
+          if (!p || typeof p !== "object") return false;
+          const text = (p as Record<string, unknown>).text;
+          return typeof text === "string" && text.trim().length > 0;
+        }) as Record<string, unknown> | undefined;
+        reflectionText = typeof firstWithText?.text === "string" ? firstWithText.text.trim() : null;
+      }
     }
   } catch (err) {
     errors.push(`embedded: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);

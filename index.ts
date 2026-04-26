@@ -4,7 +4,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { PluginConfig, ReflectionThinkLevel, SessionStrategy, ReflectionInjectMode, ReflectionErrorSignal, ReflectionErrorState, EmbeddedPiRunner, AgentWorkspaceMap } from "./src/plugin-types.js";
+import type { PluginConfig, ReflectionThinkLevel, SessionStrategy, ReflectionInjectMode, ReflectionErrorSignal, ReflectionErrorState, AgentWorkspaceMap } from "./src/plugin-types.js";
 import { DEFAULT_SELF_IMPROVEMENT_REMINDER, SELF_IMPROVEMENT_NOTE_PREFIX, DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, DEFAULT_REFLECTION_SESSION_TTL_MS, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS, REFLECTION_FALLBACK_MARKER, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
@@ -28,8 +28,8 @@ import { clampInt } from "./src/utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir, getDefaultMdMirrorDir, resolveWorkspaceDirFromContext } from "./src/path-utils.js";
 import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress, buildAutoCaptureConversationKeyFromSessionKey, isInternalReflectionSessionKey } from "./src/auto-capture-utils.js";
 import { withTimeout, tryParseJsonObject, extractJsonObjectFromOutput, extractReflectionTextFromCliResult, clipDiagnostic, asNonEmptyString, sanitizeFileToken } from "./src/cli-utils.js";
-import { runReflectionViaCli, generateReflectionText } from "./src/reflection-cli.js";
-import { toImportSpecifier, getExtensionApiImportSpecifiers, loadEmbeddedPiRunner } from "./src/openclaw-extension-utils.js";
+import { generateReflectionText } from "./src/reflection-cli.js";
+import { resolveRuntimeEmbeddedPiRunner } from "./src/openclaw-extension-utils.js";
 import { parsePluginConfig } from "./src/plugin-config-parser.js";
 import { getPluginVersion } from "./src/version-utils.js";
 import { sortFileNamesByMtimeDesc } from "./src/file-utils.js";
@@ -1323,6 +1323,7 @@ const myMemPlugin = {
             timeoutMs: reflectionTimeoutMs,
             thinkLevel: reflectionThinkLevel,
             toolErrorSignals,
+            runEmbeddedPiAgent: resolveRuntimeEmbeddedPiRunner(api),
             logger: api.logger,
           });
           api.logger.info(

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ const jiti = jitiFactory(import.meta.url, {
 });
 
 const { readSessionConversationWithResetFallback } = jiti("../src/session-recovery-utils.ts");
+const { generateReflectionText } = jiti("../src/reflection-cli.ts");
+const { resolveRuntimeEmbeddedPiRunner } = jiti("../src/openclaw-extension-utils.ts");
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
 const { getDisplayCategoryTag } = jiti("../src/reflection-metadata.ts");
 const {
@@ -129,6 +131,66 @@ describe("memory reflection", () => {
       assert.match(conversation, /assistant: Acknowledged\. I will keep responses concise and factual\./);
       assert.doesNotMatch(conversation, /old reset snapshot/);
       assert.doesNotMatch(conversation, /^user:\s*\/new/m);
+    });
+  });
+
+  describe("runtime embedded runner", () => {
+    it("resolves runEmbeddedPiAgent from the injected plugin runtime", () => {
+      const runner = async () => ({ payloads: [{ text: "ok" }] });
+      assert.equal(
+        resolveRuntimeEmbeddedPiRunner({ runtime: { agent: { runEmbeddedPiAgent: runner } } }),
+        runner
+      );
+      assert.equal(resolveRuntimeEmbeddedPiRunner({ runtime: { agent: {} } }), undefined);
+      assert.equal(resolveRuntimeEmbeddedPiRunner({ runtime: { agent: { runEmbeddedPiAgent: "nope" } } }), undefined);
+    });
+
+    it("uses the injected runtime runner for reflection generation", async () => {
+      const workDir = mkdtempSync(path.join(tmpdir(), "reflection-runtime-runner-test-"));
+      let seenParams;
+      try {
+        const result = await generateReflectionText({
+          conversation: "user: Keep responses concise.\nassistant: Acknowledged.",
+          maxInputChars: 1000,
+          cfg: {
+            agents: {
+              list: [
+                { id: "reflection", model: { primary: "openai/gpt-test" } },
+              ],
+            },
+          },
+          agentId: "reflection",
+          workspaceDir: workDir,
+          timeoutMs: 5000,
+          thinkLevel: "low",
+          runEmbeddedPiAgent: async (params) => {
+            seenParams = params;
+            return { payloads: [{ text: "## Session Invariants\n- Keep responses concise." }] };
+          },
+        });
+
+        assert.equal(result.runner, "embedded");
+        assert.equal(result.usedFallback, false);
+        assert.match(result.text, /Keep responses concise/);
+        assert.equal(seenParams.agentId, "reflection");
+        assert.equal(seenParams.workspaceDir, workDir);
+        assert.equal(seenParams.disableTools, true);
+        assert.equal(seenParams.disableMessageTool, true);
+        assert.equal(seenParams.provider, "openai");
+        assert.equal(seenParams.model, "gpt-test");
+      } finally {
+        rmSync(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it("does not keep deprecated extension API import probes", () => {
+      const source = readFileSync(
+        path.resolve(testDir, "..", "src", "openclaw-extension-utils.ts"),
+        "utf-8"
+      );
+      assert.doesNotMatch(source, /extensionAPI\.js/);
+      assert.doesNotMatch(source, /OPENCLAW_EXTENSION_API_PATH/);
+      assert.doesNotMatch(source, /openclaw\/dist\/extensionAPI/);
     });
   });
 
