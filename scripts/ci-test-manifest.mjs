@@ -46,7 +46,6 @@ export const CI_TEST_MANIFEST = [
   { group: "cli-smoke", runner: "node", file: "test/llm-api-key-client.test.mjs", args: ["--test"] },
   { group: "cli-smoke", runner: "node", file: "test/llm-oauth-client.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/lock-recovery.test.mjs", args: ["--test"] },
-  { group: "packaging-and-workflow", runner: "node", file: "test/longmemeval-benchmark.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/mdmirror-fallback-dir.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/memory-compactor.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/memory-doctor.test.mjs", args: ["--test"] },

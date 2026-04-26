@@ -31,9 +31,6 @@
     "test:storage-and-schema": "node scripts/run-ci-tests.mjs --group storage-and-schema",
     "test:llm-clients-and-auth": "node scripts/run-ci-tests.mjs --group llm-clients-and-auth",
     "test:packaging-and-workflow": "node scripts/verify-ci-test-manifest.mjs && node scripts/run-ci-tests.mjs --group packaging-and-workflow",
-    "bench": "jiti benchmark/run.ts",
-    "bench:locomo": "jiti benchmark/run.ts --benchmark locomo",
-    "bench:longmemeval": "jiti benchmark/run.ts --benchmark longmemeval",
     "test:openclaw-host": "node test/openclaw-host-functional.mjs",
     "version": "node scripts/sync-plugin-version.mjs openclaw.plugin.json package.json && git add openclaw.plugin.json",
     "typecheck": "tsc -p tsconfig.json"
