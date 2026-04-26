@@ -134,6 +134,19 @@ access tracking
 
 把本仓库链接发给你的 Agent，安装 Plugins
 
+如果插件是通过 Git/source path/容器 volume 放到 OpenClaw 插件目录，而不是通过会自动安装依赖的插件管理器安装，需要在运行 OpenClaw 的同一个环境里安装运行时依赖：
+
+```bash
+cd /root/.openclaw/workspace/plugins/mymem
+npm ci --omit=dev
+```
+
+如果目标目录没有 `package-lock.json`，使用：
+
+```bash
+npm install --omit=dev
+```
+
 默认开启的能力：
 
 | 能力 | 默认状态 |
@@ -779,6 +792,19 @@ rm -rf node_modules/.cache/jiti
 ---
 
 ## 故障排查
+
+### 插件加载失败：`Cannot find module 'openai'`
+
+这表示插件源码已经被 OpenClaw 找到，但插件目录里的运行时依赖没有安装。请在运行 OpenClaw 的同一台机器或同一个容器中执行：
+
+```bash
+cd /root/.openclaw/workspace/plugins/mymem
+npm ci --omit=dev
+node -e "import('openai').then(() => console.log('openai ok'))"
+openclaw gateway restart
+```
+
+如果没有 `package-lock.json`，把 `npm ci --omit=dev` 换成 `npm install --omit=dev`。后续如果又报 `@lancedb/lancedb`、`apache-arrow` 或 `@sinclair/typebox` 缺失，原因相同，重新安装依赖即可。
 
 ### `openclaw mymem version` 前出现插件日志
 
