@@ -223,13 +223,7 @@ MyMem 特别适合：
       ]
     },
     "allow": [
-      "mymem",
-      "memory-core",
-      "lossless-claw",
-      "minimax",
-      "browser",
-      "firecrawl",
-      "telegram"
+      "mymem"
     ],
     "slots": {
       "memory": "mymem"
@@ -247,9 +241,9 @@ MyMem 特别适合：
             "model": "text-embedding-v4"
           },
           "llm": {
-            "baseURL": "https://api.xins.live/v1",
+            "baseURL": "${LLM_API_URL}",
             "apiKey": "${LLM_API_KEY}",
-            "model": "MiniMax"
+            "model": "${LLM_API_MODEL}"
           },
           "retrieval": {
             "rerankEndpoint": "https://dashscope.aliyuncs.com/compatible-api/v1/reranks",
@@ -263,21 +257,12 @@ MyMem 特别适合：
 }
 ```
 
-这套形态把 embedding、记忆提取模型和重排序模型分开配置：`text-embedding-v4` 负责把生活、工作、关系、偏好和计划转成可检索的长期记忆向量，`MiniMax` 负责智能提取和反思，`qwen3-rerank` 负责在召回后重新排序，让个人助理更容易找到真正相关的记忆。推荐的向量模型和重排模型都来自阿里云百炼，`DASHSCOPE_API_KEY` 从阿里云百炼控制台获取，并通过环境变量注入，不要写进仓库。
+`embedding` 负责把生活、工作、关系、偏好和计划转成可检索的长期记忆向量
+`llm` 负责智能提取和反思
+`retrieval` 负责在召回后重新排序，让个人助理更容易找到真正相关的记忆。
+推荐的向量模型和重排模型都来自阿里云百炼，`DASHSCOPE_API_KEY` 从阿里云百炼控制台获取，建议通过环境变量注入。
 
-MyMem 配置里填写的是 OpenAI 兼容 SDK 的 `baseURL`，所以向量服务使用 `https://dashscope.aliyuncs.com/compatible-mode/v1`；它对应的完整 HTTP 接口是 `https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings`。重排序服务直接填写完整接口 `https://dashscope.aliyuncs.com/compatible-api/v1/reranks`。
-
-`plugins.allow` 是 OpenClaw 的插件白名单。个人助理场景建议至少允许 `mymem`；如果你的助理还需要长上下文整理、网页访问、网页抓取、Telegram 消息或 MiniMax 模型插件，可以保留 `memory-core`、`lossless-claw`、`browser`、`firecrawl`、`telegram`、`minimax`。不使用的插件可以从白名单里删掉。
-
-如果你的 OpenClaw 环境还对工具做白名单控制，推荐允许 MyMem 的全部工具。核心工具包括 `memory_recall`、`memory_store`、`memory_update`、`memory_forget`；治理和诊断工具包括 `memory_stats`、`memory_list`、`memory_debug`、`memory_doctor`、`memory_promote`、`memory_archive`、`memory_compact`、`memory_explain_rank`；自我改进工具包括 `self_improvement_log`、`self_improvement_extract_skill`、`self_improvement_review`、`self_improvement_distill`。这组自我改进工具是 MyMem 的关键能力之一，它让个人助理不只会记住事实，还能从长期使用中沉淀偏好、经验和可复用的做事方式。
-
----
-
-## 存储与安全
-
-MyMem 的运行时记忆数据保存在本地 OpenClaw 环境中。请不要提交本地数据库、生成的记忆文件、密钥、令牌或私有凭据。
-
-这个项目目录只包含插件源码、元数据、测试和文档。用户的长期记忆应留在自己的运行环境里。
+如果你的 OpenClaw 环境还对工具做白名单控制，推荐允许 MyMem 的全部工具。核心工具包括 `memory_recall`、`memory_store`、`memory_update`、`memory_forget`；治理和诊断工具包括 `memory_stats`、`memory_list`、`memory_debug`、`memory_doctor`、`memory_promote`、`memory_archive`、`memory_compact`、`memory_explain_rank`；自我改进工具包括 `self_improvement_log`、`self_improvement_extract_skill`、`self_improvement_review`、`self_improvement_distill`。这组自我改进工具是 MyMem 的关键能力之一，它让个人助理不只会记住事实，还能从长期使用中沉淀偏好、经验和可复用的做事方式，也就是自进化，自动创建技能。
 
 ---
 
