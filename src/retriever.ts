@@ -212,7 +212,7 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   bm25Weight: 0.3,
   queryExpansion: true,
   minScore: 0.5,
-  rerank: "none",
+  rerank: "cross-encoder",
   candidatePoolSize: 12,
   recencyHalfLifeDays: 14,
   recencyWeight: 0.15,

@@ -449,7 +449,7 @@
               "lightweight",
               "none"
             ],
-            "default": "none"
+            "default": "cross-encoder"
           },
           "rerankApiKey": {
             "type": "string",
