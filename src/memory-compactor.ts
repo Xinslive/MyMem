@@ -25,6 +25,7 @@
 import type { MemoryEntry } from "./store.js";
 import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } from "./smart-metadata.js";
+import type { MemoryCategory } from "./memory-categories.js";
 
 // ============================================================================
 // Types
@@ -101,6 +102,7 @@ interface RefinedMemory {
   overview: string;
   content: string;
   category: MemoryEntry["category"];
+  memoryCategory: MemoryCategory;
   importance: number;
   reason: string;
 }
@@ -133,6 +135,69 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return Math.max(0, Math.min(1, dot(a, b) / (na * nb)));
 }
 
+function normalizeScope(scope: string | null | undefined): string {
+  return scope || "global";
+}
+
+function mapSmartCategoryToStoreCategory(category: MemoryCategory): MemoryEntry["category"] {
+  switch (category) {
+    case "profile":
+    case "cases":
+      return "fact";
+    case "preferences":
+      return "preference";
+    case "entities":
+      return "entity";
+    case "events":
+      return "decision";
+    case "patterns":
+      return "other";
+  }
+}
+
+function normalizeRefinedCategory(
+  rawCategory: unknown,
+  fallback: ClusterPlan["merged"],
+  text: string,
+): { category: MemoryEntry["category"]; memoryCategory: MemoryCategory } {
+  const raw = typeof rawCategory === "string" ? rawCategory.trim().toLowerCase() : "";
+  const smartAliases: Record<string, MemoryCategory> = {
+    profile: "profile",
+    preference: "preferences",
+    preferences: "preferences",
+    entity: "entities",
+    entities: "entities",
+    event: "events",
+    events: "events",
+    decision: "events",
+    case: "cases",
+    cases: "cases",
+    pattern: "patterns",
+    patterns: "patterns",
+    other: "patterns",
+  };
+
+  const smartCategory = smartAliases[raw];
+  if (smartCategory) {
+    return {
+      category: mapSmartCategoryToStoreCategory(smartCategory),
+      memoryCategory: smartCategory,
+    };
+  }
+
+  if (raw === "fact") {
+    return {
+      category: "fact",
+      memoryCategory: reverseMapLegacyCategory("fact", text),
+    };
+  }
+
+  return {
+    category: fallback.category,
+    memoryCategory: reverseMapLegacyCategory(fallback.category, text),
+  };
+}
+
 // ============================================================================
 // Cluster building
 // ============================================================================
@@ -141,8 +206,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
  * Greedy cluster expansion.
  *
  * Sort entries by importance DESC so the most valuable memory seeds each
- * cluster. Expand each seed by collecting every unassigned entry whose
- * cosine similarity with the seed is >= threshold.
+ * cluster. Expand each seed by collecting every unassigned entry in the same
+ * scope whose cosine similarity with the seed is >= threshold.
  *
  * Returns an array of index-arrays (each inner array = one cluster).
  * Only clusters with >= minClusterSize entries are returned.
@@ -170,9 +235,11 @@ export function buildClusters(
 
     const seedVec = entries[seedIdx].vector;
     if (seedVec.length === 0) continue; // skip entries without vectors
+    const seedScope = normalizeScope(entries[seedIdx].scope);
 
     for (let j = 0; j < entries.length; j++) {
       if (assigned[j]) continue;
+      if (normalizeScope(entries[j].scope) !== seedScope) continue;
       const jVec = entries[j].vector;
       if (jVec.length === 0) continue;
       if (cosineSimilarity(seedVec, jVec) >= threshold) {
@@ -245,14 +312,14 @@ export function buildMergedEntry(
   }
 
   // --- scope: use the first (all should match) ---
-  const scope = members[0].scope;
+  const scope = normalizeScope(members[0].scope);
 
   // --- metadata ---
   const metadata = JSON.stringify({
     compacted: true,
     sourceCount: members.length,
     compactedAt: Date.now(),
-    memory_category: category,
+    memory_category: reverseMapLegacyCategory(category, text),
   });
 
   return { text, importance, category, scope, metadata };
@@ -279,9 +346,7 @@ function normalizeRefinedMemory(value: unknown, fallback: ClusterPlan["merged"])
   const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
   if (!abstract || !content) return null;
 
-  const rawCategory = typeof raw.category === "string" ? raw.category : fallback.category;
-  const allowedCategories = new Set(["fact", "preference", "decision", "pattern", "other"]);
-  const category = (allowedCategories.has(rawCategory) ? rawCategory : fallback.category) as MemoryEntry["category"];
+  const { category, memoryCategory } = normalizeRefinedCategory(raw.category, fallback, content);
   const importance = typeof raw.importance === "number"
     ? Math.min(1, Math.max(0, raw.importance))
     : fallback.importance;
@@ -291,6 +356,7 @@ function normalizeRefinedMemory(value: unknown, fallback: ClusterPlan["merged"])
     overview: overview || `- ${abstract}`,
     content,
     category,
+    memoryCategory,
     importance,
     reason: reason || "llm_refined_compaction",
   };
@@ -311,7 +377,7 @@ function buildRefinementPrompt(members: CompactionEntry[]): string {
     "You refine duplicate or near-duplicate long-term memories into one canonical memory.",
     "Preserve durable user-relevant facts, preferences, decisions, and patterns. Remove repetition, obsolete wording, and low-signal noise.",
     "Return only JSON with keys: abstract, overview, content, category, importance, reason.",
-    "category must be one of: fact, preference, decision, pattern, other. importance must be a number from 0 to 1.",
+    "category must be one of the smart memory categories: profile, preferences, entities, events, cases, patterns. importance must be a number from 0 to 1.",
     "abstract should be one concise sentence. overview should be a short bullet-style summary. content should be the canonical memory text.",
     "",
     memoryLines,
@@ -513,7 +579,7 @@ export async function runCompaction(
             l0_abstract: refined?.abstract ?? merged.text,
             l1_overview: refined?.overview ?? `- ${merged.text}`,
             l2_content: refined?.content ?? merged.text,
-            memory_category: reverseMapLegacyCategory(merged.category, merged.text),
+            memory_category: refined?.memoryCategory ?? reverseMapLegacyCategory(merged.category, merged.text),
             compacted: true,
             source_ids: members.map((m) => m.id),
             source_count: members.length,
@@ -545,7 +611,7 @@ export async function runCompaction(
       // Delete source entries
       if (deleteSourceMemories) {
         for (const m of members) {
-          const deleted = await store.delete(m.id);
+          const deleted = await store.delete(m.id, [normalizeScope(m.scope)]);
           if (deleted) memoriesDeleted++;
         }
       }

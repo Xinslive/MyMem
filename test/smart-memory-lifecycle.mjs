@@ -389,4 +389,114 @@ assert.equal(contradictedMeta.state, "archived");
 assert.equal(contradictedMeta.prune_reason, "contradiction_newer_version");
 assert.equal(contradictedMeta.superseded_by, newPreference.id);
 
+const crossScopeOldPreference = {
+  id: "pref-cross-scope-old",
+  text: "Preferred editor is Vim.",
+  vector: [0.3, 0.4],
+  category: "preference",
+  scope: "agent:alpha",
+  importance: 0.82,
+  timestamp: now - 20 * 86_400_000,
+  metadata: JSON.stringify(
+    buildSmartMetadata(
+      {
+        text: "Preferred editor is Vim.",
+        category: "preference",
+        importance: 0.82,
+        timestamp: now - 20 * 86_400_000,
+      },
+      {
+        memory_category: "preferences",
+        confidence: 0.7,
+        fact_key: "preferences:editor",
+      },
+    ),
+  ),
+};
+
+const crossScopeNewPreference = {
+  id: "pref-cross-scope-new",
+  text: "Preferred editor is VS Code.",
+  vector: [0.3, 0.45],
+  category: "preference",
+  scope: "agent:beta",
+  importance: 0.86,
+  timestamp: now - 2 * 86_400_000,
+  metadata: JSON.stringify(
+    buildSmartMetadata(
+      {
+        text: "Preferred editor is VS Code.",
+        category: "preference",
+        importance: 0.86,
+        timestamp: now - 2 * 86_400_000,
+      },
+      {
+        memory_category: "preferences",
+        confidence: 0.92,
+        fact_key: "preferences:editor",
+      },
+    ),
+  ),
+};
+
+const crossScopeUpdates = new Map();
+const crossScopeResult = await runLifecycleMaintenance(
+  {
+    store: {
+      async list() {
+        return [crossScopeOldPreference, crossScopeNewPreference];
+      },
+      async update(id, patch) {
+        crossScopeUpdates.set(id, patch);
+        return { id, ...patch };
+      },
+      async delete() {
+        throw new Error("cross-scope contradiction pruning should not delete");
+      },
+    },
+    decayEngine,
+    tierManager,
+  },
+  { enabled: true, maxMemoriesToScan: 10, cooldownHours: 1, archiveThreshold: 0, dryRun: false, phase: "prune" },
+);
+
+assert.equal(crossScopeResult.archived, 0);
+assert.equal(crossScopeUpdates.size, 0);
+
+const sameScopeOldPreference = {
+  ...crossScopeOldPreference,
+  id: "pref-same-scope-old",
+  scope: "agent:shared",
+};
+const sameScopeNewPreference = {
+  ...crossScopeNewPreference,
+  id: "pref-same-scope-new",
+  scope: "agent:shared",
+};
+const sameScopeUpdates = new Map();
+const sameScopeResult = await runLifecycleMaintenance(
+  {
+    store: {
+      async list() {
+        return [sameScopeOldPreference, sameScopeNewPreference];
+      },
+      async update(id, patch) {
+        sameScopeUpdates.set(id, patch);
+        return { id, ...patch };
+      },
+      async delete() {
+        throw new Error("same-scope contradiction pruning should archive by default");
+      },
+    },
+    decayEngine,
+    tierManager,
+  },
+  { enabled: true, maxMemoriesToScan: 10, cooldownHours: 1, archiveThreshold: 0, dryRun: false, phase: "prune" },
+);
+
+assert.equal(sameScopeResult.archived, 1);
+const sameScopeArchivedMeta = parseSmartMetadata(sameScopeUpdates.get(sameScopeOldPreference.id).metadata, sameScopeOldPreference);
+assert.equal(sameScopeArchivedMeta.state, "archived");
+assert.equal(sameScopeArchivedMeta.superseded_by, sameScopeNewPreference.id);
+
 console.log("OK: smart memory lifecycle test passed");

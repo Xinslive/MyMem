@@ -15,6 +15,7 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { clampInt } from "./utils.js";
@@ -57,6 +58,7 @@ export interface MetadataPatch {
 
 let lancedbImportPromise: Promise<typeof import("@lancedb/lancedb")> | null =
   null;
+const nodeRequire = createRequire(import.meta.url);
 
 // =========================================================================
 // Cross-Process File Lock (proper-lockfile)
@@ -76,7 +78,9 @@ export const loadLanceDB = async (): Promise<
 > => {
   if (!lancedbImportPromise) {
     // Use require() for CommonJS modules on Windows to avoid ESM URL scheme issues
-    lancedbImportPromise = Promise.resolve(require("@lancedb/lancedb"));
+    lancedbImportPromise = Promise.resolve(
+      nodeRequire("@lancedb/lancedb") as typeof import("@lancedb/lancedb"),
+    );
   }
   try {
     return await lancedbImportPromise;
@@ -90,6 +94,13 @@ export const loadLanceDB = async (): Promise<
 
 function toLanceRows(entries: MemoryEntry[]): Record<string, unknown>[] {
   return entries.map((entry) => ({ ...entry }));
+}
+
+function toNumberVector(value: unknown): number[] {
+  if (!value) return [];
+  const maybeIterable = value as Iterable<unknown>;
+  if (typeof maybeIterable[Symbol.iterator] !== "function") return [];
+  return Array.from(maybeIterable, (item) => Number(item));
 }
 
 // ============================================================================
@@ -571,7 +582,7 @@ export class MemoryStore {
     return {
       id: row.id as string,
       text: row.text as string,
-      vector: Array.from(row.vector as Iterable<number>),
+      vector: toNumberVector(row.vector),
       category: row.category as MemoryEntry["category"],
       scope: rowScope,
       importance: Number(row.importance),
@@ -625,7 +636,7 @@ export class MemoryStore {
       const entry: MemoryEntry = {
         id: row.id as string,
         text: row.text as string,
-        vector: row.vector as number[],
+        vector: toNumberVector(row.vector),
         category: row.category as MemoryEntry["category"],
         scope: rowScope,
         importance: Number(row.importance),
@@ -704,7 +715,7 @@ export class MemoryStore {
         const entry: MemoryEntry = {
             id: row.id as string,
             text: row.text as string,
-            vector: row.vector as number[],
+            vector: toNumberVector(row.vector),
             category: row.category as MemoryEntry["category"],
             scope: rowScope,
             importance: Number(row.importance),
@@ -768,7 +779,7 @@ export class MemoryStore {
       const entry: MemoryEntry = {
         id: row.id as string,
         text: row.text as string,
-        vector: row.vector as number[],
+        vector: toNumberVector(row.vector),
         category: row.category as MemoryEntry["category"],
         scope: rowScope,
         importance: Number(row.importance),
@@ -1038,7 +1049,7 @@ export class MemoryStore {
       const original: MemoryEntry = {
         id: row.id as string,
         text: row.text as string,
-        vector: Array.from(row.vector as Iterable<number>),
+        vector: toNumberVector(row.vector),
         category: row.category as MemoryEntry["category"],
         scope: rowScope,
         importance: Number(row.importance),
@@ -1230,6 +1241,8 @@ export class MemoryStore {
   ): Promise<MemoryEntry[]> {
     await this.ensureInitialized();
 
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
+
     const conditions: string[] = [`timestamp < ${maxTimestamp}`];
 
     if (scopeFilter && scopeFilter.length > 0) {
@@ -1252,7 +1265,7 @@ export class MemoryStore {
         (row): MemoryEntry => ({
           id: row.id as string,
           text: row.text as string,
-          vector: Array.isArray(row.vector) ? (row.vector as number[]) : [],
+          vector: toNumberVector(row.vector),
           category: row.category as MemoryEntry["category"],
           scope: (row.scope as string | undefined) ?? "global",
           importance: Number(row.importance),

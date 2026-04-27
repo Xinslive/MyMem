@@ -1,5 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
@@ -10,6 +14,7 @@ const {
   buildMergedEntry,
   runCompaction,
 } = jiti("../src/memory-compactor.ts");
+const { MemoryStore } = jiti("../src/store.ts");
 
 // ============================================================================
 // Helpers
@@ -40,6 +45,7 @@ function makeStore(entries = []) {
   return {
     stored: [],
     deleted: [],
+    deleteCalls: [],
     async fetchForCompaction(_maxTs, _scopes, limit = 200) {
       return [...db.values()].slice(0, limit);
     },
@@ -49,7 +55,8 @@ function makeStore(entries = []) {
       this.stored.push(newEntry);
       return newEntry;
     },
-    async delete(id) {
+    async delete(id, scopeFilter) {
+      this.deleteCalls.push({ id, scopeFilter });
       if (db.has(id)) { db.delete(id); this.deleted.push(id); return true; }
       return false;
     },
@@ -156,6 +163,13 @@ describe("buildClusters", () => {
     assert.equal(clusters.length, 2);
   });
 
+  it("does not cluster similar entries across different scopes", () => {
+    const a = entry({ vector: vec(4, 1, 0.01, 0, 0), scope: "agent:a" });
+    const b = entry({ vector: vec(4, 1, 0.02, 0, 0), scope: "agent:b" });
+    const clusters = buildClusters([a, b], 0.88, 2);
+    assert.equal(clusters.length, 0);
+  });
+
   it("skips entries with empty vectors", () => {
     const a = entry({ vector: [], importance: 0.9 });
     const b = entry({ vector: [], importance: 0.5 });
@@ -241,6 +255,36 @@ describe("runCompaction", () => {
     assert.equal(result.fallbackMerged, 1);
   });
 
+  it("keeps compaction deletion scoped to source memory scope", async () => {
+    const a = entry({ text: "team note: use retries", vector: vec(4, 1, 0.01, 0, 0), scope: "team-a" });
+    const b = entry({ text: "team note: use retry logic", vector: vec(4, 1, 0.02, 0, 0), scope: "team-a" });
+    const store = makeStore([a, b]);
+
+    const result = await runCompaction(store, makeEmbedder(), defaultConfig);
+
+    assert.equal(result.clustersFound, 1);
+    assert.equal(result.memoriesDeleted, 2);
+    assert.deepEqual(
+      store.deleteCalls.map((call) => call.scopeFilter),
+      [["team-a"], ["team-a"]],
+    );
+  });
+
+  it("does not merge similar memories from different scopes", async () => {
+    const a = entry({ text: "shared wording", vector: vec(4, 1, 0.01, 0, 0), scope: "agent:a" });
+    const b = entry({ text: "shared wording variant", vector: vec(4, 1, 0.02, 0, 0), scope: "agent:b" });
+    const store = makeStore([a, b]);
+
+    const result = await runCompaction(store, makeEmbedder(), {
+      ...defaultConfig,
+      dryRun: true,
+    });
+
+    assert.equal(result.clustersFound, 0);
+    assert.equal(store.stored.length, 0);
+    assert.equal(store.deleted.length, 0);
+  });
+
   it("uses LLM refinement for canonical memory and records source metadata", async () => {
     const a = entry({ id: "a", text: "User prefers Neovim for coding.", vector: vec(4, 1, 0.01, 0, 0), importance: 0.7, category: "preference" });
     const b = entry({ id: "b", text: "Coding editor preference is Neovim.", vector: vec(4, 1, 0.02, 0, 0), importance: 0.5, category: "preference" });
@@ -271,6 +315,33 @@ describe("runCompaction", () => {
     assert.equal(meta.source_count, 2);
     assert.equal(meta.compact_reason, "duplicate_preference_refined");
     assert.ok(typeof meta.compacted_at === "number");
+  });
+
+  it("normalizes LLM pattern categories to store category other with smart metadata patterns", async () => {
+    for (const rawCategory of ["pattern", "patterns"]) {
+      const a = entry({ id: `${rawCategory}-a`, text: "Use bounded retries for transient failures.", vector: vec(4, 1, 0.01, 0, 0), category: "other" });
+      const b = entry({ id: `${rawCategory}-b`, text: "Retry transient failures with a bounded policy.", vector: vec(4, 1, 0.02, 0, 0), category: "other" });
+      const store = makeStore([a, b]);
+      const llm = {
+        async completeJson() {
+          return {
+            abstract: "Use bounded retries for transient failures.",
+            overview: "- Apply bounded retries to transient failures.",
+            content: "Use bounded retries for transient failures.",
+            category: rawCategory,
+            importance: 0.86,
+            reason: "pattern_refined",
+          };
+        },
+      };
+
+      const result = await runCompaction(store, makeEmbedder(), { ...defaultConfig, mergeMode: "llm" }, undefined, undefined, undefined, llm);
+
+      assert.equal(result.llmRefined, 1);
+      assert.equal(store.stored[0].category, "other");
+      const meta = JSON.parse(store.stored[0].metadata);
+      assert.equal(meta.memory_category, "patterns");
+    }
   });
 
   it("falls back to deterministic merge when LLM returns null", async () => {
@@ -336,5 +407,46 @@ describe("runCompaction", () => {
     });
 
     assert.ok(result.scanned <= 3);
+  });
+
+  it("preserves LanceDB vector rows for compaction and finds real-backend clusters", async () => {
+    const workDir = mkdtempSync(path.join(tmpdir(), "mymem-compaction-vector-"));
+    try {
+      const store = new MemoryStore({
+        dbPath: path.join(workDir, "db"),
+        vectorDim: 4,
+      });
+      const oldTimestamp = Date.now() - 10 * 24 * 60 * 60 * 1000;
+
+      await store.importEntry(entry({
+        id: randomUUID(),
+        text: "Real backend compaction vector A",
+        vector: vec(4, 1, 0.01, 0, 0),
+        scope: "global",
+        timestamp: oldTimestamp,
+      }));
+      await store.importEntry(entry({
+        id: randomUUID(),
+        text: "Real backend compaction vector B",
+        vector: vec(4, 1, 0.02, 0, 0),
+        scope: "global",
+        timestamp: oldTimestamp + 1,
+      }));
+
+      const fetched = await store.fetchForCompaction(Date.now() - 7 * 24 * 60 * 60 * 1000, ["global"], 10);
+      assert.equal(fetched.length, 2);
+      assert.deepEqual(fetched.map((row) => row.vector.length), [4, 4]);
+
+      const result = await runCompaction(store, makeEmbedder(), {
+        ...defaultConfig,
+        dryRun: true,
+        maxMemoriesToScan: 10,
+      }, ["global"]);
+
+      assert.equal(result.scanned, 2);
+      assert.equal(result.clustersFound, 1);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
   });
 });

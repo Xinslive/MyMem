@@ -119,6 +119,12 @@ function contradictionKey(entry: MemoryEntry, meta: SmartMemoryMetadata): string
   return null;
 }
 
+function scopedContradictionKey(entry: MemoryEntry, meta: SmartMemoryMetadata): string | null {
+  const key = contradictionKey(entry, meta);
+  if (!key) return null;
+  return `${entry.scope || "global"}\0${key}`;
+}
+
 function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: string; newerId: string }> {
   const eligible = rows.filter(({ meta }) =>
     meta.state !== "archived" &&
@@ -127,7 +133,7 @@ function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: stri
 
   const groups = new Map<string, RowContext[]>();
   for (const row of eligible) {
-    const key = contradictionKey(row.entry, row.meta);
+    const key = scopedContradictionKey(row.entry, row.meta);
     if (!key) continue;
     const current = groups.get(key) ?? [];
     current.push(row);
