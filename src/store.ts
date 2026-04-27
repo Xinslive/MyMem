@@ -381,6 +381,9 @@ export class MemoryStore {
     this.ftsIndexCreated = hasFts;
     this.vectorIndexCreated = hasVector;
     this.scalarIndexedColumns = scalar;
+    if (hasFts) {
+      this._lastFtsError = null;
+    }
 
     return {
       totalRows,
@@ -702,10 +705,12 @@ export class MemoryStore {
     }
 
     // Create FTS index for BM25 search (graceful fallback if unavailable)
+    this._lastFtsError = null;
     try {
       await this.createFtsIndex(table);
       this.ftsIndexCreated = true;
     } catch (err) {
+      this._lastFtsError = err instanceof Error ? err.message : String(err);
       this.log.warn(
         "Failed to create FTS index, falling back to vector-only search:",
         err,

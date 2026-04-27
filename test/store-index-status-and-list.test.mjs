@@ -7,12 +7,13 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { MemoryStore } = jiti("../src/store.ts");
+const { nullLogger } = jiti("../src/logger.ts");
 
-function makeStore() {
+function makeStore(logger = undefined) {
   const dir = mkdtempSync(join(tmpdir(), "mymem-store-index-"));
   return {
     dir,
-    store: new MemoryStore({ dbPath: dir, vectorDim: 4 }),
+    store: new MemoryStore({ dbPath: dir, vectorDim: 4, logger }),
   };
 }
 
@@ -46,6 +47,27 @@ describe("MemoryStore index status and list pagination", () => {
         ["memory-3", "memory-2"],
       );
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records the FTS initialization error when index creation fails", async () => {
+    const originalCreateFtsIndex = MemoryStore.prototype.createFtsIndex;
+    MemoryStore.prototype.createFtsIndex = async function mockCreateFtsIndex() {
+      throw new Error("simulated FTS failure");
+    };
+
+    const { dir, store } = makeStore(nullLogger);
+    try {
+      const indexStatus = await store.getIndexStatus();
+      assert.equal(indexStatus.available.fts, false);
+
+      const ftsStatus = store.getFtsStatus();
+      assert.equal(ftsStatus.available, false);
+      assert.match(ftsStatus.lastError || "", /simulated FTS failure/);
+      assert.match(store.lastFtsError || "", /simulated FTS failure/);
+    } finally {
+      MemoryStore.prototype.createFtsIndex = originalCreateFtsIndex;
       rmSync(dir, { recursive: true, force: true });
     }
   });

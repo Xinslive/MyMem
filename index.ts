@@ -1775,18 +1775,28 @@ const myMemPlugin = {
             // can hit slow external providers during gateway startup. Retrieval
             // is still exercised by normal recall paths; startup health should
             // only report local retrieval capabilities after embedding is known.
-            const retrievalTest: { success: boolean; mode: string; hasFtsSupport: boolean; error?: string } = {
+            const retrievalTest: {
+              success: boolean;
+              mode: string;
+              hasFtsSupport: boolean;
+              ftsError?: string;
+              error?: string;
+            } = {
               success: true,
               mode: retriever.getConfig().mode,
               hasFtsSupport: store.hasFtsSupport,
+              ftsError: store.lastFtsError ?? undefined,
             };
+            const ftsStatus = retrievalTest.hasFtsSupport
+              ? "enabled"
+              : `disabled${retrievalTest.ftsError ? ` (${retrievalTest.ftsError})` : ""}`;
 
             api.logger.info(
               `mymem: initialized successfully ` +
               `(embedding: ${embedTest.success ? "OK" : "FAIL"}, ` +
               `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
               `mode: ${retrievalTest.mode}, ` +
-              `FTS: ${retrievalTest.hasFtsSupport ? "enabled" : "disabled"})`,
+              `FTS: ${ftsStatus})`,
             );
 
             if (!embedTest.success) {
