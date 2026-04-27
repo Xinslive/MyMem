@@ -36,9 +36,13 @@ export interface AggregateStats {
 // RetrievalStatsCollector
 // ============================================================================
 
-interface QueryRecord {
+export interface QueryRecord {
   trace: RetrievalTrace;
   source: string;
+}
+
+export interface RetrievalRecordHook {
+  (trace: RetrievalTrace, source: string): void | Promise<void>;
 }
 
 export class RetrievalStatsCollector {
@@ -47,6 +51,7 @@ export class RetrievalStatsCollector {
   private _head = 0;    // next write position
   private _count = 0;  // number of valid records
   private readonly _maxRecords: number;
+  private _recordHook: RetrievalRecordHook | null = null;
 
   constructor(maxRecords = 1000) {
     this._maxRecords = maxRecords;
@@ -64,6 +69,13 @@ export class RetrievalStatsCollector {
     if (this._count < this._maxRecords) {
       this._count++;
     }
+    if (this._recordHook) {
+      void Promise.resolve(this._recordHook(trace, source)).catch(() => {});
+    }
+  }
+
+  setRecordHook(hook: RetrievalRecordHook | null): void {
+    this._recordHook = hook;
   }
 
   /** Return records in insertion order (oldest → newest). Used by getStats(). */
@@ -166,5 +178,12 @@ export class RetrievalStatsCollector {
   /** Number of recorded queries. */
   get count(): number {
     return this._count;
+  }
+
+  getRecentQueries(limit = this._count): QueryRecord[] {
+    if (limit <= 0) return [];
+    const records = this._getRecords();
+    if (records.length <= limit) return records;
+    return records.slice(records.length - limit);
   }
 }

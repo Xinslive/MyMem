@@ -35,6 +35,8 @@ import {
 } from "./workspace-boundary.js";
 import { clampInt } from "./utils.js";
 import { registerMemoryDoctorTool } from "./memory-doctor-tool.js";
+import type { AggregateStats } from "./retrieval-stats.js";
+import type { ExtractionTelemetrySummary } from "./telemetry.js";
 
 // ============================================================================
 // Types
@@ -86,6 +88,18 @@ interface ToolContext {
   workspaceDir?: string;
   mdMirror?: MdMirrorWriter | null;
   workspaceBoundary?: WorkspaceBoundaryConfig;
+  telemetry?: {
+    enabled: boolean;
+    dir: string;
+    filePaths: {
+      retrieval: string;
+      extraction: string;
+    };
+    getPersistentSummary(limit?: number): Promise<{
+      retrieval: AggregateStats | null;
+      extraction: ExtractionTelemetrySummary | null;
+    }>;
+  } | null;
 }
 
 function resolveAgentId(runtimeAgentId: unknown, fallback?: string): string | undefined {
@@ -1755,6 +1769,12 @@ export function registerMemoryStatsTool(
           const stats = await context.store.stats(scopeFilter);
           const scopeManagerStats = context.scopeManager.getStats();
           const retrievalConfig = context.retriever.getConfig();
+          const indexStatus = typeof (context.store as any).getIndexStatus === "function"
+            ? await (context.store as any).getIndexStatus()
+            : null;
+          const persistentSummary = context.telemetry
+            ? await context.telemetry.getPersistentSummary()
+            : { retrieval: null, extraction: null };
 
           const textLines = [
             `Memory Statistics:`,
@@ -1762,6 +1782,12 @@ export function registerMemoryStatsTool(
             `\u2022 Available scopes: ${scopeManagerStats.totalScopes}`,
             `\u2022 Retrieval mode: ${retrievalConfig.mode}`,
             `\u2022 FTS support: ${context.store.hasFtsSupport ? "Yes" : "No"}`,
+            ...(indexStatus
+              ? [
+                  `\u2022 Vector index: ${indexStatus.available.vector ? "Yes" : "No"}`,
+                  `\u2022 Scalar indexes: ${indexStatus.available.scalar.join(", ") || "(none)"}`,
+                ]
+              : []),
             ``,
             `Memories by scope:`,
             ...Object.entries(stats.scopeCounts).map(
@@ -1797,6 +1823,30 @@ export function registerMemoryStatsTool(
             }
           }
 
+          if (persistentSummary.retrieval) {
+            const persisted = persistentSummary.retrieval;
+            textLines.push(
+              ``,
+              `Persistent Retrieval Telemetry:`,
+              `  \u2022 Queries: ${persisted.totalQueries}`,
+              `  \u2022 Zero-result queries: ${persisted.zeroResultQueries}`,
+              `  \u2022 Avg latency: ${persisted.avgLatencyMs}ms`,
+              `  \u2022 P95 latency: ${persisted.p95LatencyMs}ms`,
+            );
+          }
+
+          if (persistentSummary.extraction) {
+            const extraction = persistentSummary.extraction;
+            textLines.push(
+              ``,
+              `Persistent Extraction Telemetry:`,
+              `  \u2022 Runs: ${extraction.totalRuns}`,
+              `  \u2022 Avg latency: ${extraction.avgLatencyMs}ms`,
+              `  \u2022 P95 latency: ${extraction.p95LatencyMs}ms`,
+              `  \u2022 Created / merged / skipped: ${extraction.totalCreated} / ${extraction.totalMerged} / ${extraction.totalSkipped}`,
+            );
+          }
+
           const text = textLines.join("\n");
 
           return {
@@ -1810,6 +1860,15 @@ export function registerMemoryStatsTool(
               },
               hasFtsSupport: context.store.hasFtsSupport,
               retrievalStats,
+              indexStatus,
+              telemetry: context.telemetry
+                ? {
+                    enabled: context.telemetry.enabled,
+                    dir: context.telemetry.dir,
+                    filePaths: context.telemetry.filePaths,
+                    persistentSummary,
+                  }
+                : null,
             },
           };
         } catch (error) {

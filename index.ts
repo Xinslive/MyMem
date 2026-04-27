@@ -36,6 +36,7 @@ import { sortFileNamesByMtimeDesc } from "./src/file-utils.js";
 import { findPreviousSessionFile, resolveAgentWorkspaceMap, createMdMirrorWriter, createAdmissionRejectionAuditWriter, type MdMirrorWriter } from "./src/workspace-utils.js";
 import { readSessionConversationForReflection, readSessionConversationWithResetFallback, ensureDailyLogFile, buildReflectionPrompt, buildReflectionFallbackText, loadSelfImprovementReminderContent } from "./src/session-recovery-utils.js";
 import { resolveAgentPrimaryModelRef, isAgentDeclaredInConfig, splitProviderModel } from "./src/agent-config-utils.js";
+import { TelemetryStore, resolveTelemetryDir } from "./src/telemetry.js";
 
 // Import core components
 import { MemoryStore, validateStoragePath } from "./src/store.js";
@@ -167,6 +168,7 @@ interface PluginSingletonState {
   smartExtractionLlmClient: LlmClient | null;
   extractionRateLimiter: ReturnType<typeof createExtractionRateLimiter>;
   feedbackLoop: FeedbackLoop | null;
+  telemetryStore: TelemetryStore | null;
   // Session Maps — persist across scope refreshes instead of being recreated
   reflectionErrorStateBySession: Map<string, ReflectionErrorState>;
   reflectionDerivedBySession: Map<string, { updatedAt: number; derived: string[] }>;
@@ -190,6 +192,10 @@ export function __resetSingletonForTesting__(): void {
 function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const config = parsePluginConfig(api.pluginConfig);
   const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
+  const telemetryStore = new TelemetryStore(
+    config.telemetry ?? { persist: false, maxRecords: 1000, sampleRate: 1 },
+    api.resolvePath(resolveTelemetryDir(resolvedDbPath, config.telemetry?.dir)),
+  );
 
   try {
     validateStoragePath(resolvedDbPath);
@@ -253,7 +259,11 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval },
     { decayEngine, recencyEngine, noiseDetector: hybridNoiseDetector, tierManager, logger: api.logger },
   );
-  retriever.setStatsCollector(new RetrievalStatsCollector());
+  const statsCollector = new RetrievalStatsCollector(config.telemetry?.maxRecords ?? 1000);
+  if (telemetryStore.enabled) {
+    statsCollector.setRecordHook((trace, source) => telemetryStore.recordRetrieval(trace, source));
+  }
+  retriever.setStatsCollector(statsCollector);
   const scopeManager = createScopeManager(config.scopes);
 
   const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
@@ -327,6 +337,9 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         workspaceBoundary: config.workspaceBoundary,
         admissionControl: config.admissionControl,
         onAdmissionRejected,
+        onExtractionComplete: telemetryStore.enabled
+          ? ({ sessionKey, scope, stats }) => telemetryStore.recordExtraction(sessionKey, scope, stats)
+          : undefined,
         log: (msg: string) => api.logger.info(msg),
         debugLog: (msg: string) => api.logger.debug(msg),
         noiseBank,
@@ -418,6 +431,7 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     smartExtractionLlmClient,
     extractionRateLimiter,
     feedbackLoop,
+    telemetryStore,
     reflectionErrorStateBySession,
     reflectionDerivedBySession,
     reflectionByAgentCache,
@@ -471,6 +485,7 @@ const myMemPlugin = {
       tierManager,
       extractionRateLimiter,
       feedbackLoop,
+      telemetryStore,
       reflectionErrorStateBySession,
       reflectionDerivedBySession,
       reflectionByAgentCache,
@@ -769,6 +784,7 @@ const myMemPlugin = {
         workspaceDir: getDefaultWorkspaceDir(),
         mdMirror,
         workspaceBoundary: config.workspaceBoundary,
+        telemetry: telemetryStore,
       },
       {
         enableManagementTools: config.enableManagementTools,

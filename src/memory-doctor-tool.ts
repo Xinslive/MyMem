@@ -8,6 +8,19 @@ interface OpenClawPluginApiLike {
 interface StoreLike {
   hasFtsSupport: boolean;
   count(): Promise<number>;
+  getIndexStatus?(): Promise<{
+    totalRows: number;
+    totalIndices: number;
+    names: string[];
+    available: {
+      fts: boolean;
+      vector: boolean;
+      scalar: string[];
+    };
+    exhaustiveVectorSearch: boolean;
+    missingRecommendedScalars: string[];
+    vectorIndexPending: boolean;
+  }>;
   stats(scopeFilter?: string[]): Promise<{
     totalCount: number;
     scopeCounts: Record<string, number>;
@@ -54,6 +67,31 @@ interface DoctorToolContext {
   scopeManager: MemoryScopeManager;
   embedder: EmbedderLike;
   agentId?: string;
+  telemetry?: {
+    enabled: boolean;
+    dir: string;
+    filePaths: {
+      retrieval: string;
+      extraction: string;
+    };
+    getPersistentSummary(limit?: number): Promise<{
+      retrieval: {
+        totalQueries: number;
+        zeroResultQueries: number;
+        avgLatencyMs: number;
+        p95LatencyMs: number;
+      } | null;
+      extraction: {
+        totalRuns: number;
+        avgLatencyMs: number;
+        p95LatencyMs: number;
+        totalCreated: number;
+        totalMerged: number;
+        totalSkipped: number;
+        totalRejected: number;
+      } | null;
+    }>;
+  } | null;
 }
 
 function resolveRuntimeAgentId(staticAgentId: string | undefined, runtimeCtx: unknown): string {
@@ -107,6 +145,20 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
             });
           } catch (error) {
             addCheck("storage", "fail", error instanceof Error ? error.message : String(error));
+          }
+
+          if (typeof context.store.getIndexStatus === "function") {
+            try {
+              const indexStatus = await context.store.getIndexStatus();
+              addCheck(
+                "indices",
+                indexStatus.exhaustiveVectorSearch || indexStatus.missingRecommendedScalars.length > 0 ? "warn" : "ok",
+                `fts=${indexStatus.available.fts ? "yes" : "no"}, vector=${indexStatus.available.vector ? "yes" : "no"}, scalar=${indexStatus.available.scalar.join(", ") || "(none)"}`,
+                indexStatus,
+              );
+            } catch (error) {
+              addCheck("indices", "warn", error instanceof Error ? error.message : String(error));
+            }
           }
 
           const retrievalConfig = context.retriever.getConfig();
@@ -172,6 +224,33 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
             );
           }
 
+          if (context.telemetry?.enabled) {
+            try {
+              const persistent = await context.telemetry.getPersistentSummary();
+              if (!persistent.retrieval && !persistent.extraction) {
+                addCheck(
+                  "telemetry_persistence",
+                  "warn",
+                  `enabled at ${context.telemetry.dir}, but no telemetry has been persisted yet`,
+                  context.telemetry.filePaths,
+                );
+              } else {
+                addCheck(
+                  "telemetry_persistence",
+                  "ok",
+                  `enabled at ${context.telemetry.dir}`,
+                  {
+                    ...context.telemetry.filePaths,
+                    retrieval: persistent.retrieval,
+                    extraction: persistent.extraction,
+                  },
+                );
+              }
+            } catch (error) {
+              addCheck("telemetry_persistence", "warn", error instanceof Error ? error.message : String(error));
+            }
+          }
+
           if (testEmbedding) {
             try {
               const probe = await context.embedder.test();
@@ -195,6 +274,9 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
             }
             if (check.name === "retrieval_config" && check.status === "warn") {
               suggestions.push("Hybrid mode is configured without FTS; enable FTS or switch retrieval.mode to vector.");
+            }
+            if (check.name === "indices" && check.status === "warn") {
+              suggestions.push("Build scalar/vector indexes to avoid fallback scans on larger memory sets.");
             }
             if (check.name === "rerank_config" && check.status === "warn") {
               suggestions.push("Configure rerankEndpoint/rerankApiKey or set rerank to none.");

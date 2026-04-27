@@ -58,6 +58,8 @@ function createMockApi(pluginConfig, options = {}) {
 }
 
 for (const key of [
+  "tuningPreset",
+  "telemetry",
   "smartExtraction",
   "extractMinMessages",
   "extractMaxChars",

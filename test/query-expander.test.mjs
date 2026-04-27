@@ -753,6 +753,13 @@ describe("cli search source tagging", () => {
     assert.deepEqual(errors, []);
     assert.equal(logs.length, 1);
     const payload = JSON.parse(logs[0]);
+    assert.ok(payload?.diagnostics?.latencyMs);
+    assert.equal(typeof payload.diagnostics.latencyMs.bm25Search, "number");
+    assert.equal(typeof payload.diagnostics.latencyMs.parallelSearch, "number");
+    assert.ok(payload.diagnostics.latencyMs.bm25Search >= 0);
+    assert.ok(payload.diagnostics.latencyMs.parallelSearch >= 0);
+    payload.diagnostics.latencyMs.bm25Search = 0;
+    payload.diagnostics.latencyMs.parallelSearch = 0;
     assert.deepEqual(payload, {
       error: {
         code: "search_failed",

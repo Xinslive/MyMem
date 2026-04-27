@@ -10,6 +10,8 @@ import { asNonEmptyString } from "./cli-utils.js";
 import { normalizeAdmissionControlConfig } from "./admission-control.js";
 import { normalizeFeedbackLoopConfig } from "./feedback-loop.js";
 import { createDefaultHookEnhancementsConfig } from "./hook-enhancements.js";
+import { applyTuningPreset, resolveTuningPreset } from "./tuning-presets.js";
+import { normalizeTelemetryConfig } from "./telemetry.js";
 import type {
   PluginConfig,
   SessionStrategy,
@@ -26,7 +28,13 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("mymem config required");
   }
-  const cfg = value as Record<string, unknown>;
+  const rawCfg = value as Record<string, unknown>;
+  const rawRetrieval =
+    typeof rawCfg.retrieval === "object" && rawCfg.retrieval !== null
+      ? (rawCfg.retrieval as Record<string, unknown>)
+      : null;
+  const tuningPreset = resolveTuningPreset(rawCfg.tuningPreset);
+  const cfg = applyTuningPreset(rawCfg, tuningPreset);
 
   const embedding = cfg.embedding as Record<string, unknown> | undefined;
   if (!embedding) {
@@ -153,6 +161,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   };
 
   return {
+    tuningPreset,
     embedding: {
       provider: "openai-compatible",
       apiKey,
@@ -208,11 +217,13 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
         ? (() => {
           const retrieval = { ...(cfg.retrieval as Record<string, unknown>) } as Record<string, unknown>;
-          const rerankEnabled = retrieval.rerank !== "none";
-          if (rerankEnabled && typeof retrieval.rerankApiKey === "string" && retrieval.rerankApiKey.includes("${")) {
+          const rerankApiConfigured =
+            typeof rawRetrieval?.rerankApiKey === "string" && rawRetrieval.rerankApiKey.trim() !== "";
+          const rerankConfigured = retrieval.rerank !== "none" || rerankApiConfigured;
+          if (rerankConfigured && typeof retrieval.rerankApiKey === "string" && retrieval.rerankApiKey.includes("${")) {
             retrieval.rerankApiKey = resolveEnvVars(retrieval.rerankApiKey);
           }
-          if (rerankEnabled && typeof retrieval.rerankApiKey === "string" && retrieval.rerankApiKey.trim() !== "") {
+          if (rerankApiConfigured) {
             if (typeof retrieval.rerankEndpoint !== "string" || retrieval.rerankEndpoint.trim() === "") {
               throw new Error("retrieval.rerankEndpoint is required when retrieval.rerankApiKey is configured");
             }
@@ -220,13 +231,13 @@ export function parsePluginConfig(value: unknown): PluginConfig {
               throw new Error("retrieval.rerankModel is required when retrieval.rerankApiKey is configured");
             }
           }
-          if (rerankEnabled && typeof retrieval.rerankEndpoint === "string" && retrieval.rerankEndpoint.includes("${")) {
+          if (rerankConfigured && typeof retrieval.rerankEndpoint === "string" && retrieval.rerankEndpoint.includes("${")) {
             retrieval.rerankEndpoint = resolveEnvVars(retrieval.rerankEndpoint);
           }
-          if (rerankEnabled && typeof retrieval.rerankModel === "string" && retrieval.rerankModel.includes("${")) {
+          if (rerankConfigured && typeof retrieval.rerankModel === "string" && retrieval.rerankModel.includes("${")) {
             retrieval.rerankModel = resolveEnvVars(retrieval.rerankModel);
           }
-          if (rerankEnabled && typeof retrieval.rerankProvider === "string" && retrieval.rerankProvider.includes("${")) {
+          if (rerankConfigured && typeof retrieval.rerankProvider === "string" && retrieval.rerankProvider.includes("${")) {
             retrieval.rerankProvider = resolveEnvVars(retrieval.rerankProvider);
           }
           return retrieval as any;
@@ -447,6 +458,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
                 : undefined,
           }
         : undefined,
+    telemetry: normalizeTelemetryConfig(cfg.telemetry),
     hookEnhancements: hookEnhancementsRaw
       ? {
           badRecallFeedback: hookEnhancementsRaw.badRecallFeedback !== false,

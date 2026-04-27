@@ -85,6 +85,44 @@
       "dbPath": {
         "type": "string"
       },
+      "tuningPreset": {
+        "type": "string",
+        "enum": [
+          "balanced",
+          "low-latency",
+          "high-recall",
+          "high-precision"
+        ],
+        "default": "balanced",
+        "description": "Top-level tuning preset. Applies opinionated defaults for latency/recall/precision while keeping explicit fields authoritative."
+      },
+      "telemetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "persist": {
+            "type": "boolean",
+            "default": false,
+            "description": "Persist retrieval/extraction telemetry to local JSONL files for tuning and replay benchmarks."
+          },
+          "dir": {
+            "type": "string",
+            "description": "Optional directory for persisted telemetry files. Defaults to a telemetry folder beside dbPath."
+          },
+          "maxRecords": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 50000,
+            "default": 1000
+          },
+          "sampleRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 1
+          }
+        }
+      },
       "enableManagementTools": {
         "type": "boolean",
         "default": true,
@@ -393,6 +431,11 @@
             "maximum": 1,
             "default": 0.3
           },
+          "queryExpansion": {
+            "type": "boolean",
+            "default": true,
+            "description": "Expand manual/BM25 queries with synonyms before hybrid retrieval."
+          },
           "minScore": {
             "type": "number",
             "minimum": 0,
@@ -406,7 +449,7 @@
               "lightweight",
               "none"
             ],
-            "default": "cross-encoder"
+            "default": "none"
           },
           "rerankApiKey": {
             "type": "string",
@@ -498,6 +541,19 @@
             "maximum": 10,
             "default": 3,
             "description": "Maximum half-life multiplier from access reinforcement. Prevents frequently accessed memories from becoming immortal."
+          },
+          "tagPrefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "proj",
+              "env",
+              "team",
+              "scope"
+            ],
+            "description": "Prefixes treated as exact tag queries to avoid vector false positives."
           }
         }
       },

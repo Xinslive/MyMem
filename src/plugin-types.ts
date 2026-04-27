@@ -6,8 +6,10 @@
 
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { AdmissionControlConfig } from "./admission-control.js";
+import type { TuningPreset } from "./tuning-presets.js";
 
 export interface PluginConfig {
+  tuningPreset?: TuningPreset;
   embedding: {
     provider: "openai-compatible";
     apiKey: string | string[];
@@ -45,6 +47,7 @@ export interface PluginConfig {
     mode?: "hybrid" | "vector";
     vectorWeight?: number;
     bm25Weight?: number;
+    queryExpansion?: boolean;
     minScore?: number;
     rerank?: "cross-encoder" | "lightweight" | "none";
     candidatePoolSize?: number;
@@ -67,6 +70,7 @@ export interface PluginConfig {
     timeDecayHalfLifeDays?: number;
     reinforcementFactor?: number;
     maxHalfLifeMultiplier?: number;
+    tagPrefixes?: string[];
   };
   decay?: {
     recencyHalfLifeDays?: number;
@@ -188,6 +192,12 @@ export interface PluginConfig {
   };
   recallPrefix?: {
     categoryField?: string;
+  };
+  telemetry?: {
+    persist: boolean;
+    dir?: string;
+    maxRecords: number;
+    sampleRate: number;
   };
   hookEnhancements?: HookEnhancementsConfig;
 }

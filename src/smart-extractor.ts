@@ -258,6 +258,12 @@ export interface SmartExtractorConfig {
   admissionControl?: AdmissionControlConfig;
   /** Optional sink for durable reject-audit logging. */
   onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  /** Optional sink for extraction telemetry persistence. */
+  onExtractionComplete?: (payload: {
+    sessionKey: string;
+    scope: string;
+    stats: ExtractionStats;
+  }) => Promise<void> | void;
 }
 
 export interface ExtractPersistOptions {
@@ -279,6 +285,11 @@ export class SmartExtractor {
   private admissionController: AdmissionController | null;
   private persistAdmissionAudit: boolean;
   private onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  private onExtractionComplete?: (payload: {
+    sessionKey: string;
+    scope: string;
+    stats: ExtractionStats;
+  }) => Promise<void> | void;
 
   constructor(
     private store: MemoryStore,
@@ -292,6 +303,7 @@ export class SmartExtractor {
       config.admissionControl?.enabled === true &&
       config.admissionControl.auditMetadata !== false;
     this.onAdmissionRejected = config.onAdmissionRejected;
+    this.onExtractionComplete = config.onExtractionComplete;
     this.admissionController =
       config.admissionControl?.enabled === true
         ? new AdmissionController(
@@ -363,6 +375,13 @@ export class SmartExtractor {
       // LLM returned zero candidates → strongest noise signal → feedback to noise bank
       this.learnAsNoise(conversationText);
       attachTelemetry();
+      if (this.onExtractionComplete) {
+        await this.onExtractionComplete({
+          sessionKey,
+          scope: targetScope,
+          stats,
+        });
+      }
       return stats;
     }
 
@@ -491,6 +510,13 @@ export class SmartExtractor {
     this.debugLog(
       `mymem: smart-extractor telemetry total=${telemetry.totalMs}ms candidates=${candidateCount} processable=${processableCandidateCount} created=${stats.created} merged=${stats.merged} skipped=${stats.skipped} rejected=${stats.rejected ?? 0}`,
     );
+    if (this.onExtractionComplete) {
+      await this.onExtractionComplete({
+        sessionKey,
+        scope: targetScope,
+        stats,
+      });
+    }
     return stats;
   }
 

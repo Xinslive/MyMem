@@ -154,4 +154,48 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     });
     assert.equal(parsed.embedding.chunking, false);
   });
+
+  it("applies tuning presets before explicit overrides", () => {
+    const presetParsed = parsePluginConfig({
+      ...baseConfig(),
+      tuningPreset: "low-latency",
+    });
+    assert.equal(presetParsed.tuningPreset, "low-latency");
+    assert.equal(presetParsed.autoRecallMaxItems, 4);
+    assert.equal(presetParsed.retrieval?.candidatePoolSize, 8);
+    assert.equal(presetParsed.memoryCompaction?.mergeMode, "deterministic");
+
+    const overridden = parsePluginConfig({
+      ...baseConfig(),
+      tuningPreset: "low-latency",
+      autoRecallMaxItems: 9,
+      retrieval: { candidatePoolSize: 15 },
+    });
+    assert.equal(overridden.autoRecallMaxItems, 9);
+    assert.equal(overridden.retrieval?.candidatePoolSize, 15);
+  });
+
+  it("normalizes telemetry config with safe defaults", () => {
+    const parsed = parsePluginConfig(baseConfig());
+    assert.deepEqual(parsed.telemetry, {
+      persist: false,
+      dir: undefined,
+      maxRecords: 1000,
+      sampleRate: 1,
+    });
+
+    const custom = parsePluginConfig({
+      ...baseConfig(),
+      telemetry: {
+        persist: true,
+        dir: "./telemetry",
+        maxRecords: 2500,
+        sampleRate: 0.25,
+      },
+    });
+    assert.equal(custom.telemetry?.persist, true);
+    assert.equal(custom.telemetry?.dir, "./telemetry");
+    assert.equal(custom.telemetry?.maxRecords, 2500);
+    assert.equal(custom.telemetry?.sampleRate, 0.25);
+  });
 });

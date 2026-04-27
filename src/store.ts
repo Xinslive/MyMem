@@ -52,6 +52,20 @@ export interface MetadataPatch {
   [key: string]: unknown;
 }
 
+export interface StoreIndexStatus {
+  totalRows: number;
+  totalIndices: number;
+  names: string[];
+  available: {
+    fts: boolean;
+    vector: boolean;
+    scalar: string[];
+  };
+  exhaustiveVectorSearch: boolean;
+  missingRecommendedScalars: string[];
+  vectorIndexPending: boolean;
+}
+
 // ============================================================================
 // LanceDB Dynamic Import
 // ============================================================================
@@ -103,9 +117,46 @@ function toNumberVector(value: unknown): number[] {
   return Array.from(maybeIterable, (item) => Number(item));
 }
 
+function mapRowToMemoryEntry(row: any, includeVector = true): MemoryEntry {
+  return {
+    id: row.id as string,
+    text: row.text as string,
+    vector: includeVector ? toNumberVector(row.vector) : [],
+    category: row.category as MemoryEntry["category"],
+    scope: (row.scope as string | undefined) ?? "global",
+    importance: Number(row.importance),
+    timestamp: Number(row.timestamp),
+    metadata: (row.metadata as string) || "{}",
+  };
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
+const FULL_ENTRY_COLUMNS = [
+  "id",
+  "text",
+  "vector",
+  "category",
+  "scope",
+  "importance",
+  "timestamp",
+  "metadata",
+] as const;
+
+const LIST_ENTRY_COLUMNS = [
+  "id",
+  "text",
+  "category",
+  "scope",
+  "importance",
+  "timestamp",
+  "metadata",
+] as const;
+
+const DEFAULT_SCALAR_INDEX_COLUMNS = ["id", "scope", "category", "timestamp"] as const;
+const MIN_VECTOR_INDEX_ROWS = 64;
 
 function escapeSqlLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -117,6 +168,39 @@ function normalizeSearchText(value: string): string {
 
 function isExplicitDenyAllScopeFilter(scopeFilter?: string[]): boolean {
   return Array.isArray(scopeFilter) && scopeFilter.length === 0;
+}
+
+function buildScopeWhereClause(scopeFilter?: string[]): string | null {
+  if (!scopeFilter || scopeFilter.length === 0) return null;
+  const scopeConditions = scopeFilter
+    .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+    .join(" OR ");
+  return `((${scopeConditions}) OR scope IS NULL)`;
+}
+
+function combineWhereClauses(parts: Array<string | null | undefined>): string | undefined {
+  const filtered = parts
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter((part) => part.length > 0);
+  return filtered.length > 0 ? filtered.join(" AND ") : undefined;
+}
+
+function prefixWhereClause(column: string, prefix: string): string {
+  return `${column} LIKE '${escapeSqlLiteral(prefix)}%'`;
+}
+
+function isVectorIndexType(indexType: string): boolean {
+  return /ivf|hnsw|pq|sq|vector/i.test(indexType);
+}
+
+function isScalarIndexType(indexType: string): boolean {
+  return /btree|bitmap|label/i.test(indexType);
+}
+
+function recommendedVectorPartitions(totalRows: number): number {
+  const sqrt = Math.sqrt(Math.max(totalRows, 1));
+  const rough = Math.max(8, Math.min(256, Math.round(sqrt)));
+  return Math.max(8, Math.pow(2, Math.round(Math.log2(rough))));
 }
 
 function scoreLexicalHit(query: string, candidates: Array<{ text: string; weight: number }>): number {
@@ -215,6 +299,8 @@ export class MemoryStore {
   private table: LanceDB.Table | null = null;
   private initPromise: Promise<void> | null = null;
   private ftsIndexCreated = false;
+  private vectorIndexCreated = false;
+  private scalarIndexedColumns = new Set<string>();
   // Tail-reset serialization: replaces unbounded promise chain with a boolean flag + FIFO queue.
   private _updating = false;
   private _waitQueue: Array<() => void> = [];
@@ -243,7 +329,7 @@ export class MemoryStore {
     if (entries.length === 0) return [];
 
     await this.ensureInitialized();
-    return this.runWithFileLock(async () => {
+    const written = await this.runWithFileLock(async () => {
       try {
         await this.table!.add(toLanceRows(entries));
       } catch (err: any) {
@@ -255,10 +341,205 @@ export class MemoryStore {
       }
       return entries;
     });
+    await this.maybeCreateDeferredVectorIndex();
+    return written;
   }
 
   constructor(private readonly config: StoreConfig) {
     this.log = config.logger ?? createLogger();
+  }
+
+  private async countRowsWithFilter(whereClause?: string): Promise<number> {
+    if (!this.table) return 0;
+    return whereClause ? this.table.countRows(whereClause) : this.table.countRows();
+  }
+
+  private async getIndexStatusInternal(table: LanceDB.Table): Promise<StoreIndexStatus> {
+    const [indices, totalRows] = await Promise.all([
+      table.listIndices(),
+      table.countRows(),
+    ]);
+    const scalar = new Set<string>();
+    let hasFts = false;
+    let hasVector = false;
+
+    for (const index of indices) {
+      const columns = Array.isArray(index.columns) ? index.columns : [];
+      if (index.indexType === "FTS" || columns.includes("text")) {
+        hasFts = true;
+      }
+      if (columns.includes("vector") || isVectorIndexType(index.indexType)) {
+        hasVector = true;
+      }
+      if (isScalarIndexType(index.indexType)) {
+        for (const column of columns) {
+          if (column !== "vector" && column !== "text") scalar.add(column);
+        }
+      }
+    }
+
+    this.ftsIndexCreated = hasFts;
+    this.vectorIndexCreated = hasVector;
+    this.scalarIndexedColumns = scalar;
+
+    return {
+      totalRows,
+      totalIndices: indices.length,
+      names: indices.map((index) => index.name),
+      available: {
+        fts: hasFts,
+        vector: hasVector,
+        scalar: Array.from(scalar).sort((left, right) => left.localeCompare(right)),
+      },
+      exhaustiveVectorSearch: !hasVector,
+      missingRecommendedScalars: DEFAULT_SCALAR_INDEX_COLUMNS.filter((column) => !scalar.has(column)),
+      vectorIndexPending: !hasVector && totalRows >= MIN_VECTOR_INDEX_ROWS,
+    };
+  }
+
+  private async ensureScalarIndex(
+    table: LanceDB.Table,
+    column: string,
+    kind: "btree" | "bitmap",
+  ): Promise<void> {
+    const current = await this.getIndexStatusInternal(table);
+    if (current.available.scalar.includes(column)) return;
+
+    const lancedb = await loadLanceDB();
+    const config =
+      kind === "bitmap"
+        ? (lancedb as any).Index.bitmap()
+        : (lancedb as any).Index.btree();
+    await table.createIndex(column, {
+      config,
+      replace: false,
+      waitTimeoutSeconds: 30,
+      train: true,
+    });
+  }
+
+  private async ensureVectorIndex(table: LanceDB.Table, totalRows: number): Promise<void> {
+    const current = await this.getIndexStatusInternal(table);
+    if (current.available.vector || totalRows < MIN_VECTOR_INDEX_ROWS) return;
+
+    const lancedb = await loadLanceDB();
+    await table.createIndex("vector", {
+      config: (lancedb as any).Index.ivfFlat({
+        distanceType: "cosine",
+        numPartitions: recommendedVectorPartitions(totalRows),
+      }),
+      replace: false,
+      waitTimeoutSeconds: 120,
+    });
+  }
+
+  private async ensureRecommendedIndices(table: LanceDB.Table): Promise<void> {
+    const status = await this.getIndexStatusInternal(table);
+
+    const scalarPlans: Array<{ column: string; kind: "btree" | "bitmap" }> = [
+      { column: "id", kind: "btree" },
+      { column: "scope", kind: "bitmap" },
+      { column: "category", kind: "bitmap" },
+      { column: "timestamp", kind: "btree" },
+    ];
+
+    for (const plan of scalarPlans) {
+      if (status.available.scalar.includes(plan.column)) continue;
+      try {
+        await this.ensureScalarIndex(table, plan.column, plan.kind);
+      } catch (error) {
+        this.log.warn(`mymem: failed to create scalar index on ${plan.column}: ${String(error)}`);
+      }
+    }
+
+    try {
+      await this.ensureVectorIndex(table, status.totalRows);
+    } catch (error) {
+      this.log.warn(`mymem: failed to create vector index: ${String(error)}`);
+    }
+
+    await this.getIndexStatusInternal(table);
+  }
+
+  private async maybeCreateDeferredVectorIndex(): Promise<void> {
+    if (!this.table || this.vectorIndexCreated) return;
+    try {
+      const totalRows = await this.table.countRows();
+      if (totalRows < MIN_VECTOR_INDEX_ROWS) return;
+      await this.ensureVectorIndex(this.table, totalRows);
+      await this.getIndexStatusInternal(this.table);
+    } catch (error) {
+      this.log.warn(`mymem: deferred vector index creation failed: ${String(error)}`);
+    }
+  }
+
+  private buildBaseWhereClause(scopeFilter?: string[], category?: string, extraConditions: string[] = []): string | undefined {
+    return combineWhereClauses([
+      buildScopeWhereClause(scopeFilter),
+      category ? `category = '${escapeSqlLiteral(category)}'` : undefined,
+      ...extraConditions,
+    ]);
+  }
+
+  private async findListWindowLowerBound(
+    baseWhere: string | undefined,
+    neededCount: number,
+    upperExclusive: number,
+  ): Promise<number | null> {
+    let lower = Math.max(0, upperExclusive - 24 * 60 * 60 * 1000);
+    let previousLower = upperExclusive;
+    let count = await this.countRowsWithFilter(
+      combineWhereClauses([
+        baseWhere,
+        `timestamp >= ${lower}`,
+        `timestamp < ${upperExclusive}`,
+      ]),
+    );
+
+    let attempts = 0;
+    while (count < neededCount && lower > 0 && attempts < 12) {
+      previousLower = lower;
+      lower = Math.max(0, upperExclusive - (upperExclusive - lower) * 2);
+      count = await this.countRowsWithFilter(
+        combineWhereClauses([
+          baseWhere,
+          `timestamp >= ${lower}`,
+          `timestamp < ${upperExclusive}`,
+        ]),
+      );
+      attempts++;
+    }
+
+    if (count < neededCount) return null;
+
+    let low = lower;
+    let high = previousLower;
+    for (let i = 0; i < 12 && high - low > 1000; i++) {
+      const mid = low + Math.floor((high - low) / 2);
+      const midCount = await this.countRowsWithFilter(
+        combineWhereClauses([
+          baseWhere,
+          `timestamp >= ${mid}`,
+          `timestamp < ${upperExclusive}`,
+        ]),
+      );
+      if (midCount >= neededCount) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+
+    return low;
+  }
+
+  private async fetchListRows(whereClause?: string): Promise<MemoryEntry[]> {
+    let query = this.table!.query().select(LIST_ENTRY_COLUMNS as unknown as string[]);
+    if (whereClause) {
+      query = query.where(whereClause);
+    }
+    const rows = await query.toArray();
+    return rows.map((row) => mapRowToMemoryEntry(row, false));
   }
 
   private async runWithFileLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -432,6 +713,8 @@ export class MemoryStore {
       this.ftsIndexCreated = false;
     }
 
+    await this.ensureRecommendedIndices(table);
+
     this.db = db;
     this.table = table;
   }
@@ -449,6 +732,8 @@ export class MemoryStore {
         const lancedb = await loadLanceDB();
         await table.createIndex("text", {
           config: (lancedb as any).Index.fts({ withPosition: true }),
+          replace: false,
+          waitTimeoutSeconds: 60,
         });
       }
     } catch (err) {
@@ -476,7 +761,7 @@ export class MemoryStore {
       return fullEntry;
     }
 
-    return this.runWithFileLock(async () => {
+    const stored = await this.runWithFileLock(async () => {
       try {
         await this.table!.add(toLanceRows([fullEntry]));
       } catch (err: any) {
@@ -488,6 +773,8 @@ export class MemoryStore {
       }
       return fullEntry;
     });
+    await this.maybeCreateDeferredVectorIndex();
+    return stored;
   }
 
   /**
@@ -519,10 +806,12 @@ export class MemoryStore {
       metadata: entry.metadata || "{}",
     };
 
-    return this.runWithFileLock(async () => {
+    const imported = await this.runWithFileLock(async () => {
       await this.table!.add(toLanceRows([full]));
       return full;
     });
+    await this.maybeCreateDeferredVectorIndex();
+    return imported;
   }
 
   async hasId(id: string): Promise<boolean> {
@@ -830,17 +1119,18 @@ export class MemoryStore {
 
     let candidates: any[];
     if (isFullId) {
+      const safeId = escapeSqlLiteral(id);
       candidates = await this.table!.query()
-        .where(`id = '${id}'`)
+        .select(["id", "scope"])
+        .where(`id = '${safeId}'`)
         .limit(1)
         .toArray();
     } else {
-      // Prefix match: fetch candidates and filter in app layer
-      const all = await this.table!.query()
+      candidates = await this.table!.query()
         .select(["id", "scope"])
-        .limit(1000)
+        .where(prefixWhereClause("id", id))
+        .limit(2)
         .toArray();
-      candidates = all.filter((r: any) => (r.id as string).startsWith(id));
       if (candidates.length > 1) {
         throw new Error(
           `Ambiguous prefix "${id}" matches ${candidates.length} memories. Use a longer prefix or full ID.`,
@@ -878,55 +1168,41 @@ export class MemoryStore {
     await this.ensureInitialized();
 
     if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
+    const safeLimit = clampInt(limit, 1, 200);
+    const safeOffset = Math.max(0, Math.floor(offset));
+    const neededCount = safeLimit + safeOffset;
+    const baseWhere = this.buildBaseWhereClause(scopeFilter, category);
+    const totalCount = await this.countRowsWithFilter(baseWhere);
 
-    let query = this.table!.query();
+    if (totalCount === 0 || safeOffset >= totalCount) return [];
 
-    // Build where conditions
-    const conditions: string[] = [];
-
-    if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      conditions.push(`((${scopeConditions}) OR scope IS NULL)`);
+    let rows: MemoryEntry[];
+    if (totalCount <= neededCount * 2) {
+      rows = await this.fetchListRows(baseWhere);
+    } else {
+      const upperExclusive = Date.now() + 1;
+      const lowerBound = await this.findListWindowLowerBound(
+        baseWhere,
+        neededCount,
+        upperExclusive,
+      );
+      rows = lowerBound === null
+        ? await this.fetchListRows(baseWhere)
+        : await this.fetchListRows(
+            combineWhereClauses([
+              baseWhere,
+              `timestamp >= ${lowerBound}`,
+              `timestamp < ${upperExclusive}`,
+            ]),
+          );
+      if (rows.length < neededCount) {
+        rows = await this.fetchListRows(baseWhere);
+      }
     }
 
-    if (category) {
-      conditions.push(`category = '${escapeSqlLiteral(category)}'`);
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(conditions.join(" AND "));
-    }
-
-    // Fetch all matching rows (no pre-limit) so app-layer sort is correct across full dataset
-    const results = await query
-      .select([
-        "id",
-        "text",
-        "category",
-        "scope",
-        "importance",
-        "timestamp",
-        "metadata",
-      ])
-      .toArray();
-
-    return results
-      .map(
-        (row): MemoryEntry => ({
-          id: row.id as string,
-          text: row.text as string,
-          vector: [], // Don't include vectors in list results for performance
-          category: row.category as MemoryEntry["category"],
-          scope: (row.scope as string | undefined) ?? "global",
-          importance: Number(row.importance),
-          timestamp: Number(row.timestamp),
-          metadata: (row.metadata as string) || "{}",
-        }),
-      )
+    return rows
       .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-      .slice(offset, offset + limit);
+      .slice(safeOffset, safeOffset + safeLimit);
   }
 
   async stats(scopeFilter?: string[]): Promise<{
@@ -943,17 +1219,15 @@ export class MemoryStore {
         categoryCounts: {},
       };
     }
-
-    let query = this.table!.query();
-
-    if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
+    const whereClause = this.buildBaseWhereClause(scopeFilter);
+    let query = this.table!.query().select(["scope", "category"]);
+    if (whereClause) {
+      query = query.where(whereClause);
     }
-
-    const results = await query.select(["scope", "category"]).toArray();
+    const [totalCount, results] = await Promise.all([
+      this.countRowsWithFilter(whereClause),
+      query.toArray(),
+    ]);
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
@@ -967,7 +1241,7 @@ export class MemoryStore {
     }
 
     return {
-      totalCount: results.length,
+      totalCount,
       scopeCounts,
       categoryCounts,
     };
@@ -1006,25 +1280,16 @@ export class MemoryStore {
       if (isFullId) {
         const safeId = escapeSqlLiteral(id);
         rows = await this.table!.query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
           .where(`id = '${safeId}'`)
           .limit(1)
           .toArray();
       } else {
-        // Prefix match
-        const all = await this.table!.query()
-          .select([
-            "id",
-            "text",
-            "vector",
-            "category",
-            "scope",
-            "importance",
-            "timestamp",
-            "metadata",
-          ])
-          .limit(1000)
+        rows = await this.table!.query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
+          .where(prefixWhereClause("id", id))
+          .limit(2)
           .toArray();
-        rows = all.filter((r: any) => (r.id as string).startsWith(id));
         if (rows.length > 1) {
           throw new Error(
             `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
@@ -1168,17 +1433,20 @@ export class MemoryStore {
     const whereClause = conditions.join(" AND ");
 
     return this.runWithFileLock(async () => {
-      // Count first
-      const countResults = await this.table!.query().where(whereClause).toArray();
-      const deleteCount = countResults.length;
+      const beforeCount = await this.table!.countRows(whereClause);
 
-      // Then delete
-      if (deleteCount > 0) {
+      if (beforeCount > 0) {
         await this.table!.delete(whereClause);
       }
+      const afterCount = await this.table!.countRows(whereClause);
 
-      return deleteCount;
+      return Math.max(0, beforeCount - afterCount);
     });
+  }
+
+  async getIndexStatus(): Promise<StoreIndexStatus> {
+    await this.ensureInitialized();
+    return this.getIndexStatusInternal(this.table!);
   }
 
   get hasFtsSupport(): boolean {
@@ -1217,7 +1485,7 @@ export class MemoryStore {
       }
       // Recreate
       await this.createFtsIndex(this.table!);
-      this.ftsIndexCreated = true;
+      await this.getIndexStatusInternal(this.table!);
       this._lastFtsError = null;
       return { success: true };
     } catch (err) {
@@ -1256,22 +1524,11 @@ export class MemoryStore {
 
     const results = await this.table!
       .query()
+      .select(FULL_ENTRY_COLUMNS as unknown as string[])
       .where(whereClause)
+      .limit(limit)
       .toArray();
 
-    return results
-      .slice(0, limit)
-      .map(
-        (row): MemoryEntry => ({
-          id: row.id as string,
-          text: row.text as string,
-          vector: toNumberVector(row.vector),
-          category: row.category as MemoryEntry["category"],
-          scope: (row.scope as string | undefined) ?? "global",
-          importance: Number(row.importance),
-          timestamp: Number(row.timestamp),
-          metadata: (row.metadata as string) || "{}",
-        }),
-      );
+    return results.map((row) => mapRowToMemoryEntry(row));
   }
 }
