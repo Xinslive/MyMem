@@ -186,6 +186,41 @@ try {
   assert.equal(services.length, 1, "plugin should register its background service");
   assert.equal(typeof api.hooks.agent_end, "function", "autoCapture should remain enabled by default");
   assert.equal(typeof api.hooks.before_reset, "function", "selfImprovement before_reset hook should be registered by default");
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const scheduledTimeouts = [];
+  try {
+    globalThis.setTimeout = (fn, delay = 0, ...args) => {
+      scheduledTimeouts.push(Number(delay));
+      return { fn, delay, args };
+    };
+    globalThis.clearTimeout = () => {};
+    globalThis.setInterval = (fn, delay = 0, ...args) => ({ fn, delay, args });
+    globalThis.clearInterval = () => {};
+    await assert.doesNotReject(
+      services[0].start(),
+      "service start should schedule deferred startup work without throwing",
+    );
+    assert.ok(
+      scheduledTimeouts.includes(15_000),
+      "service start should defer startup health checks by 15 seconds",
+    );
+    assert.ok(
+      !scheduledTimeouts.includes(0),
+      "service start should no longer trigger startup health checks immediately",
+    );
+    await assert.doesNotReject(
+      services[0].stop(),
+      "service stop should tolerate deferred startup work handles",
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
   await assert.doesNotReject(
     services[0].stop(),
     "service stop should not throw when no access tracker is configured",

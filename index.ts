@@ -127,6 +127,7 @@ import {
 // ============================================================================
 
 const pluginVersion = getPluginVersion();
+const STARTUP_HEALTH_CHECK_DELAY_MS = 15_000;
 
 // ============================================================================
 // Plugin Definition
@@ -1837,8 +1838,9 @@ const myMemPlugin = {
           }
         };
 
-        // Fire-and-forget: allow gateway to start serving immediately.
-        setTimeout(() => void runStartupChecks(), 0);
+        // Fire-and-forget: allow gateway to start serving immediately, then
+        // defer health probing so startup I/O does not contend with host init.
+        setTimeout(() => void runStartupChecks(), STARTUP_HEALTH_CHECK_DELAY_MS);
 
         // Check for legacy memories that could be upgraded
         setTimeout(async () => {
