@@ -35,7 +35,7 @@ export interface ExperienceCompilerResult {
 export const DEFAULT_EXPERIENCE_COMPILER_CONFIG: Required<ExperienceCompilerConfig> = {
   enabled: true,
   gatewayBackfill: true,
-  cooldownHours: 6,
+  cooldownHours: 4,
   maxStrategiesPerRun: 3,
 };
 

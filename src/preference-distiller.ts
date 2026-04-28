@@ -32,7 +32,7 @@ export interface PreferenceDistillerResult {
 export const DEFAULT_PREFERENCE_DISTILLER_CONFIG: Required<PreferenceDistillerConfig> = {
   enabled: true,
   gatewayBackfill: true,
-  cooldownHours: 6,
+  cooldownHours: 4,
   maxSessions: 12,
   minEvidenceCount: 2,
   minStabilityScore: 0.6,

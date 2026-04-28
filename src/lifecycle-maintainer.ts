@@ -51,7 +51,7 @@ type RowContext = {
 
 const DEFAULT_CONFIG: LifecycleMaintenanceConfig = {
   enabled: true,
-  cooldownHours: 6,
+  cooldownHours: 4,
   maxMemoriesToScan: 300,
   archiveThreshold: 0.15,
   dryRun: false,

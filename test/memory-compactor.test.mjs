@@ -81,7 +81,7 @@ const defaultConfig = {
   minClusterSize: 2,
   maxMemoriesToScan: 200,
   dryRun: false,
-  cooldownHours: 6,
+  cooldownHours: 4,
 };
 
 // ============================================================================

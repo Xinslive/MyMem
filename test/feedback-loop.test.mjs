@@ -180,6 +180,92 @@ it("FeedbackLoop: onAdmissionRejected buffers entry when enabled", () => {
   loop.dispose();
 });
 
+it("FeedbackLoop: periodic scan timer calls file and rejection scanners when runtime context is known", async () => {
+  let errorScanCount = 0;
+  let rejectionScanCount = 0;
+
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [] },
+    admissionController: null,
+    config: {
+      enabled: true,
+      noiseLearning: {
+        ...DEFAULT_NOISE_LEARNING_CONFIG,
+        fromErrors: true,
+        fromRejections: true,
+        scanIntervalMs: 10,
+      },
+      priorAdaptation: {
+        ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
+        enabled: false,
+      },
+    },
+    runtimeContext: {
+      workspaceDir: "/tmp/workspace",
+      dbPath: "/tmp/db",
+      admissionConfig: { rejectThreshold: 0.45 },
+    },
+  });
+
+  loop.scanErrorFile = async () => {
+    errorScanCount++;
+  };
+  loop.scanRejectionAudits = async () => {
+    rejectionScanCount++;
+  };
+
+  try {
+    loop.start();
+    await new Promise((resolve) => setTimeout(resolve, 35));
+  } finally {
+    loop.dispose();
+  }
+
+  assert.ok(errorScanCount >= 1, `expected periodic error scans, got ${errorScanCount}`);
+  assert.ok(rejectionScanCount >= 1, `expected periodic rejection scans, got ${rejectionScanCount}`);
+});
+
+it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled", async () => {
+  let adaptationCount = 0;
+
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [] },
+    admissionController: {},
+    config: {
+      enabled: true,
+      noiseLearning: {
+        ...DEFAULT_NOISE_LEARNING_CONFIG,
+        fromErrors: false,
+        fromRejections: false,
+      },
+      priorAdaptation: {
+        ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
+        enabled: true,
+        adaptationIntervalMs: 10,
+      },
+    },
+    runtimeContext: {
+      dbPath: "/tmp/db",
+      admissionConfig: { rejectThreshold: 0.45 },
+    },
+  });
+
+  loop.forceAdaptationCycle = async () => {
+    adaptationCount++;
+  };
+
+  try {
+    loop.start();
+    await new Promise((resolve) => setTimeout(resolve, 35));
+  } finally {
+    loop.dispose();
+  }
+
+  assert.ok(adaptationCount >= 1, `expected periodic prior adaptation, got ${adaptationCount}`);
+});
+
 // ============================================================================
 // Error File Parsing Tests
 // ============================================================================

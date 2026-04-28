@@ -366,7 +366,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
             : 0.88,
         minClusterSize: parsePositiveInt(raw?.minClusterSize) ?? 2,
         maxMemoriesToScan: parsePositiveInt(raw?.maxMemoriesToScan) ?? 200,
-        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 6,
+        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
         mergeMode: raw?.mergeMode === "deterministic" ? "deterministic" : "llm",
         deleteSourceMemories: raw?.deleteSourceMemories !== false,
         dryRun: raw?.dryRun === true,
@@ -383,7 +383,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         : 0.15;
       return {
         enabled: raw?.enabled !== false,
-        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 6,
+        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
         maxMemoriesToScan: parsePositiveInt(raw?.maxMemoriesToScan) ?? 300,
         archiveThreshold,
         dryRun: raw?.dryRun === true,
@@ -404,7 +404,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       return {
         enabled: raw?.enabled !== false,
         gatewayBackfill: raw?.gatewayBackfill !== false,
-        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 6,
+        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
         maxSessions: clampInt(parsePositiveInt(raw?.maxSessions) ?? 12, 1, 50),
         minEvidenceCount: clampInt(parsePositiveInt(raw?.minEvidenceCount) ?? 2, 1, 10),
         minStabilityScore:
@@ -422,7 +422,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       return {
         enabled: raw?.enabled !== false,
         gatewayBackfill: raw?.gatewayBackfill !== false,
-        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 6,
+        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
         maxStrategiesPerRun: clampInt(parsePositiveInt(raw?.maxStrategiesPerRun) ?? 3, 1, 12),
       };
     })(),

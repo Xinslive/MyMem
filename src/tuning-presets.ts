@@ -61,7 +61,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       similarityThreshold: 0.88,
       minClusterSize: 2,
       maxMemoriesToScan: 200,
-      cooldownHours: 6,
+      cooldownHours: 4,
       mergeMode: "llm",
       deleteSourceMemories: true,
       dryRun: false,
@@ -69,7 +69,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     },
     lifecycleMaintenance: {
       enabled: true,
-      cooldownHours: 6,
+      cooldownHours: 4,
       maxMemoriesToScan: 300,
       archiveThreshold: 0.15,
       dryRun: false,
@@ -80,7 +80,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     preferenceDistiller: {
       enabled: true,
       gatewayBackfill: true,
-      cooldownHours: 6,
+      cooldownHours: 4,
       maxSessions: 12,
       minEvidenceCount: 2,
       minStabilityScore: 0.6,
@@ -89,7 +89,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     experienceCompiler: {
       enabled: true,
       gatewayBackfill: true,
-      cooldownHours: 6,
+      cooldownHours: 4,
       maxStrategiesPerRun: 3,
     },
   },

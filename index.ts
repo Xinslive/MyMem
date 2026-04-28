@@ -232,6 +232,8 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   // It uses simple exponential decay instead of Weibull, suitable for resource-constrained environments.
   const recencyConfig = config.retrieval ?? {};
   const feedbackLoopConfig = normalizeFeedbackLoopConfig(config.feedbackLoop);
+  const feedbackLoopAdmissionConfig = normalizeAdmissionControlConfig(config.admissionControl);
+  const feedbackLoopWorkspaceDir = getDefaultWorkspaceDir();
   const recencyEngine = new RecencyEngine({
     ...DEFAULT_RECENCY_CONFIG,
     halfLifeDays: recencyConfig.timeDecayHalfLifeDays ?? recencyConfig.recencyHalfLifeDays ?? DEFAULT_RECENCY_CONFIG.halfLifeDays,
@@ -362,6 +364,11 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
+          runtimeContext: {
+            workspaceDir: feedbackLoopWorkspaceDir,
+            dbPath: resolvedDbPath,
+            admissionConfig: feedbackLoopAdmissionConfig,
+          },
         });
       }
     } catch (err) {
@@ -378,6 +385,11 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           admissionController: null,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
+          runtimeContext: {
+            workspaceDir: feedbackLoopWorkspaceDir,
+            dbPath: resolvedDbPath,
+            admissionConfig: feedbackLoopAdmissionConfig,
+          },
         });
       }
     }
@@ -389,6 +401,11 @@ function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       admissionController: null,
       config: feedbackLoopConfig,
       debugLog: (msg: string) => api.logger.debug(msg),
+      runtimeContext: {
+        workspaceDir: feedbackLoopWorkspaceDir,
+        dbPath: resolvedDbPath,
+        admissionConfig: feedbackLoopAdmissionConfig,
+      },
     });
   }
 
@@ -822,14 +839,14 @@ const myMemPlugin = {
           minClusterSize: config.memoryCompaction!.minClusterSize ?? 2,
           maxMemoriesToScan: config.memoryCompaction!.maxMemoriesToScan ?? 200,
           dryRun: config.memoryCompaction!.dryRun === true,
-          cooldownHours: config.memoryCompaction!.cooldownHours ?? 6,
+          cooldownHours: config.memoryCompaction!.cooldownHours ?? 4,
           mergeMode: config.memoryCompaction!.mergeMode ?? "llm",
           deleteSourceMemories: config.memoryCompaction!.deleteSourceMemories !== false,
           maxLlmClustersPerRun: config.memoryCompaction!.maxLlmClustersPerRun ?? 10,
         } : null;
         const lifecycleCfg = {
           enabled: config.lifecycleMaintenance?.enabled === true,
-          cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 6,
+          cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 4,
           maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 300,
           archiveThreshold: config.lifecycleMaintenance?.archiveThreshold ?? 0.15,
           dryRun: config.lifecycleMaintenance?.dryRun === true,
@@ -854,10 +871,10 @@ const myMemPlugin = {
 
         Promise.all([
           config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
-            ? shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 6)
+            ? shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
             : Promise.resolve(false),
           config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill
-            ? shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 6)
+            ? shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 4)
             : Promise.resolve(false),
           lifecycleCfg.enabled ? shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
           compactionCfg ? shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),

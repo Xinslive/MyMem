@@ -42,6 +42,12 @@ export interface FeedbackLoopConfig {
   priorAdaptation: PriorAdaptationConfig;
 }
 
+export interface FeedbackLoopRuntimeContext {
+  workspaceDir?: string;
+  dbPath?: string;
+  admissionConfig?: AdmissionControlConfig;
+}
+
 export const DEFAULT_NOISE_LEARNING_CONFIG: NoiseLearningConfig = {
   fromErrors: true,
   fromRejections: true,
@@ -183,11 +189,13 @@ export class FeedbackLoop {
   private admissionController: AdmissionController | null;
   private config: FeedbackLoopConfig;
   private debugLog: (msg: string) => void;
+  private runtimeContext: FeedbackLoopRuntimeContext;
 
   private processedErrors = new ProcessedErrorTracker();
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
   private scanTimer: ReturnType<typeof setInterval> | null = null;
+  private adaptationTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
 
   constructor(opts: {
@@ -196,23 +204,33 @@ export class FeedbackLoop {
     admissionController: AdmissionController | null;
     config: FeedbackLoopConfig;
     debugLog?: (msg: string) => void;
+    runtimeContext?: FeedbackLoopRuntimeContext;
   }) {
     this.noiseBank = opts.noiseBank;
     this.embedder = opts.embedder;
     this.admissionController = opts.admissionController;
     this.config = opts.config;
     this.debugLog = opts.debugLog ?? (() => {});
+    this.runtimeContext = {};
+    this.rememberRuntimeContext(opts.runtimeContext);
   }
 
   // --- Lifecycle ---
 
   start(): void {
     if (this.disposed || !this.config.enabled) return;
+    if (this.scanTimer || this.adaptationTimer) return;
 
     if (this.config.noiseLearning.fromErrors || this.config.noiseLearning.fromRejections) {
       this.scanTimer = setInterval(
         () => void this.runNoiseScanCycle().catch(() => {}),
         this.config.noiseLearning.scanIntervalMs,
+      );
+    }
+    if (this.config.priorAdaptation.enabled && this.admissionController) {
+      this.adaptationTimer = setInterval(
+        () => void this.runPriorAdaptationCycle().catch(() => {}),
+        this.config.priorAdaptation.adaptationIntervalMs,
       );
     }
 
@@ -222,7 +240,12 @@ export class FeedbackLoop {
   dispose(): void {
     this.disposed = true;
     if (this.scanTimer) { clearInterval(this.scanTimer); this.scanTimer = null; }
+    if (this.adaptationTimer) { clearInterval(this.adaptationTimer); this.adaptationTimer = null; }
     this.debugLog("feedback-loop: disposed");
+  }
+
+  setRuntimeContext(context: FeedbackLoopRuntimeContext): void {
+    this.rememberRuntimeContext(context);
   }
 
   // --- Hot-path callbacks (no I/O) ---
@@ -244,6 +267,7 @@ export class FeedbackLoop {
   // --- Error File Scanning ---
 
   async scanErrorFile(baseDir: string): Promise<void> {
+    this.rememberRuntimeContext({ workspaceDir: baseDir });
     if (this.disposed || !this.config.noiseLearning.fromErrors || !this.noiseBank?.initialized) return;
 
     try {
@@ -303,6 +327,7 @@ export class FeedbackLoop {
   // --- Rejection Audit Scanning ---
 
   async scanRejectionAudits(dbPath: string, admissionConfig: AdmissionControlConfig): Promise<void> {
+    this.rememberRuntimeContext({ dbPath, admissionConfig });
     if (this.disposed || !this.config.noiseLearning.fromRejections || !this.noiseBank?.initialized) return;
 
     const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
@@ -397,6 +422,7 @@ export class FeedbackLoop {
   }
 
   async forceAdaptationCycle(dbPath: string, admissionConfig: AdmissionControlConfig): Promise<void> {
+    this.rememberRuntimeContext({ dbPath, admissionConfig });
     if (this.disposed || !this.config.priorAdaptation.enabled || !this.admissionController) return;
 
     try {
@@ -448,11 +474,52 @@ export class FeedbackLoop {
 
   private async runNoiseScanCycle(): Promise<void> {
     if (this.disposed) return;
+    const workspaceDir = this.runtimeContext.workspaceDir;
+    const dbPath = this.runtimeContext.dbPath;
+    const admissionConfig = this.runtimeContext.admissionConfig;
     try {
-      await this.drainErrorBuffer();
-      await this.drainRejectionBuffer(0.45);
+      if (this.config.noiseLearning.fromErrors) {
+        if (workspaceDir) {
+          await this.scanErrorFile(workspaceDir);
+        } else {
+          await this.drainErrorBuffer();
+        }
+      }
+      if (this.config.noiseLearning.fromRejections) {
+        if (dbPath && admissionConfig) {
+          await this.scanRejectionAudits(dbPath, admissionConfig);
+        } else {
+          await this.drainRejectionBuffer(admissionConfig?.rejectThreshold ?? 0.45);
+        }
+      }
     } catch {
       // Non-critical: swallow
+    }
+  }
+
+  private async runPriorAdaptationCycle(): Promise<void> {
+    if (this.disposed || !this.config.priorAdaptation.enabled || !this.admissionController) return;
+    const dbPath = this.runtimeContext.dbPath;
+    const admissionConfig = this.runtimeContext.admissionConfig;
+    if (!dbPath || !admissionConfig) return;
+
+    try {
+      await this.forceAdaptationCycle(dbPath, admissionConfig);
+    } catch {
+      // Non-critical: swallow
+    }
+  }
+
+  private rememberRuntimeContext(context?: FeedbackLoopRuntimeContext): void {
+    if (!context) return;
+    if (typeof context.workspaceDir === "string" && context.workspaceDir.trim().length > 0) {
+      this.runtimeContext.workspaceDir = context.workspaceDir.trim();
+    }
+    if (typeof context.dbPath === "string" && context.dbPath.trim().length > 0) {
+      this.runtimeContext.dbPath = context.dbPath.trim();
+    }
+    if (context.admissionConfig) {
+      this.runtimeContext.admissionConfig = context.admissionConfig;
     }
   }
 }

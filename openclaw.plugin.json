@@ -967,7 +967,7 @@
           },
           "cooldownHours": {
             "type": "integer",
-            "default": 6,
+            "default": 4,
             "minimum": 1,
             "description": "Minimum hours between automatic compaction runs"
           },
@@ -1007,7 +1007,7 @@
           },
           "cooldownHours": {
             "type": "integer",
-            "default": 6,
+            "default": 4,
             "minimum": 1,
             "description": "Minimum hours between automatic lifecycle sweeps."
           },
@@ -1065,7 +1065,7 @@
           "cooldownHours": {
             "type": "integer",
             "minimum": 1,
-            "default": 6
+            "default": 4
           },
           "maxSessions": {
             "type": "integer",
@@ -1106,7 +1106,7 @@
           "cooldownHours": {
             "type": "integer",
             "minimum": 1,
-            "default": 6
+            "default": 4
           },
           "maxStrategiesPerRun": {
             "type": "integer",

@@ -44,7 +44,7 @@ export interface CompactionConfig {
   maxMemoriesToScan: number;
   /** Report plan without writing changes. Default: false */
   dryRun: boolean;
-  /** Run at most once per N hours (gateway_start guard). Default: 6 */
+  /** Run at most once per N hours (gateway_start guard). Default: 4 */
   cooldownHours: number;
   /** Merge strategy. Default: "llm" */
   mergeMode?: "llm" | "deterministic";
