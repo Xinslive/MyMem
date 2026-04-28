@@ -248,7 +248,7 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 100,
-        "default": 2,
+        "default": 5,
         "description": "Minimum conversation messages required before smart extraction runs."
       },
       "extractMaxChars": {

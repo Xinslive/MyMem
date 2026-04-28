@@ -66,7 +66,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.autoRecallMinLength, 6);
     assert.equal(parsed.autoRecallMaxItems, 5);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
-    assert.equal(parsed.extractMinMessages, 2);
+    assert.equal(parsed.extractMinMessages, 5);
     assert.equal(parsed.llm?.model, undefined);
     assert.equal(parsed.llm?.baseURL, undefined);
     assert.equal(parsed.llm?.timeoutMs, 90000);

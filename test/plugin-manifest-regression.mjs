@@ -94,7 +94,7 @@ assert.equal(
 );
 assert.equal(
   manifest.configSchema.properties.extractMinMessages.default,
-  2,
+  5,
   "extractMinMessages schema default should match runtime default",
 );
 assert.equal(

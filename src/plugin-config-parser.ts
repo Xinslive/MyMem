@@ -264,7 +264,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         timeoutMs: parsePositiveInt(raw.timeoutMs) ?? 90000,
       } as any;
     })(),
-    extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 2,
+    extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 5,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as any : undefined,
     enableManagementTools: cfg.enableManagementTools !== false,

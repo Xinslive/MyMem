@@ -149,7 +149,7 @@ export function registerAutoCaptureHook(params: {
           params.autoCaptureRecentTexts.set(sessionKey, nextRecentTexts);
         }
 
-        const minMessages = config.extractMinMessages ?? 4;
+        const minMessages = config.extractMinMessages ?? 5;
         if (skippedAutoCaptureTexts > 0) {
           api.logger.debug(`mymem: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent ${agentId}`);
         }
