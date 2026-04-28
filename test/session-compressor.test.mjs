@@ -322,14 +322,22 @@ describe("createExtractionRateLimiter", () => {
     assert.equal(limiter.getRecentCount(), 2);
   });
 
-  it("uses default max of 30 when not specified", () => {
+  it("is disabled by default when not specified", () => {
     const limiter = createExtractionRateLimiter();
-    for (let i = 0; i < 29; i++) {
+    for (let i = 0; i < 100; i++) {
       limiter.recordExtraction();
     }
     assert.equal(limiter.isRateLimited(), false);
-    limiter.recordExtraction();
-    assert.equal(limiter.isRateLimited(), true);
+    assert.equal(limiter.getRecentCount(), 0);
+  });
+
+  it("treats 0 as disabled", () => {
+    const limiter = createExtractionRateLimiter({ maxExtractionsPerHour: 0 });
+    for (let i = 0; i < 100; i++) {
+      limiter.recordExtraction();
+    }
+    assert.equal(limiter.isRateLimited(), false);
+    assert.equal(limiter.getRecentCount(), 0);
   });
 
   it("sliding window: old entries expire (simulated)", () => {

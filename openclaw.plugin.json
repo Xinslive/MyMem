@@ -1146,10 +1146,10 @@
           },
           "maxExtractionsPerHour": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 200,
-            "default": 30,
-            "description": "Maximum number of auto-capture extractions allowed per hour"
+            "default": 0,
+            "description": "Maximum number of auto-capture extractions allowed per hour. Set 0 to disable throttling."
           }
         }
       },
@@ -1873,7 +1873,7 @@
     },
     "extractionThrottle.maxExtractionsPerHour": {
       "label": "Max Extractions Per Hour",
-      "help": "Rate limit for auto-capture extractions. Prevents excessive LLM calls during rapid-fire sessions.",
+      "help": "Rate limit for auto-capture extractions. Set 0 to disable throttling; positive values prevent excessive LLM calls during rapid-fire sessions.",
       "advanced": true
     },
     "hookEnhancements.badRecallFeedback": {

@@ -445,9 +445,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
             maxExtractionsPerHour:
               typeof (cfg.extractionThrottle as Record<string, unknown>).maxExtractionsPerHour === "number"
                 ? ((cfg.extractionThrottle as Record<string, unknown>).maxExtractionsPerHour as number)
-                : 30,
+                : 0,
           }
-        : { skipLowValue: false, maxExtractionsPerHour: 30 },
+        : { skipLowValue: false, maxExtractionsPerHour: 0 },
     feedbackLoop: normalizeFeedbackLoopConfig(cfg.feedbackLoop),
     recallPrefix:
       typeof cfg.recallPrefix === "object" && cfg.recallPrefix !== null

@@ -94,6 +94,8 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.experienceCompiler?.enabled, true);
     assert.equal(parsed.experienceCompiler?.cooldownHours, 4);
     assert.equal(parsed.experienceCompiler?.maxStrategiesPerRun, 3);
+    assert.equal(parsed.extractionThrottle?.skipLowValue, false);
+    assert.equal(parsed.extractionThrottle?.maxExtractionsPerHour, 0);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.enabled, true);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.preferDistilled, true);
     assert.equal(parsed.hookEnhancements?.selfCorrectionLoop?.enabled, true);
