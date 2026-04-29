@@ -111,6 +111,15 @@ import {
 } from "./src/feedback-loop.js";
 // intent-analyzer imports moved to auto-recall-hook.ts
 
+// Import singleton state management
+import {
+  type PluginSingletonState,
+  initPluginState,
+  getSingletonState,
+  setSingletonState,
+  __resetSingletonForTesting__,
+} from "./src/plugin-singleton.js";
+
 // ============================================================================
 // Version
 // ============================================================================
@@ -140,320 +149,6 @@ import { registerAutoRecallHook } from "./src/auto-recall-hook.js";
 import { registerSelfImprovementHook } from "./src/self-improvement-hook.js";
 import { createHookEnhancementState, registerHookEnhancements } from "./src/hook-enhancements.js";
 
-// ============================================================================
-// Phase 2 — Singleton State Management (PR #598)
-// ============================================================================
-
-interface PluginSingletonState {
-  config: ReturnType<typeof parsePluginConfig>;
-  resolvedDbPath: string;
-  store: MemoryStore;
-  embedder: ReturnType<typeof createEmbedder>;
-  decayEngine: ReturnType<typeof createDecayEngine>;
-  recencyEngine: RecencyEngine;
-  hybridNoiseDetector: HybridNoiseDetector;
-  tierManager: ReturnType<typeof createTierManager>;
-  retriever: ReturnType<typeof createRetriever>;
-  scopeManager: ReturnType<typeof createScopeManager>;
-  migrator: ReturnType<typeof createMigrator>;
-  smartExtractor: SmartExtractor | null;
-  smartExtractionLlmClient: LlmClient | null;
-  extractionRateLimiter: ReturnType<typeof createExtractionRateLimiter>;
-  feedbackLoop: FeedbackLoop | null;
-  telemetryStore: TelemetryStore | null;
-  // Session Maps — persist across scope refreshes instead of being recreated
-  reflectionErrorStateBySession: Map<string, ReflectionErrorState>;
-  reflectionDerivedBySession: Map<string, { updatedAt: number; derived: string[] }>;
-  reflectionByAgentCache: Map<string, { updatedAt: number; invariants: string[]; derived: string[] }>;
-  recallHistory: Map<string, Map<string, number>>;
-  turnCounter: Map<string, number>;
-  lastRawUserMessage: Map<string, string>;
-  hookEnhancementState: ReturnType<typeof createHookEnhancementState>;
-  autoCaptureSeenTextCount: Map<string, number>;
-  autoCapturePendingIngressTexts: Map<string, string[]>;
-  autoCaptureRecentTexts: Map<string, string[]>;
-}
-
-let _singletonState: PluginSingletonState | null = null;
-
-// Test-only: reset singleton state so each test gets a fresh _initPluginState run.
-export function __resetSingletonForTesting__(): void {
-	_singletonState = null;
-}
-
-function _initPluginState(api: OpenClawPluginApi): PluginSingletonState {
-  const config = parsePluginConfig(api.pluginConfig);
-  const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
-  const telemetryStore = new TelemetryStore(
-    config.telemetry ?? { persist: false, maxRecords: 1000, sampleRate: 1 },
-    api.resolvePath(resolveTelemetryDir(resolvedDbPath, config.telemetry?.dir)),
-  );
-
-  try {
-    validateStoragePath(resolvedDbPath);
-  } catch (err) {
-    api.logger.warn(
-      `mymem: storage path issue — ${String(err)}\n` +
-      `  The plugin will still attempt to start, but writes may fail.`,
-    );
-  }
-
-  const vectorDim = getVectorDimensions(
-    config.embedding.model || "text-embedding-3-small",
-    config.embedding.dimensions,
-  );
-  const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim });
-  const embedder = createEmbedder({
-    provider: "openai-compatible",
-    apiKey: config.embedding.apiKey,
-    model: config.embedding.model || "text-embedding-3-small",
-    baseURL: config.embedding.baseURL,
-    dimensions: config.embedding.dimensions,
-    omitDimensions: config.embedding.omitDimensions,
-    taskQuery: config.embedding.taskQuery,
-    taskPassage: config.embedding.taskPassage,
-    normalized: config.embedding.normalized,
-    chunking: config.embedding.chunking,
-    logger: api.logger,
-  });
-  const decayEngine = createDecayEngine({
-    ...DEFAULT_DECAY_CONFIG,
-    ...(config.decay || {}),
-  });
-  // RecencyEngine is the lightweight alternative when DecayEngine (Weibull) is not configured.
-  // It uses simple exponential decay instead of Weibull, suitable for resource-constrained environments.
-  const recencyConfig = config.retrieval ?? {};
-  const feedbackLoopConfig = normalizeFeedbackLoopConfig(config.feedbackLoop);
-  const feedbackLoopAdmissionConfig = normalizeAdmissionControlConfig(config.admissionControl);
-  const feedbackLoopWorkspaceDir = getDefaultWorkspaceDir();
-  const recencyEngine = new RecencyEngine({
-    ...DEFAULT_RECENCY_CONFIG,
-    halfLifeDays: recencyConfig.timeDecayHalfLifeDays ?? recencyConfig.recencyHalfLifeDays ?? DEFAULT_RECENCY_CONFIG.halfLifeDays,
-    reinforcementFactor: recencyConfig.reinforcementFactor ?? DEFAULT_RECENCY_CONFIG.reinforcementFactor,
-    maxHalfLifeMultiplier: recencyConfig.maxHalfLifeMultiplier ?? DEFAULT_RECENCY_CONFIG.maxHalfLifeMultiplier,
-    importanceBaseWeight: DEFAULT_RECENCY_CONFIG.importanceBaseWeight,
-  });
-  const tierManager = createTierManager({
-    ...DEFAULT_TIER_CONFIG,
-    ...(config.tier || {}),
-  });
-  // HybridNoiseDetector combines regex fast-path with embedding semantic detection.
-  // Created early so it can be initialized in parallel with other startup tasks.
-  const hybridNoiseDetector = new HybridNoiseDetector(embedder, undefined, {
-    learnFromRegex: true,
-    debugLog: (msg: string) => api.logger.debug(msg),
-  });
-  // Initialize async (safe to not await - detector falls back to regex-only until ready)
-  hybridNoiseDetector.init().catch((err) =>
-    api.logger.debug(`mymem: hybrid noise detector init: ${String(err)}`),
-  );
-  const retriever = createRetriever(
-    store,
-    embedder,
-    { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval },
-    { decayEngine, recencyEngine, noiseDetector: hybridNoiseDetector, tierManager, logger: api.logger },
-  );
-  const statsCollector = new RetrievalStatsCollector(config.telemetry?.maxRecords ?? 1000);
-  if (telemetryStore.enabled) {
-    statsCollector.setRecordHook((trace, source) => telemetryStore.recordRetrieval(trace, source));
-  }
-  retriever.setStatsCollector(statsCollector);
-  const scopeManager = createScopeManager(config.scopes);
-
-  const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
-  if (clawteamScopes.length > 0) {
-    applyClawteamScopes(scopeManager, clawteamScopes);
-    api.logger.info(`mymem: CLAWTEAM_MEMORY_SCOPE added scopes: ${clawteamScopes.join(", ")}`);
-  }
-
-  const migrator = createMigrator(store);
-
-  let smartExtractor: SmartExtractor | null = null;
-  let smartExtractionLlmClient: LlmClient | null = null;
-  let feedbackLoop: FeedbackLoop | null = null;
-  if (config.smartExtraction !== false) {
-    try {
-      const llmAuth = config.llm?.auth || "api-key";
-      const llmApiKey = llmAuth === "oauth"
-        ? undefined
-        : config.llm?.apiKey
-          ? resolveEnvVars(config.llm.apiKey)
-          : resolveFirstApiKey(config.embedding.apiKey);
-      const llmBaseURL = llmAuth === "oauth"
-        ? (config.llm?.baseURL ? resolveEnvVars(config.llm.baseURL) : undefined)
-        : config.llm?.baseURL
-          ? resolveEnvVars(config.llm.baseURL)
-          : config.embedding.baseURL;
-      const llmModel = config.llm?.model || "openai/gpt-oss-120b";
-      const llmOauthPath = llmAuth === "oauth"
-        ? resolveOptionalPathWithEnv(api, config.llm?.oauthPath, ".mymem/oauth.json")
-        : undefined;
-      const llmOauthProvider = llmAuth === "oauth" ? config.llm?.oauthProvider : undefined;
-      const llmTimeoutMs = resolveLlmTimeoutMs(config);
-
-      const llmClient = createLlmClient({
-        auth: llmAuth,
-        apiKey: llmApiKey,
-        model: llmModel,
-        baseURL: llmBaseURL,
-        oauthProvider: llmOauthProvider,
-        oauthPath: llmOauthPath,
-        timeoutMs: llmTimeoutMs,
-        log: (msg: string) => api.logger.debug(msg),
-        warnLog: (msg: string) => api.logger.warn(msg),
-      });
-      smartExtractionLlmClient = llmClient;
-
-      const noiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
-      noiseBank.init(embedder).catch((err) =>
-        api.logger.debug(`mymem: noise bank init: ${String(err)}`),
-      );
-
-      const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(config, resolvedDbPath, api);
-
-      // Wrapper that chains feedbackLoop.onAdmissionRejected() into the existing audit writer.
-      // Uses _singletonState so the closure reads the live reference (set after this returns).
-      const onAdmissionRejectedOriginal = admissionRejectionAuditWriter ?? undefined;
-      const onAdmissionRejected = onAdmissionRejectedOriginal
-        ? async (entry: AdmissionRejectionAuditEntry) => {
-            await onAdmissionRejectedOriginal(entry);
-            if (_singletonState?.feedbackLoop) _singletonState.feedbackLoop.onAdmissionRejected(entry);
-          }
-        : (entry: AdmissionRejectionAuditEntry) => {
-            if (_singletonState?.feedbackLoop) _singletonState.feedbackLoop.onAdmissionRejected(entry);
-          };
-
-      smartExtractor = new SmartExtractor(store, embedder, llmClient, {
-        user: "User",
-        extractMinMessages: config.extractMinMessages ?? 5,
-        extractMaxChars: config.extractMaxChars ?? 8000,
-        defaultScope: config.scopes?.default ?? "global",
-        workspaceBoundary: config.workspaceBoundary,
-        admissionControl: config.admissionControl,
-        onAdmissionRejected,
-        onExtractionComplete: telemetryStore.enabled
-          ? ({ sessionKey, scope, stats }) => telemetryStore.recordExtraction(sessionKey, scope, stats)
-          : undefined,
-        log: (msg: string) => api.logger.info(msg),
-        debugLog: (msg: string) => api.logger.debug(msg),
-        noiseBank,
-      });
-
-      (isCliMode() ? api.logger.debug : api.logger.info)(
-        "mymem: smart extraction enabled (LLM model: "
-        + llmModel
-        + ", timeoutMs: "
-        + llmTimeoutMs
-        + ", noise bank: ON)",
-      );
-
-      // feedbackLoop must be created here (inside the if block) so it can access
-      // noiseBank and smartExtractor which are declared in this scope.
-      if (feedbackLoopConfig.enabled) {
-        feedbackLoop = new FeedbackLoop({
-          noiseBank,
-          embedder,
-          admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
-          config: feedbackLoopConfig,
-          debugLog: (msg: string) => api.logger.debug(msg),
-          runtimeContext: {
-            workspaceDir: feedbackLoopWorkspaceDir,
-            dbPath: resolvedDbPath,
-            admissionConfig: feedbackLoopAdmissionConfig,
-          },
-        });
-      }
-    } catch (err) {
-      api.logger.warn(`mymem: smart extraction init failed, falling back to regex: ${String(err)}`);
-      const fallbackNoiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
-      fallbackNoiseBank.init(embedder).catch((initErr) =>
-        api.logger.debug(`mymem: fallback noise bank init: ${String(initErr)}`),
-      );
-      // Still create feedbackLoop even if extraction failed.
-      if (feedbackLoopConfig.enabled) {
-        feedbackLoop = new FeedbackLoop({
-          noiseBank: fallbackNoiseBank,
-          embedder,
-          admissionController: null,
-          config: feedbackLoopConfig,
-          debugLog: (msg: string) => api.logger.debug(msg),
-          runtimeContext: {
-            workspaceDir: feedbackLoopWorkspaceDir,
-            dbPath: resolvedDbPath,
-            admissionConfig: feedbackLoopAdmissionConfig,
-          },
-        });
-      }
-    }
-  } else if (feedbackLoopConfig.enabled) {
-    // smartExtraction is off but feedbackLoop may still want to learn noise.
-    feedbackLoop = new FeedbackLoop({
-      noiseBank: null,
-      embedder,
-      admissionController: null,
-      config: feedbackLoopConfig,
-      debugLog: (msg: string) => api.logger.debug(msg),
-      runtimeContext: {
-        workspaceDir: feedbackLoopWorkspaceDir,
-        dbPath: resolvedDbPath,
-        admissionConfig: feedbackLoopAdmissionConfig,
-      },
-    });
-  }
-
-  const extractionRateLimiter = createExtractionRateLimiter({
-    maxExtractionsPerHour: config.extractionThrottle?.maxExtractionsPerHour,
-  });
-
-  // Session Maps — MUST be in singleton state so they persist across scope refreshes
-  const reflectionErrorStateBySession = new Map<string, ReflectionErrorState>();
-  const reflectionDerivedBySession = new Map<string, { updatedAt: number; derived: string[] }>();
-  const reflectionByAgentCache = new Map<string, { updatedAt: number; invariants: string[]; derived: string[] }>();
-  const recallHistory = new Map<string, Map<string, number>>();
-  const turnCounter = new Map<string, number>();
-  const lastRawUserMessage = new Map<string, string>();
-  const hookEnhancementState = createHookEnhancementState();
-  const autoCaptureSeenTextCount = new Map<string, number>();
-  const autoCapturePendingIngressTexts = new Map<string, string[]>();
-  const autoCaptureRecentTexts = new Map<string, string[]>();
-
-  const logReg = isCliMode() ? api.logger.debug : api.logger.info;
-  logReg(
-    `mymem@${pluginVersion}: plugin registered [singleton init] `
-    + `(db: ${resolvedDbPath}, model: ${config.embedding.model || "text-embedding-3-small"})`,
-  );
-  logReg(`mymem: diagnostic build tag loaded (${DIAG_BUILD_TAG})`);
-
-  return {
-    config,
-    resolvedDbPath,
-    store,
-    embedder,
-    decayEngine,
-    recencyEngine,
-    hybridNoiseDetector,
-    tierManager,
-    retriever,
-    scopeManager,
-    migrator,
-    smartExtractor,
-    smartExtractionLlmClient,
-    extractionRateLimiter,
-    feedbackLoop,
-    telemetryStore,
-    reflectionErrorStateBySession,
-    reflectionDerivedBySession,
-    reflectionByAgentCache,
-    recallHistory,
-    turnCounter,
-    lastRawUserMessage,
-    hookEnhancementState,
-    autoCaptureSeenTextCount,
-    autoCapturePendingIngressTexts,
-    autoCaptureRecentTexts,
-  };
-}
-
 const myMemPlugin = {
   id: "mymem",
   name: "MyMem",
@@ -472,12 +167,12 @@ const myMemPlugin = {
     // Parse and validate configuration
     // ========================================================================
     // Phase 2 — Singleton state: initialize heavy resources exactly once.
-    // First register() call runs _initPluginState(); subsequent calls reuse
+    // First register() call runs initPluginState(); subsequent calls reuse
     // the same singleton via destructuring. This prevents:
     //   - Memory heap growth from repeated resource creation (~9 calls/process)
     //   - Accumulated session Maps being lost on re-registration
     // ========================================================================
-    if (!_singletonState) { _singletonState = _initPluginState(api); }
+    if (!getSingletonState()) { setSingletonState(initPluginState(api)); }
     const {
       config,
       resolvedDbPath,
@@ -505,7 +200,7 @@ const myMemPlugin = {
       autoCaptureSeenTextCount,
       autoCapturePendingIngressTexts,
       autoCaptureRecentTexts,
-    } = _singletonState;
+    } = getSingletonState()!;
 
     const resolveGovernanceCommandContext = async (event: any): Promise<{
       sessionKey: string;
@@ -954,7 +649,7 @@ const myMemPlugin = {
       mdMirror,
       smartExtractionLlmClient,
       resolvedDbPath,
-      singletonState: _singletonState!,
+      singletonState: getSingletonState()!,
       isCliMode,
     });
 
@@ -1149,5 +844,7 @@ export function resetRegistration() {
   // For hot-reload scenarios, the module is re-imported fresh.
   // (WeakSet.clear() does not exist, so we do nothing here.)
 }
+
+export { __resetSingletonForTesting__ };
 
 export default myMemPlugin;

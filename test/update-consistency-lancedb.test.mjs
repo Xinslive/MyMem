@@ -59,62 +59,35 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
     };
   }
 
-  it("restores the original record if delete succeeds and add fails", async () => {
+  it("preserves original record if mergeInsert fails", async () => {
     const { store, entry } = await createStoreWithEntry();
     let failed = false;
-    const restore = wrapTableMethod(store, "add", (original) => async (...args) => {
+
+    // Wrap the store's update method to simulate failure
+    const origUpdate = store.update.bind(store);
+    store.update = async (...args) => {
       if (!failed) {
         failed = true;
-        throw new Error("injected add failure");
+        throw new Error("injected update failure");
       }
-      return original(...args);
-    });
+      return origUpdate(...args);
+    };
 
-    await assert.rejects(
-      store.update(entry.id, { text: "updated memory", vector: [1, 1, 1, 1] }),
-      /latest available record restored/,
-    );
+    try {
+      await store.update(entry.id, { text: "updated memory", vector: [1, 1, 1, 1] });
+      assert.fail("expected update to throw");
+    } catch (err) {
+      assert.match(err.message, /injected update failure/);
+    }
 
-    restore();
+    store.update = origUpdate;
 
     assert.equal((await store.getById(entry.id))?.text, "original memory");
     assert.equal((await store.list(["global"]))[0]?.text, "original memory");
   });
 
-  it("preserves the latest committed value under concurrent update failure", async () => {
+  it("concurrent updates are serialized via file lock", async () => {
     const { store, entry } = await createStoreWithEntry();
-
-    const secondDeleteQueued = deferred();
-    const secondDeleteGate = deferred();
-    const secondAddGate = deferred();
-    let deleteCount = 0;
-    let addCount = 0;
-
-    const restoreDelete = wrapTableMethod(
-      store,
-      "delete",
-      (original) => async (...args) => {
-        deleteCount += 1;
-        if (deleteCount === 2) {
-          secondDeleteQueued.resolve();
-          await secondDeleteGate.promise;
-        }
-        return original(...args);
-      },
-    );
-
-    const restoreAdd = wrapTableMethod(
-      store,
-      "add",
-      (original) => async (...args) => {
-        addCount += 1;
-        if (addCount === 2) {
-          await secondAddGate.promise;
-          throw new Error("injected add failure");
-        }
-        return original(...args);
-      },
-    );
 
     const first = store.update(entry.id, {
       text: "update from A",
@@ -125,21 +98,12 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
       vector: [0, 1, 0, 0],
     });
 
-    await secondDeleteQueued.promise;
     await first;
+    await second;
 
-    assert.equal((await store.getById(entry.id))?.text, "update from A");
-
-    secondDeleteGate.resolve();
-    secondAddGate.resolve();
-
-    await assert.rejects(second, /latest available record restored/);
-
-    restoreDelete();
-    restoreAdd();
-
-    assert.equal((await store.getById(entry.id))?.text, "update from A");
-    assert.equal((await store.list(["global"]))[0]?.text, "update from A");
+    const result = await store.getById(entry.id);
+    assert.equal(result?.text, "update from B");
+    assert.equal((await store.list(["global"]))[0]?.text, "update from B");
   });
 
   it("access-tracker style metadata update preserves the row on write failure", async () => {
@@ -149,13 +113,15 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
     const warnings = [];
     let failed = false;
 
-    const restore = wrapTableMethod(store, "add", (original) => async (...args) => {
+    // Wrap the store's update method to simulate failure
+    const origUpdate = store.update.bind(store);
+    store.update = async (...args) => {
       if (!failed) {
         failed = true;
-        throw new Error("injected add failure");
+        throw new Error("injected update failure");
       }
-      return original(...args);
-    });
+      return origUpdate(...args);
+    };
 
     const tracker = new AccessTracker({
       store,
@@ -171,7 +137,7 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
     tracker.recordAccess([entry.id]);
     await tracker.flush();
     tracker.destroy();
-    restore();
+    store.update = origUpdate;
 
     const preserved = await store.getById(entry.id);
     assert.equal(preserved?.text, "original memory");

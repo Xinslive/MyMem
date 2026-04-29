@@ -82,3 +82,28 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
 
   return score;
 }
+
+// ── ID Resolution ──────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PREFIX_RE = /^[0-9a-f]{8,}$/i;
+
+export interface ResolvedMemoryId {
+  /** The original input ID. */
+  raw: string;
+  /** true when the ID is a full UUID; false when it's a short prefix. */
+  isFullId: boolean;
+}
+
+/**
+ * Validate and classify a memory ID as either a full UUID or a short hex prefix.
+ * Throws on invalid format.
+ */
+export function resolveMemoryId(id: string): ResolvedMemoryId {
+  const isFullId = UUID_RE.test(id);
+  if (isFullId) return { raw: id, isFullId: true };
+
+  if (PREFIX_RE.test(id)) return { raw: id, isFullId: false };
+
+  throw new Error(`Invalid memory ID format: ${id}`);
+}

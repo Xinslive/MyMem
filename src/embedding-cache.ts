@@ -1,8 +1,23 @@
-import { createHash } from "node:crypto";
-
 interface CacheEntry {
   vector: number[];
   createdAt: number;
+}
+
+/** Threshold below which the raw string is used as cache key (avoids hashing). */
+const SHORT_KEY_THRESHOLD = 200;
+
+/**
+ * FNV-1a 32-bit hash — fast non-cryptographic hash for cache keys.
+ * ~10x faster than SHA-256 for typical embedding text lengths.
+ */
+function fnv1a(input: string): string {
+  let h = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193); // FNV prime
+  }
+  // Convert to unsigned 32-bit hex, zero-padded to 8 chars
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 export class EmbeddingCache {
@@ -28,8 +43,11 @@ export class EmbeddingCache {
   }
 
   key(text: string, task?: string): string {
-    const hash = createHash("sha256").update(`${task || ""}:${text}`).digest("hex").slice(0, 24);
-    return hash;
+    const composite = `${task || ""}:${text}`;
+    // Short text: use raw string as key (no hash overhead)
+    if (composite.length <= SHORT_KEY_THRESHOLD) return composite;
+    // Long text: fast FNV-1a hash
+    return fnv1a(composite);
   }
 
   get(text: string, task?: string): number[] | undefined {

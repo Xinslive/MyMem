@@ -957,6 +957,20 @@ export class Embedder {
     }
   }
 
+  /**
+   * Warm up the embedding provider with a dummy request.
+   * Call during plugin init to pre-establish connections and avoid cold-start
+   * latency on the first real query.
+   */
+  async warmup(): Promise<void> {
+    try {
+      await this.embedQuery("warmup");
+    } catch {
+      // Ignore warmup errors — the provider may not be ready yet.
+      // The actual query will retry with proper error handling.
+    }
+  }
+
   get cacheStats() {
     return {
       ...this._cache.stats,

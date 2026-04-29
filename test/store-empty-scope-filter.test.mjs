@@ -35,6 +35,9 @@ describe("MemoryStore empty scopeFilter semantics", () => {
         totalCount: 0,
         scopeCounts: {},
         categoryCounts: {},
+        recentActivity: { last24h: 0, last7d: 0 },
+        tierDistribution: {},
+        healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
       });
       assert.strictEqual(await store.getById(entry.id, []), null);
       await assert.rejects(() => store.delete(entry.id, []), /outside accessible scopes/);

@@ -112,6 +112,43 @@ export class MemoryRetriever {
     return this._statsCollector;
   }
 
+  /**
+   * Compute a confidence score (0-1) for a retrieval result.
+   * Combines multiple signals:
+   * - Retrieval score (primary signal)
+   * - Recency (newer memories score higher)
+   * - Access count (frequently accessed memories are more reliable)
+   * - Confidence from metadata (self-reported confidence)
+   */
+  private computeConfidence(result: RetrievalResult): number {
+    const meta = result.entry._parsedMeta;
+    if (!meta) return Math.min(1, result.score);
+
+    // Base: retrieval score (0-1)
+    const baseScore = Math.min(1, Math.max(0, result.score));
+
+    // Recency: exponential decay, half-life = 30 days
+    const ageMs = Date.now() - (result.entry.timestamp || 0);
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    const recencyFactor = Math.exp(-0.693 * ageDays / 30); // ln(2)/30
+
+    // Access frequency: log scale, saturates at ~10 accesses
+    const accessCount = meta.access_count || 0;
+    const accessFactor = Math.min(1, Math.log2(1 + accessCount) / 3.32); // log2(10) ≈ 3.32
+
+    // Metadata confidence (self-reported)
+    const metaConfidence = meta.confidence || 0.7;
+
+    // Weighted combination
+    const confidence =
+      baseScore * 0.5 +
+      recencyFactor * 0.2 +
+      accessFactor * 0.15 +
+      metaConfidence * 0.15;
+
+    return Math.min(1, Math.max(0, confidence));
+  }
+
   async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
     const { query, limit, scopeFilter, category, source, signal, candidatePoolSize, overFetchMultiplier } = context;
     const safeLimit = clampInt(limit, 1, 20);
@@ -339,8 +376,7 @@ export class MemoryRetriever {
       // Filter expired memories early — before scoring — so they don't
       // occupy candidate slots that should go to live memories.
       const unexpired = filtered.filter((r) => {
-        const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
-        return !isMemoryExpired(metadata);
+        return !isMemoryExpired(r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, r.entry));
       });
       if (diagnostics) {
         diagnostics.vectorResultCount = unexpired.length;
@@ -410,6 +446,12 @@ export class MemoryRetriever {
       denoised.sort((a, b) => b.score - a.score);
       const deduplicated = applyMMRDiversity(denoised);
       const finalResults = deduplicated.slice(0, limit);
+
+      // Attach confidence scores
+      for (const result of finalResults) {
+        result.confidence = this.computeConfidence(result);
+      }
+
       trace?.startStage("final_limit", deduplicated.map((r) => r.entry.id));
       trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
       if (diagnostics) {
@@ -453,8 +495,7 @@ export class MemoryRetriever {
     });
     // Filter expired memories early — before scoring
     const unexpiredResults = mustContainFiltered.filter((r) => {
-      const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
-      return !isMemoryExpired(metadata);
+      return !isMemoryExpired(r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, r.entry));
     });
     const mapped = unexpiredResults.map(
       (result, index) =>
@@ -541,6 +582,12 @@ export class MemoryRetriever {
     denoised.sort((a, b) => b.score - a.score);
     const deduplicated = applyMMRDiversity(denoised);
     const finalResults = deduplicated.slice(0, limit);
+
+    // Attach confidence scores
+    for (const result of finalResults) {
+      result.confidence = this.computeConfidence(result);
+    }
+
     trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
 
@@ -708,8 +755,7 @@ export class MemoryRetriever {
 
       // Filter expired memories early — before rerank/scoring
       const filtered = scoreFiltered.filter((r) => {
-        const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
-        return !isMemoryExpired(metadata);
+        return !isMemoryExpired(r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, r.entry));
       });
       if (diagnostics) diagnostics.stageCounts.afterMinScore = filtered.length;
 
@@ -822,6 +868,12 @@ export class MemoryRetriever {
       denoised.sort((a, b) => b.score - a.score);
       const deduplicated = applyMMRDiversity(denoised);
       const finalResults = deduplicated.slice(0, limit);
+
+      // Attach confidence scores
+      for (const result of finalResults) {
+        result.confidence = this.computeConfidence(result);
+      }
+
       trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
       if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
 

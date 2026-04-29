@@ -1,4 +1,5 @@
 import type { Logger } from "./logger.js";
+import type { SmartMemoryMetadata } from "./smart-metadata.js";
 
 export interface MemoryEntry {
   id: string;
@@ -9,6 +10,8 @@ export interface MemoryEntry {
   importance: number;
   timestamp: number;
   metadata?: string; // JSON string for extensible metadata
+  /** Cached parsed metadata — avoids repeated JSON.parse across retrieval pipeline. */
+  _parsedMeta?: SmartMemoryMetadata;
 }
 
 export interface MemorySearchResult {

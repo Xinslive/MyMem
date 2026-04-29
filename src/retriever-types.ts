@@ -110,6 +110,12 @@ export interface RetrievalResult extends MemorySearchResult {
     fused?: { score: number };
     reranked?: { score: number };
   };
+  /**
+   * Confidence score (0-1) indicating overall result quality.
+   * Combines retrieval score, recency, access count, and decay signals.
+   * Higher = more confident the result is relevant and current.
+   */
+  confidence?: number;
 }
 
 export interface RetrievalDiagnostics {

@@ -720,3 +720,49 @@ export function updateSupportStats(
 
   return { global_strength, total_observations: totalObs, slices };
 }
+
+// ── Lazy Metadata ──────────────────────────────────────────────────────
+
+/**
+ * Lazy-parsing wrapper for metadata JSON strings.
+ * Parses on first access and caches the result.
+ * Provides structured field access without repeated JSON.parse.
+ */
+export class LazyMetadata {
+  private _raw: string | undefined;
+  private _entry: EntryLike;
+  private _parsed: SmartMemoryMetadata | null = null;
+
+  constructor(raw: string | undefined, entry: EntryLike = {}) {
+    this._raw = raw;
+    this._entry = entry;
+  }
+
+  /** Get the fully parsed SmartMemoryMetadata (cached after first call). */
+  get value(): SmartMemoryMetadata {
+    if (!this._parsed) {
+      this._parsed = parseSmartMetadata(this._raw, this._entry);
+    }
+    return this._parsed;
+  }
+
+  /** Access a specific field. Returns undefined if not set. */
+  get<K extends keyof SmartMemoryMetadata>(field: K): SmartMemoryMetadata[K] {
+    return this.value[field];
+  }
+
+  /** Check if a field exists and has a truthy value. */
+  has(field: keyof SmartMemoryMetadata): boolean {
+    return !!this.value[field];
+  }
+
+  /** Get the raw JSON string. */
+  get raw(): string | undefined {
+    return this._raw;
+  }
+
+  /** Whether the metadata has been parsed yet. */
+  get isParsed(): boolean {
+    return this._parsed !== null;
+  }
+}

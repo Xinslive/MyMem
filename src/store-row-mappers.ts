@@ -1,7 +1,13 @@
 import type { MemoryEntry } from "./store-types.js";
+import { parseSmartMetadata } from "./smart-metadata.js";
 
 export function toLanceRows(entries: MemoryEntry[]): Record<string, unknown>[] {
-  return entries.map((entry) => ({ ...entry }));
+  // Strip internal cache fields before writing to LanceDB
+  return entries.map((entry) => {
+    const { _parsedMeta, ...rest } = entry;
+    void _parsedMeta; // explicitly unused — just stripped
+    return { ...rest };
+  });
 }
 
 export function toNumberVector(value: unknown): number[] {
@@ -12,7 +18,7 @@ export function toNumberVector(value: unknown): number[] {
 }
 
 export function mapRowToMemoryEntry(row: any, includeVector = true): MemoryEntry {
-  return {
+  const entry: MemoryEntry = {
     id: row.id as string,
     text: row.text as string,
     vector: includeVector ? toNumberVector(row.vector) : [],
@@ -22,4 +28,7 @@ export function mapRowToMemoryEntry(row: any, includeVector = true): MemoryEntry
     timestamp: Number(row.timestamp),
     metadata: (row.metadata as string) || "{}",
   };
+  // Eagerly parse and cache metadata to avoid repeated JSON.parse downstream
+  entry._parsedMeta = parseSmartMetadata(entry.metadata, entry);
+  return entry;
 }

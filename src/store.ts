@@ -6,7 +6,7 @@ import type * as LanceDB from "@lancedb/lancedb";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./smart-metadata.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
 
@@ -25,6 +25,7 @@ import {
   isScalarIndexType,
   recommendedVectorPartitions,
   scoreLexicalHit,
+  resolveMemoryId,
 } from "./store-sql-utils.js";
 import { toLanceRows, toNumberVector, mapRowToMemoryEntry } from "./store-row-mappers.js";
 import { loadLanceDB } from "./lancedb-loader.js";
@@ -93,12 +94,32 @@ export class MemoryStore {
   private _batchBuffer: MemoryEntry[] = [];
   private _batchActive = false;
 
+  // In-process serialization chain (Issue #598)
+  private _serialChain: Promise<void> = Promise.resolve();
+
   /** Logger instance for structured logging. */
   private log: Logger;
 
   /** Enter batch mode — subsequent store() calls buffer instead of writing immediately. */
   startBatch(): void {
     this._batchActive = true;
+  }
+
+  /**
+   * Serialize concurrent async operations through a promise chain.
+   * Each call waits for the previous one to complete before executing.
+   * Prevents unbounded memory growth by cleaning up resolved promises.
+   */
+  async runSerializedUpdate<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this._serialChain;
+    let resolve: () => void;
+    this._serialChain = new Promise<void>((r) => { resolve = r; });
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      resolve!();
+    }
   }
 
   /**
@@ -655,22 +676,12 @@ export class MemoryStore {
 
     if (rows.length === 0) return null;
 
-    const row = rows[0];
-    const rowScope = (row.scope as string | undefined) ?? "global";
-    if (scopeFilter && scopeFilter.length > 0 && !scopeFilter.includes(rowScope)) {
+    const entry = mapRowToMemoryEntry(rows[0]);
+    if (scopeFilter && scopeFilter.length > 0 && !scopeFilter.includes(entry.scope)) {
       return null;
     }
 
-    return {
-      id: row.id as string,
-      text: row.text as string,
-      vector: toNumberVector(row.vector),
-      category: row.category as MemoryEntry["category"],
-      scope: rowScope,
-      importance: Number(row.importance),
-      timestamp: Number(row.timestamp),
-      metadata: (row.metadata as string) || "{}",
-    };
+    return entry;
   }
 
   async vectorSearch(vector: number[], limit = 5, minScore = 0.3, scopeFilter?: string[], options?: { excludeInactive?: boolean; overFetchMultiplier?: number }): Promise<MemorySearchResult[]> {
@@ -692,12 +703,8 @@ export class MemoryStore {
     let query = this.table!.vectorSearch(vector).distanceType('cosine').limit(fetchLimit);
 
     // Apply scope filter if provided
-    if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      query = query.where(`(${scopeConditions}) OR scope IS NULL`); // NULL for backward compatibility
-    }
+    const scopeWhere = buildScopeWhereClause(scopeFilter);
+    if (scopeWhere) query = query.where(scopeWhere);
 
     const results = await query.toArray();
     const mapped: MemorySearchResult[] = [];
@@ -708,30 +715,11 @@ export class MemoryStore {
 
       if (score < minScore) continue;
 
-      const rowScope = (row.scope as string | undefined) ?? "global";
+      const entry = mapRowToMemoryEntry(row);
 
-      // Double-check scope filter in application layer
-      if (
-        scopeFilter &&
-        scopeFilter.length > 0 &&
-        !scopeFilter.includes(rowScope)
-      ) {
-        continue;
-      }
-
-      const entry: MemoryEntry = {
-        id: row.id as string,
-        text: row.text as string,
-        vector: toNumberVector(row.vector),
-        category: row.category as MemoryEntry["category"],
-        scope: rowScope,
-        importance: Number(row.importance),
-        timestamp: Number(row.timestamp),
-        metadata: (row.metadata as string) || "{}",
-      };
-
+      // Scope filter already applied in SQL WHERE — skip redundant app-layer check
       // Skip inactive (superseded) records when requested
-      if (inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
+      if (inactiveFilter && !isMemoryActiveAt(entry._parsedMeta!)) {
         continue;
       }
 
@@ -768,49 +756,24 @@ export class MemoryStore {
       let searchQuery = this.table!.search(query, "fts").limit(fetchLimit);
 
       // Apply scope filter if provided
-      if (scopeFilter && scopeFilter.length > 0) {
-        const scopeConditions = scopeFilter
-          .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-          .join(" OR ");
-        searchQuery = searchQuery.where(
-          `(${scopeConditions}) OR scope IS NULL`,
-        );
-      }
+      const scopeWhere = buildScopeWhereClause(scopeFilter);
+      if (scopeWhere) searchQuery = searchQuery.where(scopeWhere);
 
       const results = await searchQuery.toArray();
       const mapped: MemorySearchResult[] = [];
 
       for (const row of results) {
-        const rowScope = (row.scope as string | undefined) ?? "global";
-
-        // Double-check scope filter in application layer
-        if (
-          scopeFilter &&
-          scopeFilter.length > 0 &&
-          !scopeFilter.includes(rowScope)
-        ) {
-          continue;
-        }
-
         // LanceDB FTS _score is raw BM25 (unbounded). Normalize with sigmoid.
         // LanceDB may return BigInt for numeric columns; coerce safely.
         const rawScore = row._score != null ? Number(row._score) : 0;
         const normalizedScore =
           rawScore > 0 ? 1 / (1 + Math.exp(-rawScore / 5)) : 0.5;
 
-        const entry: MemoryEntry = {
-            id: row.id as string,
-            text: row.text as string,
-            vector: toNumberVector(row.vector),
-            category: row.category as MemoryEntry["category"],
-            scope: rowScope,
-            importance: Number(row.importance),
-            timestamp: Number(row.timestamp),
-            metadata: (row.metadata as string) || "{}",
-        };
+        const entry = mapRowToMemoryEntry(row);
 
+        // Scope filter already applied in SQL WHERE — skip redundant app-layer check
         // Skip inactive (superseded) records when requested
-        if (inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
+        if (inactiveFilter && !isMemoryActiveAt(entry._parsedMeta!)) {
           continue;
         }
 
@@ -845,45 +808,26 @@ export class MemoryStore {
       "metadata",
     ]);
 
-    if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map(scope => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      searchQuery = searchQuery.where(`(${scopeConditions}) OR scope IS NULL`);
-    }
+    const scopeWhere = buildScopeWhereClause(scopeFilter);
+    if (scopeWhere) searchQuery = searchQuery.where(scopeWhere);
 
-    const rows = await searchQuery.limit(1000).toArray();
+    const rows = await searchQuery.limit(limit + 500).toArray();
     const matches: MemorySearchResult[] = [];
 
     for (const row of rows) {
-      const rowScope = (row.scope as string | undefined) ?? "global";
-      if (scopeFilter && scopeFilter.length > 0 && !scopeFilter.includes(rowScope)) {
-        continue;
-      }
-
-      const entry: MemoryEntry = {
-        id: row.id as string,
-        text: row.text as string,
-        vector: toNumberVector(row.vector),
-        category: row.category as MemoryEntry["category"],
-        scope: rowScope,
-        importance: Number(row.importance),
-        timestamp: Number(row.timestamp),
-        metadata: (row.metadata as string) || "{}",
-      };
-
-      const metadata = parseSmartMetadata(entry.metadata, entry);
+      const entry = mapRowToMemoryEntry(row, false);
+      const meta = entry._parsedMeta!;
 
       // Skip inactive (superseded) records when requested
-      if (options?.excludeInactive && !isMemoryActiveAt(metadata)) {
+      if (options?.excludeInactive && !isMemoryActiveAt(meta)) {
         continue;
       }
 
       const score = scoreLexicalHit(trimmedQuery, [
         { text: entry.text, weight: 1 },
-        { text: metadata.l0_abstract, weight: 0.98 },
-        { text: metadata.l1_overview, weight: 0.92 },
-        { text: metadata.l2_content, weight: 0.96 },
+        { text: meta.l0_abstract, weight: 0.98 },
+        { text: meta.l1_overview, weight: 0.92 },
+        { text: meta.l2_content, weight: 0.96 },
       ]);
 
       if (score <= 0) continue;
@@ -902,19 +846,10 @@ export class MemoryStore {
       throw new Error(`Memory ${id} is outside accessible scopes`);
     }
 
-    // Support both full UUID and short prefix (8+ hex chars)
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const prefixRegex = /^[0-9a-f]{8,}$/i;
-    const isFullId = uuidRegex.test(id);
-    const isPrefix = !isFullId && prefixRegex.test(id);
-
-    if (!isFullId && !isPrefix) {
-      throw new Error(`Invalid memory ID format: ${id}`);
-    }
+    const resolved = resolveMemoryId(id);
 
     let candidates: any[];
-    if (isFullId) {
+    if (resolved.isFullId) {
       const safeId = escapeSqlLiteral(id);
       candidates = await this.table!.query()
         .select(["id", "scope"])
@@ -1106,19 +1041,10 @@ export class MemoryStore {
     }
 
     return this.runWithFileLock(async () => {
-      // Support both full UUID and short prefix (8+ hex chars), same as delete()
-      const uuidRegex =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const prefixRegex = /^[0-9a-f]{8,}$/i;
-      const isFullId = uuidRegex.test(id);
-      const isPrefix = !isFullId && prefixRegex.test(id);
-
-      if (!isFullId && !isPrefix) {
-        throw new Error(`Invalid memory ID format: ${id}`);
-      }
+      const resolved = resolveMemoryId(id);
 
       let rows: any[];
-      if (isFullId) {
+      if (resolved.isFullId) {
         const safeId = escapeSqlLiteral(id);
         rows = await this.table!.query()
           .select(FULL_ENTRY_COLUMNS as unknown as string[])
@@ -1140,28 +1066,16 @@ export class MemoryStore {
 
       if (rows.length === 0) return null;
 
-      const row = rows[0];
-      const rowScope = (row.scope as string | undefined) ?? "global";
+      const original = mapRowToMemoryEntry(rows[0]);
 
       // Check scope permissions
       if (
         scopeFilter &&
         scopeFilter.length > 0 &&
-        !scopeFilter.includes(rowScope)
+        !scopeFilter.includes(original.scope)
       ) {
         throw new Error(`Memory ${id} is outside accessible scopes`);
       }
-
-      const original: MemoryEntry = {
-        id: row.id as string,
-        text: row.text as string,
-        vector: toNumberVector(row.vector),
-        category: row.category as MemoryEntry["category"],
-        scope: rowScope,
-        importance: Number(row.importance),
-        timestamp: Number(row.timestamp),
-        metadata: (row.metadata as string) || "{}",
-      };
 
       // Build updated entry, preserving original timestamp
       const updated: MemoryEntry = {
@@ -1169,7 +1083,6 @@ export class MemoryStore {
         text: updates.text ?? original.text,
         vector: updates.vector ?? original.vector,
         category: updates.category ?? original.category,
-        scope: rowScope,
         importance: updates.importance ?? original.importance,
         timestamp: original.timestamp, // preserve original
         metadata: updates.metadata ?? original.metadata,
@@ -1315,12 +1228,8 @@ export class MemoryStore {
 
     const conditions: string[] = [`timestamp < ${maxTimestamp}`];
 
-    if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      conditions.push(`((${scopeConditions}) OR scope IS NULL)`);
-    }
+    const scopeWhere = buildScopeWhereClause(scopeFilter);
+    if (scopeWhere) conditions.push(scopeWhere);
 
     const whereClause = conditions.join(" AND ");
 
