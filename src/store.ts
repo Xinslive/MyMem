@@ -676,6 +676,10 @@ export class MemoryStore {
   async vectorSearch(vector: number[], limit = 5, minScore = 0.3, scopeFilter?: string[], options?: { excludeInactive?: boolean; overFetchMultiplier?: number }): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
 
+    // Ensure vector index exists before searching — without this, LanceDB
+    // falls back to exhaustive scan which can take 5-10x longer.
+    await this.maybeCreateDeferredVectorIndex();
+
     if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
 
     const safeLimit = clampInt(limit, 1, 20);
