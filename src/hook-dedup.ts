@@ -2,14 +2,17 @@
  * Hook Event Deduplication Utilities
  *
  * Guards against duplicate hook event processing in multi-scope environments.
+ * Uses a TTL-based Map for automatic expiry of stale entries.
  */
 
-// WeakSet keyed by API instance — each distinct API object tracks its own initialized state.
-const _hookEventDedup = new Set<string>();
+const DEDUP_TTL_MS = 60_000; // 60s TTL per entry
+const DEDUP_MAX_SIZE = 200;
+
+const _hookEventDedup = new Map<string, number>(); // key → timestamp
 
 /**
  * Returns true if this event was already processed (skip), false if first
- * occurrence (proceed). Automatically prunes Set when size > 200.
+ * occurrence (proceed). Automatically prunes expired entries when size > 200.
  */
 export function dedupHookEvent(handlerName: string, event: any): boolean {
   const sk = typeof event?.sessionKey === "string" ? event.sessionKey : "?";
@@ -17,14 +20,24 @@ export function dedupHookEvent(handlerName: string, event: any): boolean {
     ? event.timestamp.getTime()
     : (typeof event?.timestamp === "number" ? event.timestamp : Date.now());
   const key = `${handlerName}:${sk}:${ts}`;
+  const now = Date.now();
+
   if (_hookEventDedup.has(key)) return true; // duplicate — skip
-  _hookEventDedup.add(key);
-  if (_hookEventDedup.size > 200) {
-    // Keep newest 100: convert to array (preserves insertion order), slice last 100, clear, re-add
-    const arr = Array.from(_hookEventDedup);
-    const newest100 = arr.slice(-100);
-    _hookEventDedup.clear();
-    for (const k of newest100) _hookEventDedup.add(k);
+  _hookEventDedup.set(key, now);
+
+  if (_hookEventDedup.size > DEDUP_MAX_SIZE) {
+    // Prune expired entries first
+    for (const [k, entryTs] of _hookEventDedup) {
+      if (now - entryTs > DEDUP_TTL_MS) _hookEventDedup.delete(k);
+    }
+    // If still over limit after TTL pruning, remove oldest entries
+    if (_hookEventDedup.size > DEDUP_MAX_SIZE) {
+      const entries = [..._hookEventDedup.entries()].sort((a, b) => a[1] - b[1]);
+      const removeCount = _hookEventDedup.size - Math.floor(DEDUP_MAX_SIZE / 2);
+      for (let i = 0; i < removeCount; i++) {
+        _hookEventDedup.delete(entries[i][0]);
+      }
+    }
   }
   return false; // first occurrence — proceed
 }

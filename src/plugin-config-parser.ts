@@ -199,7 +199,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoRecallPerItemMaxChars: parsePositiveInt(cfg.autoRecallPerItemMaxChars) ?? 200,
     autoRecallMaxQueryLength: clampInt(parsePositiveInt(cfg.autoRecallMaxQueryLength) ?? 2_000, 100, 10_000),
     autoRecallCandidatePoolSize: clampInt(parsePositiveInt(cfg.autoRecallCandidatePoolSize) ?? 12, 4, 30),
-    autoRecallTimeoutMs: parsePositiveInt(cfg.autoRecallTimeoutMs) ?? 8000,
+    autoRecallTimeoutMs: parsePositiveInt(cfg.autoRecallTimeoutMs) ?? 20_000,
     maxRecallPerTurn: parsePositiveInt(cfg.maxRecallPerTurn) ?? 10,
     recallMode: (cfg.recallMode === "full" || cfg.recallMode === "summary" || cfg.recallMode === "adaptive" || cfg.recallMode === "off") ? cfg.recallMode : "full",
     autoRecallExcludeAgents: Array.isArray(cfg.autoRecallExcludeAgents)

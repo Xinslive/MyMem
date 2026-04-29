@@ -4,8 +4,8 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { PluginConfig, ReflectionThinkLevel, SessionStrategy, ReflectionInjectMode, ReflectionErrorSignal, ReflectionErrorState, AgentWorkspaceMap } from "./src/plugin-types.js";
-import { DEFAULT_SELF_IMPROVEMENT_REMINDER, SELF_IMPROVEMENT_NOTE_PREFIX, DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, DEFAULT_REFLECTION_SESSION_TTL_MS, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS, REFLECTION_FALLBACK_MARKER, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
+import type { PluginConfig, SessionStrategy, ReflectionErrorState, AgentWorkspaceMap } from "./src/plugin-types.js";
+import { DEFAULT_SELF_IMPROVEMENT_REMINDER, SELF_IMPROVEMENT_NOTE_PREFIX, DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, REFLECTION_FALLBACK_MARKER, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { readFile, readdir, writeFile, mkdir, appendFile, unlink, stat } from "node:fs/promises";
@@ -22,19 +22,17 @@ import { spawn } from "node:child_process";
 const isCliMode = () => process.env.OPENCLAW_CLI === "1";
 
 // Import extracted utilities
-import { redactSecrets, containsErrorSignal, summarizeErrorText, sha256Hex, normalizeErrorSignature, extractTextFromToolResult, summarizeRecentConversationMessages, extractTextContent, shouldSkipReflectionMessage, isExplicitRememberCommand, summarizeAgentEndMessages } from "./src/session-utils.js";
+import { redactSecrets, summarizeRecentConversationMessages, extractTextContent, shouldSkipReflectionMessage, isExplicitRememberCommand, summarizeAgentEndMessages } from "./src/session-utils.js";
 import { resolveEnvVars, parsePositiveInt, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveHookAgentId, resolveSourceFromSessionKey, pruneMapIfOver, resolveLlmTimeoutMs } from "./src/config-utils.js";
 import { clampInt } from "./src/utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir, getDefaultMdMirrorDir, resolveWorkspaceDirFromContext } from "./src/path-utils.js";
 import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress, buildAutoCaptureConversationKeyFromSessionKey, isInternalReflectionSessionKey } from "./src/auto-capture-utils.js";
-import { withTimeout, tryParseJsonObject, extractJsonObjectFromOutput, extractReflectionTextFromCliResult, clipDiagnostic, asNonEmptyString, sanitizeFileToken } from "./src/cli-utils.js";
-import { generateReflectionText } from "./src/reflection-cli.js";
-import { resolveRuntimeEmbeddedPiRunner } from "./src/openclaw-extension-utils.js";
+import { withTimeout, tryParseJsonObject, extractJsonObjectFromOutput, extractReflectionTextFromCliResult, clipDiagnostic, asNonEmptyString } from "./src/cli-utils.js";
 import { parsePluginConfig } from "./src/plugin-config-parser.js";
 import { getPluginVersion } from "./src/version-utils.js";
 import { sortFileNamesByMtimeDesc } from "./src/file-utils.js";
 import { findPreviousSessionFile, resolveAgentWorkspaceMap, createMdMirrorWriter, createAdmissionRejectionAuditWriter, type MdMirrorWriter } from "./src/workspace-utils.js";
-import { readSessionConversationForReflection, readSessionConversationWithResetFallback, ensureDailyLogFile, buildReflectionPrompt, buildReflectionFallbackText, loadSelfImprovementReminderContent } from "./src/session-recovery-utils.js";
+import { readSessionConversationForReflection, readSessionConversationWithResetFallback, buildReflectionPrompt, buildReflectionFallbackText, loadSelfImprovementReminderContent } from "./src/session-recovery-utils.js";
 import { resolveAgentPrimaryModelRef, isAgentDeclaredInConfig, splitProviderModel } from "./src/agent-config-utils.js";
 import { TelemetryStore, resolveTelemetryDir } from "./src/telemetry.js";
 
@@ -72,18 +70,9 @@ import {
   recordExperienceCompilerRun,
 } from "./src/experience-compiler.js";
 import { runWithReflectionTransientRetryOnce } from "./src/reflection-retry.js";
-import { resolveReflectionSessionSearchDirs, stripResetSuffix } from "./src/session-recovery.js";
-import {
-  storeReflectionToLanceDB,
-  loadAgentReflectionSlicesFromEntries,
-  DEFAULT_REFLECTION_DERIVED_MAX_AGE_MS,
-} from "./src/reflection-store.js";
-import {
-  extractReflectionLearningGovernanceCandidates,
-  extractInjectableReflectionMappedMemoryItems,
-} from "./src/reflection-slices.js";
-import { createReflectionEventId } from "./src/reflection-event-store.js";
-import { buildReflectionMappedMetadata } from "./src/reflection-mapped-metadata.js";
+import { resolveReflectionSessionSearchDirs } from "./src/session-recovery.js";
+import { storeReflectionToLanceDB } from "./src/reflection-store.js";
+import { extractReflectionLearningGovernanceCandidates } from "./src/reflection-slices.js";
 import { createMemoryCLI } from "./cli.js";
 import { isNoise } from "./src/noise-filter.js";
 import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
@@ -143,7 +132,9 @@ const _registeredApis = new WeakSet<OpenClawPluginApi>();
 // ============================================================================
 //
 // OpenClaw calls register() once per scope init (5× at startup, 4× per inbound
-import { dedupHookEvent } from "./src/hook-dedup.js";
+import { registerMemoryReflectionHook } from "./src/reflection-hook.js";
+import { registerSessionMemoryHook } from "./src/session-memory-hook.js";
+import { createAutoBackup } from "./src/auto-backup.js";
 import { registerAutoCaptureHook } from "./src/auto-capture-hook.js";
 import { registerAutoRecallHook } from "./src/auto-recall-hook.js";
 import { registerSelfImprovementHook } from "./src/self-improvement-hook.js";
@@ -515,111 +506,6 @@ const myMemPlugin = {
       autoCapturePendingIngressTexts,
       autoCaptureRecentTexts,
     } = _singletonState;
-
-    const pruneOldestByUpdatedAt = <T extends { updatedAt: number }>(map: Map<string, T>, maxSize: number) => {
-      if (map.size <= maxSize) return;
-      const sorted = [...map.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
-      const removeCount = map.size - maxSize;
-      for (let i = 0; i < removeCount; i++) {
-        const key = sorted[i]?.[0];
-        if (key) map.delete(key);
-      }
-    };
-
-    const pruneReflectionSessionState = (now = Date.now()) => {
-      for (const [key, state] of reflectionErrorStateBySession.entries()) {
-        if (now - state.updatedAt > DEFAULT_REFLECTION_SESSION_TTL_MS) {
-          reflectionErrorStateBySession.delete(key);
-        }
-      }
-      for (const [key, state] of reflectionDerivedBySession.entries()) {
-        if (now - state.updatedAt > DEFAULT_REFLECTION_SESSION_TTL_MS) {
-          reflectionDerivedBySession.delete(key);
-        }
-      }
-      pruneOldestByUpdatedAt(reflectionErrorStateBySession, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS);
-      pruneOldestByUpdatedAt(reflectionDerivedBySession, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS);
-    };
-
-    const getReflectionErrorState = (sessionKey: string): ReflectionErrorState => {
-      const key = sessionKey.trim();
-      const current = reflectionErrorStateBySession.get(key);
-      if (current) {
-        current.updatedAt = Date.now();
-        return current;
-      }
-      const created: ReflectionErrorState = { entries: [], lastInjectedCount: 0, signatureSet: new Set<string>(), updatedAt: Date.now() };
-      reflectionErrorStateBySession.set(key, created);
-      return created;
-    };
-
-    const addReflectionErrorSignal = (sessionKey: string, signal: ReflectionErrorSignal, dedupeEnabled: boolean) => {
-      if (!sessionKey.trim()) return;
-      pruneReflectionSessionState();
-      const state = getReflectionErrorState(sessionKey);
-      if (dedupeEnabled && state.signatureSet.has(signal.signatureHash)) return;
-      state.entries.push(signal);
-      state.signatureSet.add(signal.signatureHash);
-      state.updatedAt = Date.now();
-      if (state.entries.length > 30) {
-        const removed = state.entries.length - 30;
-        state.entries.splice(0, removed);
-        state.lastInjectedCount = Math.max(0, state.lastInjectedCount - removed);
-        state.signatureSet = new Set(state.entries.map((e) => e.signatureHash));
-      }
-    };
-
-    const getPendingReflectionErrorSignalsForPrompt = (sessionKey: string, maxEntries: number): ReflectionErrorSignal[] => {
-      pruneReflectionSessionState();
-      const state = reflectionErrorStateBySession.get(sessionKey.trim());
-      if (!state) return [];
-      state.updatedAt = Date.now();
-      state.lastInjectedCount = Math.min(state.lastInjectedCount, state.entries.length);
-      const pending = state.entries.slice(state.lastInjectedCount);
-      if (pending.length === 0) return [];
-      const clipped = pending.slice(-maxEntries);
-      state.lastInjectedCount = state.entries.length;
-      return clipped;
-    };
-
-    const loadAgentReflectionSlices = async (agentId: string, scopeFilter?: string[]) => {
-      const scopeKey = Array.isArray(scopeFilter)
-        ? `scopes:${[...scopeFilter].sort().join(",")}`
-        : "<NO_SCOPE_FILTER>";
-      const cacheKey = `${agentId}::${scopeKey}`;
-      const cached = reflectionByAgentCache.get(cacheKey);
-      if (cached && Date.now() - cached.updatedAt < 15_000) return cached;
-
-      // Prefer reflection-category rows to avoid full-table reads on bypass callers.
-      // Fall back to an uncategorized scan only when the category query produced no
-      // agent-owned reflection slices, preserving backward compatibility with mixed-schema stores.
-      let entries = await store.list(scopeFilter, "reflection", 240, 0);
-      let slices = loadAgentReflectionSlicesFromEntries({
-        entries,
-        agentId,
-        deriveMaxAgeMs: DEFAULT_REFLECTION_DERIVED_MAX_AGE_MS,
-      });
-      if (slices.invariants.length === 0 && slices.derived.length === 0) {
-        const legacyEntries = await store.list(scopeFilter, undefined, 240, 0);
-        entries = legacyEntries.filter((entry) => {
-          try {
-            const metadata = parseSmartMetadata(entry.metadata, entry);
-            return metadata.source === "reflection" && metadata.source_session === agentId;
-          } catch {
-            return false;
-          }
-        });
-        slices = loadAgentReflectionSlicesFromEntries({
-          entries,
-          agentId,
-          deriveMaxAgeMs: DEFAULT_REFLECTION_DERIVED_MAX_AGE_MS,
-        });
-      }
-      const { invariants, derived } = slices;
-      const next = { updatedAt: Date.now(), invariants, derived };
-      reflectionByAgentCache.set(cacheKey, next);
-      return next;
-    };
 
     const resolveGovernanceCommandContext = async (event: any): Promise<{
       sessionKey: string;
@@ -1059,501 +945,18 @@ const myMemPlugin = {
     // Integrated Memory Reflection (reflection)
     // ========================================================================
 
-    if (config.sessionStrategy === "memoryReflection") {
-      const reflectionMessageCount = config.memoryReflection?.messageCount ?? DEFAULT_REFLECTION_MESSAGE_COUNT;
-      const reflectionMaxInputChars = config.memoryReflection?.maxInputChars ?? DEFAULT_REFLECTION_MAX_INPUT_CHARS;
-      const reflectionTimeoutMs = config.memoryReflection?.timeoutMs ?? DEFAULT_REFLECTION_TIMEOUT_MS;
-      const reflectionThinkLevel = config.memoryReflection?.thinkLevel ?? DEFAULT_REFLECTION_THINK_LEVEL;
-      const reflectionAgentId = asNonEmptyString(config.memoryReflection?.agentId);
-      const reflectionErrorReminderMaxEntries =
-        parsePositiveInt(config.memoryReflection?.errorReminderMaxEntries) ?? DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES;
-      const reflectionDedupeErrorSignals = config.memoryReflection?.dedupeErrorSignals !== false;
-      const reflectionInjectMode = config.memoryReflection?.injectMode ?? "inheritance+derived";
-      const reflectionStoreToLanceDB = config.memoryReflection?.storeToLanceDB !== false;
-      const reflectionWriteLegacyCombined = config.memoryReflection?.writeLegacyCombined !== false;
-      const warnedInvalidReflectionAgentIds = new Set<string>();
-
-      const resolveReflectionRunAgentId = (cfg: unknown, sourceAgentId: string): string => {
-        if (!reflectionAgentId) return sourceAgentId;
-        if (isAgentDeclaredInConfig(cfg, reflectionAgentId)) return reflectionAgentId;
-
-        if (!warnedInvalidReflectionAgentIds.has(reflectionAgentId)) {
-          api.logger.warn(
-            `memory-reflection: memoryReflection.agentId "${reflectionAgentId}" not found in cfg.agents.list; ` +
-            `fallback to runtime agent "${sourceAgentId}".`
-          );
-          warnedInvalidReflectionAgentIds.add(reflectionAgentId);
-        }
-        return sourceAgentId;
-      };
-
-      api.on("after_tool_call", (event: any, ctx: any) => {
-        const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-        if (isInternalReflectionSessionKey(sessionKey)) return;
-        if (!sessionKey) return;
-        pruneReflectionSessionState();
-
-        if (typeof event.error === "string" && event.error.trim().length > 0) {
-          const signature = normalizeErrorSignature(event.error);
-          addReflectionErrorSignal(sessionKey, {
-            at: Date.now(),
-            toolName: event.toolName || "unknown",
-            summary: summarizeErrorText(event.error),
-            source: "tool_error",
-            signature,
-            signatureHash: sha256Hex(signature).slice(0, 16),
-          }, reflectionDedupeErrorSignals);
-          return;
-        }
-
-        const resultTextRaw = extractTextFromToolResult(event.result);
-        const resultText = resultTextRaw.length > DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS
-          ? resultTextRaw.slice(0, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS)
-          : resultTextRaw;
-        if (resultText && containsErrorSignal(resultText)) {
-          const signature = normalizeErrorSignature(resultText);
-          addReflectionErrorSignal(sessionKey, {
-            at: Date.now(),
-            toolName: event.toolName || "unknown",
-            summary: summarizeErrorText(resultText),
-            source: "tool_output",
-            signature,
-            signatureHash: sha256Hex(signature).slice(0, 16),
-          }, reflectionDedupeErrorSignals);
-        }
-      }, { priority: 15 });
-
-      api.on("before_prompt_build", async (_event: any, ctx: any) => {
-        const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-        // Skip reflection injection for sub-agent sessions.
-        if (sessionKey.includes(":subagent:")) return;
-        if (isInternalReflectionSessionKey(sessionKey)) return;
-        if (reflectionInjectMode !== "inheritance-only" && reflectionInjectMode !== "inheritance+derived") return;
-        try {
-          pruneReflectionSessionState();
-          const agentId = resolveHookAgentId(
-            typeof ctx.agentId === "string" ? ctx.agentId : undefined,
-            sessionKey,
-          );
-          const scopes = resolveScopeFilter(scopeManager, agentId);
-          const slices = await loadAgentReflectionSlices(agentId, scopes);
-          if (slices.invariants.length === 0) return;
-          const body = slices.invariants.slice(0, 6).map((line, i) => `${i + 1}. ${line}`).join("\n");
-          return {
-            prependContext: [
-              "<inherited-rules>",
-              "Stable rules inherited from mymem reflections. Treat as long-term behavioral constraints unless user overrides.",
-              body,
-              "</inherited-rules>",
-            ].join("\n"),
-          };
-        } catch (err) {
-          api.logger.warn(`memory-reflection: inheritance injection failed: ${String(err)}`);
-        }
-      }, { priority: 12 });
-
-      api.on("before_prompt_build", async (_event: any, ctx: any) => {
-        const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-        // Skip reflection injection for sub-agent sessions.
-        if (sessionKey.includes(":subagent:")) return;
-        if (isInternalReflectionSessionKey(sessionKey)) return;
-        const agentId = resolveHookAgentId(
-          typeof ctx.agentId === "string" ? ctx.agentId : undefined,
-          sessionKey,
-        );
-        pruneReflectionSessionState();
-
-        const blocks: string[] = [];
-        if (reflectionInjectMode === "inheritance+derived") {
-          try {
-            const scopes = resolveScopeFilter(scopeManager, agentId);
-            const derivedCache = sessionKey ? reflectionDerivedBySession.get(sessionKey) : null;
-            const derivedLines = derivedCache?.derived?.length
-              ? derivedCache.derived
-              : (await loadAgentReflectionSlices(agentId, scopes)).derived;
-            if (derivedLines.length > 0) {
-              blocks.push(
-                [
-                  "<derived-focus>",
-                  "Weighted recent derived execution deltas from reflection memory:",
-                  ...derivedLines.slice(0, 6).map((line, i) => `${i + 1}. ${line}`),
-                  "</derived-focus>",
-                ].join("\n")
-              );
-            }
-          } catch (err) {
-            api.logger.warn(`memory-reflection: derived injection failed: ${String(err)}`);
-          }
-        }
-
-        if (sessionKey) {
-          const pending = getPendingReflectionErrorSignalsForPrompt(sessionKey, reflectionErrorReminderMaxEntries);
-          if (pending.length > 0) {
-            blocks.push(
-              [
-                "<error-detected>",
-                "A tool error was detected. Consider logging this to `.learnings/ERRORS.md` if it is non-trivial or likely to recur.",
-                "Recent error signals:",
-                ...pending.map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary}`),
-                "</error-detected>",
-              ].join("\n")
-            );
-          }
-        }
-
-        if (blocks.length === 0) return;
-        return { prependContext: blocks.join("\n\n") };
-      }, { priority: 15 });
-
-      api.on("session_end", (_event: any, ctx: any) => {
-        const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey.trim() : "";
-        if (!sessionKey) return;
-        reflectionErrorStateBySession.delete(sessionKey);
-        reflectionDerivedBySession.delete(sessionKey);
-        pruneReflectionSessionState();
-      }, { priority: 20 });
-
-      // Global cross-instance re-entrant guard to prevent reflection loops.
-      // Each plugin instance used to have its own Map, so new instances created during
-      // embedded agent turns could bypass the guard. Using Symbol.for + globalThis
-      // ensures ALL instances share the same lock regardless of how many times the
-      // plugin is re-loaded by the runtime.
-      const GLOBAL_REFLECTION_LOCK = Symbol.for("openclaw.mymem.reflection-lock");
-      const getGlobalReflectionLock = (): Map<string, boolean> => {
-        const g = globalThis as Record<symbol, unknown>;
-        if (!g[GLOBAL_REFLECTION_LOCK]) g[GLOBAL_REFLECTION_LOCK] = new Map<string, boolean>();
-        return g[GLOBAL_REFLECTION_LOCK] as Map<string, boolean>;
-      };
-
-      // Serial loop guard: track last reflection time per sessionKey to prevent
-      // gateway-level re-triggering (e.g. session_end → new session → command:new)
-      const REFLECTION_SERIAL_GUARD = Symbol.for("openclaw.mymem.reflection-serial-guard");
-      const getSerialGuardMap = () => {
-        const g = globalThis as any;
-        if (!g[REFLECTION_SERIAL_GUARD]) g[REFLECTION_SERIAL_GUARD] = new Map<string, number>();
-        return g[REFLECTION_SERIAL_GUARD] as Map<string, number>;
-      };
-      const SERIAL_GUARD_COOLDOWN_MS = 120_000; // 2 minutes cooldown per sessionKey
-
-      const runMemoryReflection = async (event: any) => {
-        const sessionKey = typeof event.sessionKey === "string" ? event.sessionKey : "";
-
-        // Validate sessionKey BEFORE dedup — invalid/empty keys must NOT pollute the dedup set
-        if (!sessionKey) {
-          // skip events without a valid sessionKey — they are not meaningful for reflection
-          return;
-        }
-
-        if (dedupHookEvent("reflection", event)) return;
-        // Guard against re-entrant calls for the same session (e.g. file-write triggering another command:new)
-        // Uses global lock shared across all plugin instances to prevent loop amplification.
-        const globalLock = getGlobalReflectionLock();
-        if (sessionKey && globalLock.get(sessionKey)) {
-          api.logger.info(`memory-reflection: skipping re-entrant call for sessionKey=${sessionKey}; already running (global guard)`);
-          return;
-        }
-        // Serial loop guard: skip if a reflection for this sessionKey completed recently
-        if (sessionKey) {
-          const serialGuard = getSerialGuardMap();
-          const lastRun = serialGuard.get(sessionKey);
-          if (lastRun && (Date.now() - lastRun) < SERIAL_GUARD_COOLDOWN_MS) {
-            api.logger.info(`memory-reflection: skipping serial re-trigger for sessionKey=${sessionKey}; last run ${(Date.now() - lastRun) / 1000}s ago (cooldown=${SERIAL_GUARD_COOLDOWN_MS / 1000}s)`);
-            return;
-          }
-        }
-        if (sessionKey) globalLock.set(sessionKey, true);
-        let reflectionRan = false;
-        try {
-          pruneReflectionSessionState();
-          const action = String(event?.action || "unknown");
-          const context = (event.context || {}) as Record<string, unknown>;
-          const cfg = context.cfg;
-          const workspaceDir = resolveWorkspaceDirFromContext(context);
-          if (!cfg) {
-            api.logger.warn(`memory-reflection: command:${action} missing cfg in hook context; skip reflection`);
-            return;
-          }
-
-          const sessionEntry = (context.previousSessionEntry || context.sessionEntry || {}) as Record<string, unknown>;
-          const currentSessionId = typeof sessionEntry.sessionId === "string" ? sessionEntry.sessionId : "unknown";
-          let currentSessionFile = typeof sessionEntry.sessionFile === "string" ? sessionEntry.sessionFile : undefined;
-          const sourceAgentId = parseAgentIdFromSessionKey(sessionKey) || "main";
-          const commandSource = typeof context.commandSource === "string" ? context.commandSource : "";
-          api.logger.info(
-            `memory-reflection: command:${action} hook start; sessionKey=${sessionKey || "(none)"}; source=${commandSource || "(unknown)"}; sessionId=${currentSessionId}; sessionFile=${currentSessionFile || "(none)"}`
-          );
-
-          if (!currentSessionFile || currentSessionFile.includes(".reset.")) {
-            const searchDirs = resolveReflectionSessionSearchDirs({
-              context,
-              cfg,
-              workspaceDir,
-              currentSessionFile,
-              sourceAgentId,
-            });
-            api.logger.info(
-              `memory-reflection: command:${action} session recovery start for session ${currentSessionId}; initial=${currentSessionFile || "(none)"}; dirs=${searchDirs.join(" | ") || "(none)"}`
-            );
-            for (const sessionsDir of searchDirs) {
-              const recovered = await findPreviousSessionFile(sessionsDir, currentSessionFile, currentSessionId);
-              if (recovered) {
-                api.logger.info(
-                  `memory-reflection: command:${action} recovered session file ${recovered} from ${sessionsDir}`
-                );
-                currentSessionFile = recovered;
-                break;
-              }
-            }
-          }
-
-          if (!currentSessionFile) {
-            const searchDirs = resolveReflectionSessionSearchDirs({
-              context,
-              cfg,
-              workspaceDir,
-              currentSessionFile,
-              sourceAgentId,
-            });
-            api.logger.warn(
-              `memory-reflection: command:${action} missing session file after recovery for session ${currentSessionId}; dirs=${searchDirs.join(" | ") || "(none)"}`
-            );
-            return;
-          }
-
-          const conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
-          if (!conversation) {
-            api.logger.warn(
-              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile}`
-            );
-            return;
-          }
-
-          // Mark that reflection will actually run — cooldown is only recorded
-          // for runs that pass all pre-condition checks, not for early exits
-          // (missing cfg, session file, or conversation).
-          reflectionRan = true;
-
-          const now = new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now());
-          const nowTs = now.getTime();
-          const dateStr = now.toISOString().split("T")[0];
-          const timeIso = now.toISOString().split("T")[1].replace("Z", "");
-          const timeHms = timeIso.split(".")[0];
-          const timeCompact = timeIso.replace(/[:.]/g, "");
-          const reflectionRunAgentId = resolveReflectionRunAgentId(cfg, sourceAgentId);
-          const targetScope = isSystemBypassId(sourceAgentId)
-            ? config.scopes?.default ?? "global"
-            : scopeManager.getDefaultScope(sourceAgentId);
-          const toolErrorSignals = sessionKey
-            ? (reflectionErrorStateBySession.get(sessionKey)?.entries ?? []).slice(-reflectionErrorReminderMaxEntries)
-            : [];
-
-          api.logger.info(
-            `memory-reflection: command:${action} reflection generation start for session ${currentSessionId}; timeoutMs=${reflectionTimeoutMs}`
-          );
-          const reflectionGenerated = await generateReflectionText({
-            conversation,
-            maxInputChars: reflectionMaxInputChars,
-            cfg,
-            agentId: reflectionRunAgentId,
-            workspaceDir,
-            timeoutMs: reflectionTimeoutMs,
-            thinkLevel: reflectionThinkLevel,
-            toolErrorSignals,
-            runEmbeddedPiAgent: resolveRuntimeEmbeddedPiRunner(api),
-            logger: api.logger,
-          });
-          api.logger.info(
-            `memory-reflection: command:${action} reflection generation done for session ${currentSessionId}; runner=${reflectionGenerated.runner}; usedFallback=${reflectionGenerated.usedFallback ? "yes" : "no"}`
-          );
-          const reflectionText = reflectionGenerated.text;
-          if (reflectionGenerated.runner === "cli") {
-            api.logger.warn(
-              `memory-reflection: embedded runner unavailable, used openclaw CLI fallback for session ${currentSessionId}` +
-              (reflectionGenerated.error ? ` (${reflectionGenerated.error})` : "")
-            );
-          } else if (reflectionGenerated.usedFallback) {
-            api.logger.warn(
-              `memory-reflection: fallback used for session ${currentSessionId}` +
-              (reflectionGenerated.error ? ` (${reflectionGenerated.error})` : "")
-            );
-          }
-
-          const header = [
-            `# Reflection: ${dateStr} ${timeHms} UTC`,
-            "",
-            `- Session Key: ${sessionKey}`,
-            `- Session ID: ${currentSessionId || "unknown"}`,
-            `- Command: ${String(event.action || "unknown")}`,
-            `- Error Signatures: ${toolErrorSignals.length ? toolErrorSignals.map((s) => s.signatureHash).join(", ") : "(none)"}`,
-            "",
-          ].join("\n");
-          const reflectionBody = `${header}${reflectionText.trim()}\n`;
-
-          const outDir = join(workspaceDir, "memory", "reflections", dateStr);
-          await mkdir(outDir, { recursive: true });
-          const agentToken = sanitizeFileToken(sourceAgentId, "agent");
-          const sessionToken = sanitizeFileToken(currentSessionId || "unknown", "session");
-          let relPath = "";
-          let writeOk = false;
-          for (let attempt = 0; attempt < 10; attempt++) {
-            const suffix = attempt === 0 ? "" : `-${Math.random().toString(36).slice(2, 8)}`;
-            const fileName = `${timeCompact}-${agentToken}-${sessionToken}${suffix}.md`;
-            const candidateRelPath = join("memory", "reflections", dateStr, fileName);
-            const candidateOutPath = join(workspaceDir, candidateRelPath);
-            try {
-              await writeFile(candidateOutPath, reflectionBody, { encoding: "utf-8", flag: "wx" });
-              relPath = candidateRelPath;
-              writeOk = true;
-              break;
-            } catch (err: any) {
-              if (err?.code === "EEXIST") continue;
-              throw err;
-            }
-          }
-          if (!writeOk) {
-            throw new Error(`Failed to allocate unique reflection file for ${dateStr} ${timeCompact}`);
-          }
-
-          const reflectionGovernanceCandidates = extractReflectionLearningGovernanceCandidates(reflectionText);
-          if (config.selfImprovement?.enabled !== false && reflectionGovernanceCandidates.length > 0) {
-            for (const candidate of reflectionGovernanceCandidates) {
-              await appendSelfImprovementEntry({
-                baseDir: workspaceDir,
-                type: "learning",
-                summary: candidate.summary,
-                details: candidate.details,
-                suggestedAction: candidate.suggestedAction,
-                category: "best_practice",
-                area: candidate.area || "config",
-                priority: candidate.priority || "medium",
-                status: candidate.status || "pending",
-                source: `mymem/reflection:${relPath}`,
-              });
-            }
-            // Trigger feedback loop to scan the newly written error/learning files
-            if (_singletonState?.feedbackLoop) {
-              _singletonState.feedbackLoop.scanErrorFile(workspaceDir).catch(() => {});
-              _singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch(() => {});
-            }
-          }
-
-          const reflectionEventId = createReflectionEventId({
-            runAt: nowTs,
-            sessionKey,
-            sessionId: currentSessionId || "unknown",
-            agentId: sourceAgentId,
-            command: String(event.action || "unknown"),
-          });
-
-          const mappedReflectionMemories = extractInjectableReflectionMappedMemoryItems(reflectionText);
-          for (const mapped of mappedReflectionMemories) {
-            const vector = await embedder.embedPassage(mapped.text);
-            let existing: Awaited<ReturnType<typeof store.vectorSearch>> = [];
-            try {
-              existing = await store.vectorSearch(vector, 1, 0.1, [targetScope]);
-            } catch (err) {
-              api.logger.warn(
-                `memory-reflection: mapped memory duplicate pre-check failed, continue store: ${String(err)}`,
-              );
-            }
-
-            if (existing.length > 0 && existing[0].score > 0.95) {
-              continue;
-            }
-
-            const importance = mapped.category === "decision" ? 0.85 : 0.8;
-            const metadata = JSON.stringify(buildReflectionMappedMetadata({
-              mappedItem: mapped,
-              eventId: reflectionEventId,
-              agentId: sourceAgentId,
-              sessionKey,
-              sessionId: currentSessionId || "unknown",
-              runAt: nowTs,
-              usedFallback: reflectionGenerated.usedFallback,
-              toolErrorSignals,
-              sourceReflectionPath: relPath,
-            }));
-
-            const storedEntry = await store.store({
-              text: mapped.text,
-              vector,
-              importance,
-              category: mapped.category,
-              scope: targetScope,
-              metadata,
-            });
-
-            if (mdMirror) {
-              await mdMirror(
-                { text: mapped.text, category: mapped.category, scope: targetScope, timestamp: storedEntry.timestamp },
-                { source: `reflection:${mapped.heading}`, agentId: sourceAgentId },
-              );
-            }
-          }
-
-          if (reflectionStoreToLanceDB) {
-            const stored = await storeReflectionToLanceDB({
-              reflectionText,
-              sessionKey,
-              sessionId: currentSessionId || "unknown",
-              agentId: sourceAgentId,
-              command: String(event.action || "unknown"),
-              scope: targetScope,
-              toolErrorSignals,
-              runAt: nowTs,
-              usedFallback: reflectionGenerated.usedFallback,
-              eventId: reflectionEventId,
-              sourceReflectionPath: relPath,
-              writeLegacyCombined: reflectionWriteLegacyCombined,
-              embedPassage: (text) => embedder.embedPassage(text),
-              vectorSearch: (vector, limit, minScore, scopeFilter) =>
-                store.vectorSearch(vector, limit, minScore, scopeFilter),
-              store: (entry) => store.store(entry),
-            });
-            if (sessionKey && stored.slices.derived.length > 0) {
-              reflectionDerivedBySession.set(sessionKey, {
-                updatedAt: nowTs,
-                derived: stored.slices.derived,
-              });
-            }
-            for (const cacheKey of reflectionByAgentCache.keys()) {
-              if (cacheKey.startsWith(`${sourceAgentId}::`)) reflectionByAgentCache.delete(cacheKey);
-            }
-          } else if (sessionKey && reflectionGenerated.usedFallback) {
-            reflectionDerivedBySession.delete(sessionKey);
-          }
-
-          const dailyPath = join(workspaceDir, "memory", `${dateStr}.md`);
-          await ensureDailyLogFile(dailyPath, dateStr);
-          await appendFile(dailyPath, `- [${timeHms} UTC] Reflection generated: \`${relPath}\`\n`, "utf-8");
-
-          api.logger.info(`memory-reflection: wrote ${relPath} for session ${currentSessionId}`);
-        } catch (err) {
-          api.logger.warn(`memory-reflection: hook failed: ${String(err)}`);
-        } finally {
-          if (sessionKey) {
-            reflectionErrorStateBySession.delete(sessionKey);
-            getGlobalReflectionLock().delete(sessionKey);
-            if (reflectionRan) {
-              getSerialGuardMap().set(sessionKey, Date.now());
-            }
-          }
-          pruneReflectionSessionState();
-        }
-      };
-
-      api.registerHook?.("command:new", runMemoryReflection, {
-        name: "mymem.memory-reflection.command-new",
-        description: "Generate reflection log before /new",
-      });
-      api.registerHook?.("command:reset", runMemoryReflection, {
-        name: "mymem.memory-reflection.command-reset",
-        description: "Generate reflection log before /reset",
-      });
-      (isCliMode() ? api.logger.debug : api.logger.info)(
-        "memory-reflection: integrated hooks registered (command:new, command:reset, after_tool_call, before_prompt_build, session_end)"
-      );
-    }
+    registerMemoryReflectionHook({
+      api,
+      config,
+      store,
+      embedder,
+      scopeManager,
+      mdMirror,
+      smartExtractionLlmClient,
+      resolvedDbPath,
+      singletonState: _singletonState!,
+      isCliMode,
+    });
 
     if (config.preferenceDistiller?.enabled === true || config.experienceCompiler?.enabled === true) {
       const runGovernanceAutomationOnCommand = async (event: any) => {
@@ -1577,112 +980,7 @@ const myMemPlugin = {
       );
     }
 
-    if (config.sessionStrategy === "systemSessionMemory") {
-      const sessionMessageCount = config.sessionMemory?.messageCount ?? 15;
-
-      const storeSystemSessionSummary = async (params: {
-        agentId: string;
-        defaultScope: string;
-        sessionKey: string;
-        sessionId: string;
-        source: string;
-        sessionContent: string;
-        timestampMs?: number;
-      }) => {
-        const now = new Date(params.timestampMs ?? Date.now());
-        const dateStr = now.toISOString().split("T")[0];
-        const timeStr = now.toISOString().split("T")[1].split(".")[0];
-        const memoryText = [
-          `Session: ${dateStr} ${timeStr} UTC`,
-          `Session Key: ${params.sessionKey}`,
-          `Session ID: ${params.sessionId}`,
-          `Source: ${params.source}`,
-          "",
-          "Conversation Summary:",
-          params.sessionContent,
-        ].join("\n");
-
-        const vector = await embedder.embedPassage(memoryText);
-        await store.store({
-          text: memoryText,
-          vector,
-          category: "fact",
-          scope: params.defaultScope,
-          importance: 0.5,
-          metadata: stringifySmartMetadata(
-            buildSmartMetadata(
-              {
-                text: `Session summary for ${dateStr}`,
-                category: "fact",
-                importance: 0.5,
-                timestamp: Date.now(),
-              },
-              {
-                l0_abstract: `Session summary for ${dateStr}`,
-                l1_overview: `- Session summary saved for ${params.sessionId}`,
-                l2_content: memoryText,
-                memory_category: "patterns",
-                tier: "peripheral",
-                confidence: 0.5,
-                type: "session-summary",
-                sessionKey: params.sessionKey,
-                sessionId: params.sessionId,
-                date: dateStr,
-                agentId: params.agentId,
-                scope: params.defaultScope,
-              },
-            ),
-          ),
-        });
-
-        api.logger.info(
-          `session-memory: stored session summary for ${params.sessionId} (agent: ${params.agentId}, scope: ${params.defaultScope})`
-        );
-      };
-
-      api.on("before_reset", async (event, ctx) => {
-        if (event.reason !== "new") return;
-
-        try {
-          const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-          const agentId = resolveHookAgentId(
-            typeof ctx.agentId === "string" ? ctx.agentId : undefined,
-            sessionKey,
-          );
-          const defaultScope = isSystemBypassId(agentId)
-            ? config.scopes?.default ?? "global"
-            : scopeManager.getDefaultScope(agentId);
-          const currentSessionId =
-            typeof ctx.sessionId === "string" && ctx.sessionId.trim().length > 0
-              ? ctx.sessionId
-              : "unknown";
-          const source = resolveSourceFromSessionKey(sessionKey);
-          const sessionContent =
-            summarizeRecentConversationMessages(event.messages ?? [], sessionMessageCount) ??
-            (typeof event.sessionFile === "string"
-              ? await readSessionConversationWithResetFallback(event.sessionFile, sessionMessageCount)
-              : null);
-
-          if (!sessionContent) {
-            api.logger.debug("session-memory: no session content found, skipping");
-            return;
-          }
-
-          await storeSystemSessionSummary({
-            agentId,
-            defaultScope,
-            sessionKey,
-            sessionId: currentSessionId,
-            source,
-            sessionContent,
-          });
-        } catch (err) {
-          api.logger.warn(`session-memory: failed to save: ${String(err)}`);
-        }
-      });
-
-      (isCliMode() ? api.logger.debug : api.logger.info)("session-memory: typed before_reset hook registered for /new session summaries");
-    }
+    registerSessionMemoryHook({ api, config, store, embedder, scopeManager, isCliMode });
     if (config.sessionStrategy === "none") {
       (isCliMode() ? api.logger.debug : api.logger.info)("session-strategy: using none (plugin memory-reflection hooks disabled)");
     }
@@ -1691,62 +989,7 @@ const myMemPlugin = {
     // Auto-Backup (daily JSONL export)
     // ========================================================================
 
-    let backupTimer: ReturnType<typeof setInterval> | null = null;
-    const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-    async function runBackup() {
-      try {
-        if (!resolvedDbPath) {
-          api.logger.debug("mymem: backup skipped (no dbPath)");
-          return;
-        }
-        const backupDir = api.resolvePath(
-          join(resolvedDbPath, "..", "backups"),
-        );
-        if (!backupDir) {
-          api.logger.debug("mymem: backup skipped (resolvePath returned empty)");
-          return;
-        }
-        await mkdir(backupDir, { recursive: true });
-
-        const allMemories = await store.list(undefined, undefined, 10000, 0);
-        if (allMemories.length === 0) return;
-
-        const dateStr = new Date().toISOString().split("T")[0];
-        const backupFile = join(backupDir, `memory-backup-${dateStr}.jsonl`);
-
-        const lines = allMemories.map((m) =>
-          JSON.stringify({
-            id: m.id,
-            text: m.text,
-            category: m.category,
-            scope: m.scope,
-            importance: m.importance,
-            timestamp: m.timestamp,
-            metadata: m.metadata,
-          }),
-        );
-
-        await writeFile(backupFile, lines.join("\n") + "\n");
-
-        // Keep only last 7 backups
-        const files = (await readdir(backupDir))
-          .filter((f) => f.startsWith("memory-backup-") && f.endsWith(".jsonl"))
-          .sort();
-        if (files.length > 7) {
-          const { unlink } = await import("node:fs/promises");
-          for (const old of files.slice(0, files.length - 7)) {
-            await unlink(join(backupDir, old)).catch(() => { });
-          }
-        }
-
-        api.logger.info(
-          `mymem: backup completed (${allMemories.length} entries → ${backupFile})`,
-        );
-      } catch (err) {
-        api.logger.warn(`mymem: backup failed: ${String(err)}`);
-      }
-    }
+    const autoBackup = createAutoBackup({ api, store, resolvedDbPath });
 
     // ========================================================================
     // Service Registration
@@ -1879,17 +1122,13 @@ const myMemPlugin = {
         }, 5_000);
 
         // Run initial backup after a short delay, then schedule daily
-        setTimeout(() => void runBackup(), 60_000); // 1 min after start
-        backupTimer = setInterval(() => void runBackup(), BACKUP_INTERVAL_MS);
+        autoBackup.start();
 
         // Start feedback loop timers if enabled
         if (feedbackLoop) feedbackLoop.start();
       },
       stop: async () => {
-        if (backupTimer) {
-          clearInterval(backupTimer);
-          backupTimer = null;
-        }
+        autoBackup.stop();
         if (feedbackLoop) feedbackLoop.dispose();
         api.logger.info("mymem: stopped");
       },

@@ -1022,23 +1022,38 @@ export class MemoryStore {
       };
     }
     const whereClause = this.buildBaseWhereClause(scopeFilter);
+    const now = Date.now();
+    const h24 = 24 * 60 * 60 * 1000;
+    const d7 = 7 * h24;
+
+    // Phase 1: lightweight count queries (no row data loaded)
+    const [totalCount, last24h, last7d] = await Promise.all([
+      this.countRowsWithFilter(whereClause),
+      this.countRowsWithFilter(combineWhereClauses([whereClause, `timestamp >= ${now - h24}`])),
+      this.countRowsWithFilter(combineWhereClauses([whereClause, `timestamp >= ${now - d7}`])),
+    ]);
+
+    if (totalCount === 0) {
+      return {
+        totalCount: 0,
+        scopeCounts: {},
+        categoryCounts: {},
+        recentActivity: { last24h: 0, last7d: 0 },
+        tierDistribution: {},
+        healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+      };
+    }
+
+    // Phase 2: load only the lightweight columns (no vector, no text, no id)
     let query = this.table!.query().select(["scope", "category", "timestamp", "metadata"]);
     if (whereClause) {
       query = query.where(whereClause);
     }
-    const [totalCount, results] = await Promise.all([
-      this.countRowsWithFilter(whereClause),
-      query.toArray(),
-    ]);
+    const results = await query.toArray();
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
     const tierDistribution: Record<string, number> = {};
-    const now = Date.now();
-    const h24 = 24 * 60 * 60 * 1000;
-    const d7 = 7 * h24;
-    let last24h = 0;
-    let last7d = 0;
     let badRecall = 0;
     let suppressed = 0;
     let lowConfidence = 0;
@@ -1046,13 +1061,9 @@ export class MemoryStore {
     for (const row of results) {
       const scope = (row.scope as string | undefined) ?? "global";
       const category = row.category as string;
-      const ts = row.timestamp as number;
 
       scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
       categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-
-      if (now - ts < h24) last24h++;
-      if (now - ts < d7) last7d++;
 
       // Parse metadata for lifecycle and health signals
       try {
@@ -1164,37 +1175,17 @@ export class MemoryStore {
         metadata: updates.metadata ?? original.metadata,
       };
 
-      // LanceDB doesn't support in-place update; delete + re-add.
-      // Serialize updates per store instance to avoid stale rollback races.
-      // If the add fails after delete, attempt best-effort recovery without
-      // overwriting a newer concurrent successful update.
-      const rollbackCandidate = original; // already have latest data from query above
-      const resolvedId = escapeSqlLiteral(row.id as string);
-      await this.table!.delete(`id = '${resolvedId}'`);
+      // Use LanceDB mergeInsert for atomic upsert — eliminates the
+      // delete+add race condition where a failed add could lose data.
       try {
-        await this.table!.add(toLanceRows([updated]));
-      } catch (addError) {
-        const current = await this.getById(original.id).catch(() => null);
-        if (current) {
-          throw new Error(
-            `Failed to update memory ${id}: write failed after delete, but an existing record was preserved. ` +
-            `Write error: ${addError instanceof Error ? addError.message : String(addError)}`,
-          );
-        }
-
-        try {
-          await this.table!.add(toLanceRows([rollbackCandidate]));
-        } catch (rollbackError) {
-          throw new Error(
-            `Failed to update memory ${id}: write failed after delete, and rollback also failed. ` +
-            `Write error: ${addError instanceof Error ? addError.message : String(addError)}. ` +
-            `Rollback error: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-          );
-        }
-
+        await this.table!
+          .mergeInsert(["id"])
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(toLanceRows([updated]));
+      } catch (mergeError) {
         throw new Error(
-          `Failed to update memory ${id}: write failed after delete, latest available record restored. ` +
-          `Write error: ${addError instanceof Error ? addError.message : String(addError)}`,
+          `Failed to update memory ${id}: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
         );
       }
 

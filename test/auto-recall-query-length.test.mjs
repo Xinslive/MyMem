@@ -26,9 +26,9 @@ function baseConfig() {
 }
 
 describe("autoRecallTimeoutMs", () => {
-  it("defaults to 8000 as an interactive auto-recall safety valve", () => {
+  it("defaults to 20000 as an interactive auto-recall safety valve", () => {
     const parsed = parsePluginConfig(baseConfig());
-    assert.equal(parsed.autoRecallTimeoutMs, 8000);
+    assert.equal(parsed.autoRecallTimeoutMs, 20000);
   });
 
   it("preserves explicit timeout values", () => {
