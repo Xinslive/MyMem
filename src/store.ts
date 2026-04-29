@@ -6,77 +6,60 @@ import type * as LanceDB from "@lancedb/lancedb";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
-  accessSync,
-  constants,
   mkdirSync,
-  realpathSync,
-  lstatSync,
-  rmSync,
   statSync,
   unlinkSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
 
-// ============================================================================
-// Types
-// ============================================================================
+import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus } from "./store-types.js";
+import {
+  FULL_ENTRY_COLUMNS,
+  LIST_ENTRY_COLUMNS,
+  DEFAULT_SCALAR_INDEX_COLUMNS,
+  MIN_VECTOR_INDEX_ROWS,
+  escapeSqlLiteral,
+  isExplicitDenyAllScopeFilter,
+  buildScopeWhereClause,
+  combineWhereClauses,
+  prefixWhereClause,
+  isVectorIndexType,
+  isScalarIndexType,
+  recommendedVectorPartitions,
+  scoreLexicalHit,
+} from "./store-sql-utils.js";
+import { toLanceRows, toNumberVector, mapRowToMemoryEntry } from "./store-row-mappers.js";
+import { loadLanceDB } from "./lancedb-loader.js";
+import { validateStoragePath } from "./storage-path.js";
 
-export interface MemoryEntry {
-  id: string;
-  text: string;
-  vector: number[];
-  category: "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
-  scope: string;
-  importance: number;
-  timestamp: number;
-  metadata?: string; // JSON string for extensible metadata
-}
-
-export interface MemorySearchResult {
-  entry: MemoryEntry;
-  score: number;
-}
-
-export interface StoreConfig {
-  dbPath: string;
-  vectorDim: number;
-  /** Optional logger instance. If not provided, uses default console-based logger. */
-  logger?: Logger;
-}
-
-export interface MetadataPatch {
-  [key: string]: unknown;
-}
-
-export interface StoreIndexStatus {
-  totalRows: number;
-  totalIndices: number;
-  names: string[];
-  available: {
-    fts: boolean;
-    vector: boolean;
-    scalar: string[];
-  };
-  exhaustiveVectorSearch: boolean;
-  missingRecommendedScalars: string[];
-  vectorIndexPending: boolean;
-}
+// Re-export all public symbols for backward compatibility
+export type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus } from "./store-types.js";
+export {
+  FULL_ENTRY_COLUMNS,
+  LIST_ENTRY_COLUMNS,
+  DEFAULT_SCALAR_INDEX_COLUMNS,
+  MIN_VECTOR_INDEX_ROWS,
+  escapeSqlLiteral,
+  normalizeSearchText,
+  isExplicitDenyAllScopeFilter,
+  buildScopeWhereClause,
+  combineWhereClauses,
+  prefixWhereClause,
+  isVectorIndexType,
+  isScalarIndexType,
+  recommendedVectorPartitions,
+  scoreLexicalHit,
+} from "./store-sql-utils.js";
+export { toLanceRows, toNumberVector, mapRowToMemoryEntry } from "./store-row-mappers.js";
+export { loadLanceDB } from "./lancedb-loader.js";
+export { validateStoragePath } from "./storage-path.js";
 
 // ============================================================================
-// LanceDB Dynamic Import
-// ============================================================================
-
-let lancedbImportPromise: Promise<typeof import("@lancedb/lancedb")> | null =
-  null;
-const nodeRequire = createRequire(import.meta.url);
-
-// =========================================================================
 // Cross-Process File Lock (proper-lockfile)
-// =========================================================================
+// ============================================================================
 
 let lockfileModule: any = null;
 
@@ -85,207 +68,6 @@ async function loadLockfile(): Promise<any> {
     lockfileModule = await import("proper-lockfile");
   }
   return lockfileModule;
-}
-
-export const loadLanceDB = async (): Promise<
-  typeof import("@lancedb/lancedb")
-> => {
-  if (!lancedbImportPromise) {
-    // Use require() for CommonJS modules on Windows to avoid ESM URL scheme issues
-    lancedbImportPromise = Promise.resolve(
-      nodeRequire("@lancedb/lancedb") as typeof import("@lancedb/lancedb"),
-    );
-  }
-  try {
-    return await lancedbImportPromise;
-  } catch (err) {
-    throw new Error(
-      `mymem: failed to load LanceDB. ${String(err)}`,
-      { cause: err },
-    );
-  }
-};
-
-function toLanceRows(entries: MemoryEntry[]): Record<string, unknown>[] {
-  return entries.map((entry) => ({ ...entry }));
-}
-
-function toNumberVector(value: unknown): number[] {
-  if (!value) return [];
-  const maybeIterable = value as Iterable<unknown>;
-  if (typeof maybeIterable[Symbol.iterator] !== "function") return [];
-  return Array.from(maybeIterable, (item) => Number(item));
-}
-
-function mapRowToMemoryEntry(row: any, includeVector = true): MemoryEntry {
-  return {
-    id: row.id as string,
-    text: row.text as string,
-    vector: includeVector ? toNumberVector(row.vector) : [],
-    category: row.category as MemoryEntry["category"],
-    scope: (row.scope as string | undefined) ?? "global",
-    importance: Number(row.importance),
-    timestamp: Number(row.timestamp),
-    metadata: (row.metadata as string) || "{}",
-  };
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-const FULL_ENTRY_COLUMNS = [
-  "id",
-  "text",
-  "vector",
-  "category",
-  "scope",
-  "importance",
-  "timestamp",
-  "metadata",
-] as const;
-
-const LIST_ENTRY_COLUMNS = [
-  "id",
-  "text",
-  "category",
-  "scope",
-  "importance",
-  "timestamp",
-  "metadata",
-] as const;
-
-const DEFAULT_SCALAR_INDEX_COLUMNS = ["id", "scope", "category", "timestamp"] as const;
-const MIN_VECTOR_INDEX_ROWS = 64;
-
-function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
-function normalizeSearchText(value: string): string {
-  return value.toLowerCase().trim();
-}
-
-function isExplicitDenyAllScopeFilter(scopeFilter?: string[]): boolean {
-  return Array.isArray(scopeFilter) && scopeFilter.length === 0;
-}
-
-function buildScopeWhereClause(scopeFilter?: string[]): string | null {
-  if (!scopeFilter || scopeFilter.length === 0) return null;
-  const scopeConditions = scopeFilter
-    .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-    .join(" OR ");
-  return `((${scopeConditions}) OR scope IS NULL)`;
-}
-
-function combineWhereClauses(parts: Array<string | null | undefined>): string | undefined {
-  const filtered = parts
-    .map((part) => (typeof part === "string" ? part.trim() : ""))
-    .filter((part) => part.length > 0);
-  return filtered.length > 0 ? filtered.join(" AND ") : undefined;
-}
-
-function prefixWhereClause(column: string, prefix: string): string {
-  return `${column} LIKE '${escapeSqlLiteral(prefix)}%'`;
-}
-
-function isVectorIndexType(indexType: string): boolean {
-  return /ivf|hnsw|pq|sq|vector/i.test(indexType);
-}
-
-function isScalarIndexType(indexType: string): boolean {
-  return /btree|bitmap|label/i.test(indexType);
-}
-
-function recommendedVectorPartitions(totalRows: number): number {
-  const sqrt = Math.sqrt(Math.max(totalRows, 1));
-  const rough = Math.max(8, Math.min(256, Math.round(sqrt)));
-  return Math.max(8, Math.pow(2, Math.round(Math.log2(rough))));
-}
-
-function scoreLexicalHit(query: string, candidates: Array<{ text: string; weight: number }>): number {
-  const normalizedQuery = normalizeSearchText(query);
-  if (!normalizedQuery) return 0;
-
-  let score = 0;
-  for (const candidate of candidates) {
-    const normalized = normalizeSearchText(candidate.text);
-    if (!normalized) continue;
-    if (normalized.includes(normalizedQuery)) {
-      score = Math.max(score, Math.min(0.95, 0.72 + normalizedQuery.length * 0.02) * candidate.weight);
-    }
-  }
-
-  return score;
-}
-
-// ============================================================================
-// Storage Path Validation
-// ============================================================================
-
-/**
- * Validate and prepare the storage directory before LanceDB connection.
- * Resolves symlinks, creates missing directories, and checks write permissions.
- * Returns the resolved absolute path on success, or throws a descriptive error.
- */
-export function validateStoragePath(dbPath: string): string {
-  let resolvedPath = dbPath;
-
-  // Resolve symlinks (including dangling symlinks)
-  try {
-    const stats = lstatSync(dbPath);
-    if (stats.isSymbolicLink()) {
-      try {
-        resolvedPath = realpathSync(dbPath);
-      } catch (err: any) {
-        throw new Error(
-          `dbPath "${dbPath}" is a symlink whose target does not exist.\n` +
-          `  Fix: Create the target directory, or update the symlink to point to a valid path.\n` +
-          `  Details: ${err.code || ""} ${err.message}`,
-        );
-      }
-    }
-  } catch (err: any) {
-    // Missing path is OK (it will be created below)
-    if (err?.code === "ENOENT") {
-      // no-op
-    } else if (
-      typeof err?.message === "string" &&
-      err.message.includes("symlink whose target does not exist")
-    ) {
-      throw err;
-    } else {
-      // Other lstat failures ??continue with original path
-    }
-  }
-
-  // Create directory if it doesn't exist
-  if (!existsSync(resolvedPath)) {
-    try {
-      mkdirSync(resolvedPath, { recursive: true });
-    } catch (err: any) {
-      throw new Error(
-        `Failed to create dbPath directory "${resolvedPath}".\n` +
-        `  Fix: Ensure the parent directory "${dirname(resolvedPath)}" exists and is writable,\n` +
-        `       or create it manually: mkdir -p "${resolvedPath}"\n` +
-        `  Details: ${err.code || ""} ${err.message}`,
-      );
-    }
-  }
-
-  // Check write permissions
-  try {
-    accessSync(resolvedPath, constants.W_OK);
-  } catch (err: any) {
-    throw new Error(
-      `dbPath directory "${resolvedPath}" is not writable.\n` +
-      `  Fix: Check permissions with: ls -la "${dirname(resolvedPath)}"\n` +
-      `       Or grant write access: chmod u+w "${resolvedPath}"\n` +
-      `  Details: ${err.code || ""} ${err.message}`,
-    );
-  }
-
-  return resolvedPath;
 }
 
 // ============================================================================

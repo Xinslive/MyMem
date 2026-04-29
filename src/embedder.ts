@@ -9,94 +9,34 @@
  */
 
 import OpenAI from "openai";
-import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
+import { EmbeddingCache } from "./embedding-cache.js";
+import {
+  ConcurrencyLimiter,
+  globalEmbedRequestLimiter,
+  EMBED_TIMEOUT_MS,
+  GLOBAL_EMBED_CONCURRENCY_LIMIT,
+  MAX_EMBED_DEPTH,
+  STRICT_REDUCTION_FACTOR,
+} from "./concurrency-limiter.js";
+import {
+  detectEmbeddingProviderProfile,
+  getEmbeddingCapabilities,
+  isLoopbackBaseURL,
+  EMBEDDING_DIMENSIONS,
+} from "./embedding-provider.js";
+import {
+  formatEmbeddingProviderError,
+  getErrorMessage,
+  getErrorStatus,
+  getErrorCode,
+  isAuthError,
+  isNetworkError,
+} from "./embedding-error-utils.js";
 import type { Logger } from "./logger.js";
 
-// ============================================================================
-// Embedding Cache (LRU with TTL)
-// ============================================================================
-
-interface CacheEntry {
-  vector: number[];
-  createdAt: number;
-}
-
-class EmbeddingCache {
-  private cache = new Map<string, CacheEntry>();
-  private readonly maxSize: number;
-  private readonly ttlMs: number;
-  public hits = 0;
-  public misses = 0;
-
-  constructor(maxSize = 256, ttlMinutes = 30) {
-    this.maxSize = maxSize;
-    this.ttlMs = ttlMinutes * 60_000;
-  }
-
-  /** Remove all expired entries. Called on every set() when cache is near capacity. */
-  private _evictExpired(): void {
-    const now = Date.now();
-    for (const [k, entry] of this.cache) {
-      if (now - entry.createdAt > this.ttlMs) {
-        this.cache.delete(k);
-      }
-    }
-  }
-
-  key(text: string, task?: string): string {
-    const hash = createHash("sha256").update(`${task || ""}:${text}`).digest("hex").slice(0, 24);
-    return hash;
-  }
-
-  get(text: string, task?: string): number[] | undefined {
-    const k = this.key(text, task);
-    const entry = this.cache.get(k);
-    if (!entry) {
-      this.misses++;
-      return undefined;
-    }
-    if (Date.now() - entry.createdAt > this.ttlMs) {
-      this.cache.delete(k);
-      this.misses++;
-      return undefined;
-    }
-    // Move to end (most recently used)
-    this.cache.delete(k);
-    this.cache.set(k, entry);
-    this.hits++;
-    return entry.vector;
-  }
-
-  set(text: string, task: string | undefined, vector: number[]): void {
-    const k = this.key(text, task);
-    if (this.cache.has(k)) {
-      this.cache.delete(k);
-    }
-    // When cache is full, run TTL eviction first (removes expired + oldest).
-    // This prevents unbounded growth from stale entries while keeping writes O(1).
-    if (this.cache.size >= this.maxSize) {
-      this._evictExpired();
-      // If eviction didn't free enough slots, evict the single oldest LRU entry.
-      if (this.cache.size >= this.maxSize) {
-        const firstKey = this.cache.keys().next().value;
-        if (firstKey !== undefined) this.cache.delete(firstKey);
-      }
-    }
-    this.cache.set(k, { vector, createdAt: Date.now() });
-  }
-
-  get size(): number { return this.cache.size; }
-  get stats(): { size: number; hits: number; misses: number; hitRate: string } {
-    const total = this.hits + this.misses;
-    return {
-      size: this.cache.size,
-      hits: this.hits,
-      misses: this.misses,
-      hitRate: total > 0 ? `${((this.hits / total) * 100).toFixed(1)}%` : "N/A",
-    };
-  }
-}
+// Re-export for backward compat
+export { formatEmbeddingProviderError };
 
 // ============================================================================
 // Types & Configuration
@@ -139,65 +79,6 @@ const fallbackLogger: Pick<Logger, "debug" | "info" | "warn"> = {
   warn: (message, ...args) => console.warn(message, ...args),
 };
 
-type EmbeddingProviderProfile =
-  | "openai"
-  | "azure-openai"
-  | "jina"
-  | "voyage-compatible"
-  | "nvidia"
-  | "generic-openai-compatible";
-
-interface EmbeddingCapabilities {
-  /** Whether to send encoding_format: "float" */
-  encoding_format: boolean;
-  /** Whether to send normalized (Jina-style) */
-  normalized: boolean;
-  /**
-   * Field name to use for the task/input-type hint, or null if unsupported.
-   * e.g. "task" for Jina, "input_type" for Voyage, null for OpenAI/generic.
-   * If a taskValueMap is provided, task values are translated before sending.
-   */
-  taskField: string | null;
-  /** Optional value translation map for taskField (e.g. Voyage needs "retrieval.query" → "query") */
-  taskValueMap?: Record<string, string>;
-  /**
-   * Field name to use for the requested output dimension, or null if unsupported.
-   * e.g. "dimensions" for OpenAI, "output_dimension" for Voyage, null if not supported.
-   */
-  dimensionsField: string | null;
-}
-
-// Known embedding model dimensions
-const EMBEDDING_DIMENSIONS: Record<string, number> = {
-  "text-embedding-3-small": 1536,
-  "text-embedding-3-large": 3072,
-  "text-embedding-004": 768,
-  "gemini-embedding-001": 3072,
-  "nomic-embed-text": 768,
-  "mxbai-embed-large": 1024,
-  "BAAI/bge-m3": 1024,
-  "all-MiniLM-L6-v2": 384,
-  "all-mpnet-base-v2": 512,
-
-  // Jina v5
-  "jina-embeddings-v5-text-small": 1024,
-  "jina-embeddings-v5-text-nano": 768,
-
-  // Voyage recommended models
-  "voyage-4": 1024,
-  "voyage-4-lite": 1024,
-  "voyage-4-large": 1024,
-
-  // Voyage legacy models
-  "voyage-3": 1024,
-  "voyage-3-lite": 512,
-  "voyage-3-large": 1024,
-};
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
 function resolveEnvVars(value: string): string {
   return value.replace(/\$\{([^}]+)\}/g, (_, envVar) => {
     const envValue = process.env[envVar];
@@ -207,323 +88,6 @@ function resolveEnvVars(value: string): string {
     return envValue;
   });
 }
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const err = error as Record<string, any>;
-  if (typeof err.status === "number") return err.status;
-  if (typeof err.statusCode === "number") return err.statusCode;
-  if (err.error && typeof err.error === "object") {
-    if (typeof err.error.status === "number") return err.error.status;
-    if (typeof err.error.statusCode === "number") return err.error.statusCode;
-  }
-  return undefined;
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const err = error as Record<string, any>;
-  if (typeof err.code === "string") return err.code;
-  if (err.error && typeof err.error === "object" && typeof err.error.code === "string") {
-    return err.error.code;
-  }
-  return undefined;
-}
-
-function getProviderLabel(baseURL: string | undefined, model: string): string {
-  const profile = detectEmbeddingProviderProfile(baseURL, model);
-  const base = baseURL || "";
-
-  if (/localhost:11434|127\.0\.0\.1:11434|\/ollama\b/i.test(base)) return "Ollama";
-
-  if (base) {
-    if (profile === "jina" && /api\.jina\.ai/i.test(base)) return "Jina";
-    if (profile === "voyage-compatible" && /api\.voyageai\.com/i.test(base)) return "Voyage";
-    if (profile === "openai" && /api\.openai\.com/i.test(base)) return "OpenAI";
-    if (profile === "azure-openai" || /\.openai\.azure\.com/i.test(base)) return "Azure OpenAI";
-    if (profile === "nvidia") return "NVIDIA NIM";
-
-    try {
-      return new URL(base).host;
-    } catch {
-      return base;
-    }
-  }
-
-  switch (profile) {
-    case "jina":
-      return "Jina";
-    case "voyage-compatible":
-      return "Voyage";
-    case "openai":
-    case "azure-openai":
-      return "OpenAI";
-    case "nvidia":
-      return "NVIDIA NIM";
-    default:
-      return "embedding provider";
-  }
-}
-
-function isLoopbackBaseURL(baseURL?: string): boolean {
-  if (!baseURL) return false;
-  try {
-    const parsed = new URL(baseURL);
-    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
-  } catch {
-    return false;
-  }
-}
-
-function detectEmbeddingProviderProfile(
-  baseURL: string | undefined,
-  model: string,
-): EmbeddingProviderProfile {
-  const base = baseURL || "";
-  let host = "";
-  try { host = new URL(base).hostname.toLowerCase(); } catch { /* invalid URL — skip host checks */ }
-
-  // Host-based detection runs first — endpoint owner semantics take precedence
-  // over model-name heuristics to avoid misclassifying e.g. a jina-xxx model
-  // served from .nvidia.com as Jina instead of NVIDIA.
-  // Match on parsed hostname to avoid false positives from proxy URLs that
-  // contain provider domains in their path or query string.
-  if (host.endsWith("api.openai.com")) return "openai";
-  if (host.endsWith(".openai.azure.com")) return "azure-openai";
-  if (host.endsWith("api.jina.ai")) return "jina";
-  if (host.endsWith("api.voyageai.com")) return "voyage-compatible";
-  if (host.endsWith(".nvidia.com") || host === "nvidia.com") return "nvidia";
-
-  // Model-prefix fallback — only when baseURL didn't match a known host
-  if (/^jina-/i.test(model)) return "jina";
-  if (/^voyage\b/i.test(model)) return "voyage-compatible";
-  if (/^nvidia\//i.test(model) || /^nv-embed/i.test(model)) return "nvidia";
-
-  return "generic-openai-compatible";
-}
-
-function getEmbeddingCapabilities(profile: EmbeddingProviderProfile): EmbeddingCapabilities {
-  switch (profile) {
-    case "openai":
-      return {
-        encoding_format: true,
-        normalized: false,
-        taskField: null,
-        dimensionsField: "dimensions",
-      };
-    case "jina":
-      return {
-        encoding_format: true,
-        normalized: true,
-        taskField: "task",
-        dimensionsField: "dimensions",
-      };
-    case "voyage-compatible":
-      return {
-        encoding_format: false,
-        normalized: false,
-        taskField: "input_type",
-        taskValueMap: {
-          "retrieval.query": "query",
-          "retrieval.passage": "document",
-          "query": "query",
-          "document": "document",
-        },
-        dimensionsField: "output_dimension",
-      };
-    case "nvidia":
-      return {
-        encoding_format: true,
-        normalized: false,
-        taskField: "input_type",
-        taskValueMap: {
-          "retrieval.query": "query",
-          "retrieval.passage": "passage",
-          "query": "query",
-          "passage": "passage",
-        },
-        dimensionsField: "dimensions",
-      };
-    case "generic-openai-compatible":
-    default:
-      return {
-        encoding_format: true,
-        normalized: false,
-        taskField: null,
-        dimensionsField: "dimensions",
-      };
-  }
-}
-
-function isAuthError(error: unknown): boolean {
-  const status = getErrorStatus(error);
-  if (status === 401 || status === 403) return true;
-
-  const code = getErrorCode(error);
-  if (code && /invalid.*key|auth|forbidden|unauthorized/i.test(code)) return true;
-
-  const msg = getErrorMessage(error);
-  return /\b401\b|\b403\b|invalid api key|api key expired|expired api key|forbidden|unauthorized|authentication failed|access denied/i.test(msg);
-}
-
-function isNetworkError(error: unknown): boolean {
-  const code = getErrorCode(error);
-  if (code && /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT/i.test(code)) {
-    return true;
-  }
-
-  const msg = getErrorMessage(error);
-  return /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|fetch failed|network error|socket hang up|connection refused|getaddrinfo/i.test(msg);
-}
-
-export function formatEmbeddingProviderError(
-  error: unknown,
-  opts: { baseURL?: string; model: string; mode?: "single" | "batch" },
-): string {
-  const raw = getErrorMessage(error).trim();
-  if (
-    raw.startsWith("Embedding provider authentication failed") ||
-    raw.startsWith("Embedding provider unreachable") ||
-    raw.startsWith("Failed to generate embedding from ") ||
-    raw.startsWith("Failed to generate batch embeddings from ")
-  ) {
-    return raw;
-  }
-
-  const status = getErrorStatus(error);
-  const code = getErrorCode(error);
-  const provider = getProviderLabel(opts.baseURL, opts.model);
-  const detail = raw.length > 0 ? raw : "unknown error";
-  const suffix = [status, code].filter(Boolean).join(" ");
-  const detailText = suffix ? `${suffix}: ${detail}` : detail;
-  const genericPrefix =
-    opts.mode === "batch"
-      ? `Failed to generate batch embeddings from ${provider}: `
-      : `Failed to generate embedding from ${provider}: `;
-
-  if (isAuthError(error)) {
-    let hint = `Check embedding.apiKey and endpoint for ${provider}.`;
-    // Use profile rather than provider label so Jina-specific hint also fires
-    // when model is jina-* but baseURL is a proxy (not api.jina.ai).
-    const profile = detectEmbeddingProviderProfile(opts.baseURL, opts.model);
-    if (profile === "jina") {
-      hint +=
-        " If your Jina key expired or lost access, replace the key or switch to a local OpenAI-compatible endpoint such as Ollama (for example baseURL http://127.0.0.1:11434/v1, with a matching model and embedding.dimensions).";
-    } else if (provider === "Ollama") {
-      hint +=
-        " Ollama usually works with a dummy apiKey; verify the local server is running, the model is pulled, and embedding.dimensions matches the model output.";
-    }
-    return `Embedding provider authentication failed (${detailText}). ${hint}`;
-  }
-
-  if (isNetworkError(error)) {
-    let hint = `Verify the endpoint is reachable`;
-    if (opts.baseURL) {
-      hint += ` at ${opts.baseURL}`;
-    }
-    hint += ` and that model \"${opts.model}\" is available.`;
-    return `Embedding provider unreachable (${detailText}). ${hint}`;
-  }
-
-  return `${genericPrefix}${detailText}`;
-}
-
-// ============================================================================
-// Safety Constants
-// ============================================================================
-
-/** Maximum recursion depth for embedSingle chunking retries. */
-const MAX_EMBED_DEPTH = 3;
-
-/** Global timeout for a single embedding operation (ms). */
-const EMBED_TIMEOUT_MS = 20_000;
-/** Global cap for concurrent provider-bound embedding requests across all Embedder instances. */
-const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;
-
-/**
- * Strictly decreasing character limit for forced truncation.
- * Each recursion level MUST reduce input by this factor to guarantee progress.
- */
-const STRICT_REDUCTION_FACTOR = 0.5; // Each retry must be at most 50% of previous
-
-interface PendingPermit {
-  resolve: (release: () => void) => void;
-  reject: (reason: unknown) => void;
-  signal?: AbortSignal;
-  onAbort?: () => void;
-}
-
-class ConcurrencyLimiter {
-  private readonly limit: number;
-  private inUse = 0;
-  private readonly queue: PendingPermit[] = [];
-
-  constructor(limit: number) {
-    this.limit = limit;
-  }
-
-  async acquire(signal?: AbortSignal): Promise<() => void> {
-    if (signal?.aborted) {
-      throw signal.reason ?? new Error("aborted");
-    }
-
-    if (this.inUse < this.limit) {
-      this.inUse += 1;
-      return this.makeRelease();
-    }
-
-    return new Promise<() => void>((resolve, reject) => {
-      const pending: PendingPermit = { resolve, reject, signal };
-      if (signal) {
-        pending.onAbort = () => {
-          const idx = this.queue.indexOf(pending);
-          if (idx >= 0) {
-            this.queue.splice(idx, 1);
-          }
-          reject(signal.reason ?? new Error("aborted"));
-        };
-        signal.addEventListener("abort", pending.onAbort, { once: true });
-      }
-      this.queue.push(pending);
-    });
-  }
-
-  private makeRelease(): () => void {
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.releaseNext();
-    };
-  }
-
-  private releaseNext(): void {
-    while (this.queue.length > 0) {
-      const pending = this.queue.shift();
-      if (!pending) break;
-
-      if (pending.signal?.aborted) {
-        pending.onAbort && pending.signal.removeEventListener("abort", pending.onAbort);
-        pending.reject(pending.signal.reason ?? new Error("aborted"));
-        continue;
-      }
-
-      if (pending.onAbort && pending.signal) {
-        pending.signal.removeEventListener("abort", pending.onAbort);
-      }
-      pending.resolve(this.makeRelease());
-      return;
-    }
-
-    this.inUse = Math.max(0, this.inUse - 1);
-  }
-}
-
-const globalEmbedRequestLimiter = new ConcurrencyLimiter(GLOBAL_EMBED_CONCURRENCY_LIMIT);
 
 export function getVectorDimensions(model: string, overrideDims?: number): number {
   if (overrideDims && overrideDims > 0) {
@@ -558,7 +122,7 @@ export class Embedder {
   private readonly _taskQuery?: string;
   private readonly _taskPassage?: string;
   private readonly _normalized?: boolean;
-  private readonly _capabilities: EmbeddingCapabilities;
+  private readonly _capabilities: ReturnType<typeof getEmbeddingCapabilities>;
 
   /** Optional requested dimensions to pass through to the embedding provider (OpenAI-compatible). */
   private readonly _requestDimensions?: number;
