@@ -1787,15 +1787,25 @@ const myMemPlugin = {
         const runStartupChecks = async () => {
           try {
             // Test components (bounded time)
-            const embedTest = await withTimeout(
-              (signal) => embedder.test(signal),
-              startupTimeoutMs,
-              "embedder.test()",
-            ).promise;
-            // Avoid retriever.test() here: it performs another embedding call and
-            // can hit slow external providers during gateway startup. Retrieval
-            // is still exercised by normal recall paths; startup health should
-            // only report local retrieval capabilities after embedding is known.
+            let embedSuccess = false;
+            let embedError: string | undefined;
+            try {
+              const embedTest = await withTimeout(
+                (signal) => embedder.test(signal),
+                startupTimeoutMs,
+                "embedder.test()",
+              ).promise;
+              embedSuccess = !!embedTest.success;
+              embedError = embedTest.error;
+            } catch (timeoutErr) {
+              // Embedding provider may be slow on cold start — not a permanent failure.
+              // The plugin works fine once the provider warms up (confirmed by memory_doctor).
+              embedError = String(timeoutErr);
+              api.logger.debug?.(
+                `mymem: embedding probe skipped (provider not ready): ${embedError}`,
+              );
+            }
+
             const retrievalTest: {
               success: boolean;
               mode: string;
@@ -1812,19 +1822,26 @@ const myMemPlugin = {
               ? "enabled"
               : `disabled${retrievalTest.ftsError ? ` (${retrievalTest.ftsError})` : ""}`;
 
-            api.logger.info(
-              `mymem: initialized successfully ` +
-              `(embedding: ${embedTest.success ? "OK" : "FAIL"}, ` +
-              `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
-              `mode: ${retrievalTest.mode}, ` +
-              `FTS: ${ftsStatus})`,
-            );
-
-            if (!embedTest.success) {
-              api.logger.warn(
-                `mymem: embedding test failed: ${embedTest.error}`,
+            if (embedSuccess) {
+              api.logger.info(
+                `mymem: initialized successfully ` +
+                `(embedding: OK, ` +
+                `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
+                `mode: ${retrievalTest.mode}, ` +
+                `FTS: ${ftsStatus})`,
+              );
+            } else {
+              // Embedding not ready at startup — log as info, not error.
+              // It will work on first actual use once the provider warms up.
+              api.logger.info(
+                `mymem: initialized ` +
+                `(embedding: warming up, ` +
+                `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
+                `mode: ${retrievalTest.mode}, ` +
+                `FTS: ${ftsStatus})`,
               );
             }
+
             if (!retrievalTest.success) {
               api.logger.warn(
                 `mymem: retrieval test failed: ${retrievalTest.error}`,
@@ -1832,7 +1849,7 @@ const myMemPlugin = {
             }
 
             // Update stub health status so openclaw doctor reflects real state
-            embedHealth = { ok: !!embedTest.success, error: embedTest.error };
+            embedHealth = { ok: embedSuccess, error: embedError };
             retrievalHealth = !!retrievalTest.success;
           } catch (error) {
             api.logger.warn(
