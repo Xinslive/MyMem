@@ -440,7 +440,7 @@ export function formatEmbeddingProviderError(
 const MAX_EMBED_DEPTH = 3;
 
 /** Global timeout for a single embedding operation (ms). */
-const EMBED_TIMEOUT_MS = 10_000;
+const EMBED_TIMEOUT_MS = 20_000;
 
 /**
  * Strictly decreasing character limit for forced truncation.
