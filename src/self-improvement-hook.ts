@@ -175,7 +175,8 @@ export function registerSelfImprovementHook(params: {
         if (hasLearning) {
           const key = createBeforeResetReviewKey({ type: "learning", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
-            await appendSelfImprovementEntry({
+            // Fire-and-forget: filesystem append should not block session reset.
+            void appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "learning",
               summary: `Review possible learning before /${reason}: ${firstSignalLine(conversation, "learning")}`,
@@ -186,7 +187,7 @@ export function registerSelfImprovementHook(params: {
               priority: hasError ? "high" : "medium",
               status: "pending",
               source,
-            });
+            }).catch((err) => api.logger.warn("self-improvement: learning append failed: " + String(err)));
             writtenCount++;
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate learning review skipped for session ${sessionId}`);
@@ -196,7 +197,8 @@ export function registerSelfImprovementHook(params: {
         if (hasError) {
           const key = createBeforeResetReviewKey({ type: "error", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
-            await appendSelfImprovementEntry({
+            // Fire-and-forget: filesystem append should not block session reset.
+            void appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "error",
               summary: `Review failure before /${reason}: ${firstSignalLine(conversation, "error")}`,
@@ -206,7 +208,7 @@ export function registerSelfImprovementHook(params: {
               priority: "high",
               status: "pending",
               source,
-            });
+            }).catch((err) => api.logger.warn("self-improvement: error append failed: " + String(err)));
             writtenCount++;
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate error review skipped for session ${sessionId}`);
