@@ -371,10 +371,17 @@ export class Embedder {
       try {
         return await this.embedWithNativeFetch(payload, signal);
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        // Only retry Ollama on network/timeout errors, not user abort
+        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
           throw error;
         }
-        // Ollama errors bubble up without retry (Ollama doesn't rate-limit locally)
+        if (isNetworkError(error) || (error instanceof Error && error.name === 'AbortError')) {
+          return await this.retryWithBackoff(
+            () => this.embedWithNativeFetch(payload, signal),
+            signal,
+            error,
+          );
+        }
         throw error;
       }
     }
@@ -391,13 +398,14 @@ export class Embedder {
           signal,
         );
       } catch (error) {
-        // If aborted, re-throw immediately
-        if (error instanceof Error && error.name === 'AbortError') {
+        // If externally aborted, re-throw immediately
+        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
           throw error;
         }
 
         lastError = error instanceof Error ? error : new Error(String(error));
 
+        // Rate-limit: rotate to next key immediately
         if (this.isRateLimitError(error) && attempt < maxAttempts - 1) {
           this._logger.info(
             `[mymem] Attempt ${attempt + 1}/${maxAttempts} hit rate limit, rotating to next key...`
@@ -405,20 +413,31 @@ export class Embedder {
           continue;
         }
 
+        // Network error or internal timeout: retry with backoff
+        if (isNetworkError(error) || (error instanceof Error && error.name === 'AbortError')) {
+          return await this.retryWithBackoff(
+            () => this.withGlobalConcurrencyLimit(
+              () => client.embeddings.create(payload, signal ? { signal } : undefined),
+              signal,
+            ),
+            signal,
+            error,
+          );
+        }
+
+        // Loopback fallback for non-batch requests
         if (!Array.isArray(payload?.input) && isLoopbackBaseURL(this._baseURL)) {
           try {
             return await this.embedWithNativeFetch(payload, signal);
           } catch (fallbackError) {
-            if (fallbackError instanceof Error && fallbackError.name === "AbortError") {
+            if (fallbackError instanceof Error && fallbackError.name === "AbortError" && signal?.aborted) {
               throw fallbackError;
             }
           }
         }
 
-        // Non-rate-limit error → don't retry, let caller handle (e.g. chunking)
-        if (!this.isRateLimitError(error)) {
-          throw error;
-        }
+        // Auth and other errors: don't retry
+        throw error;
       }
     }
 
@@ -427,6 +446,63 @@ export class Embedder {
       `All ${maxAttempts} API keys exhausted (rate limited). Last error: ${lastError?.message || "unknown"}`,
       { cause: lastError }
     );
+  }
+
+  /**
+   * Retry a transient operation with exponential backoff + jitter.
+   * Retries up to 3 times for network errors and internal timeouts.
+   * Skips retry if the external signal was aborted (user cancellation).
+   */
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    signal: AbortSignal | undefined,
+    originalError: unknown,
+  ): Promise<T> {
+    const maxRetries = 3;
+    const baseDelayMs = 1000;
+
+    for (let retry = 0; retry < maxRetries; retry++) {
+      // Don't retry if externally cancelled
+      if (signal?.aborted) {
+        throw originalError instanceof Error ? originalError : new Error(String(originalError));
+      }
+
+      // Exponential backoff with jitter: 1s, 2s, 4s ± 25%
+      const delayMs = baseDelayMs * Math.pow(2, retry);
+      const jitter = delayMs * 0.25 * (Math.random() * 2 - 1);
+      const sleepMs = Math.max(0, Math.round(delayMs + jitter));
+
+      this._logger.info(
+        `[mymem] Retrying embedding after ${sleepMs}ms (attempt ${retry + 1}/${maxRetries}): ${originalError instanceof Error ? originalError.message : String(originalError)}`
+      );
+
+      await new Promise<void>((resolve) => setTimeout(resolve, sleepMs));
+
+      // Don't retry if externally cancelled during sleep
+      if (signal?.aborted) {
+        throw originalError instanceof Error ? originalError : new Error(String(originalError));
+      }
+
+      try {
+        return await fn();
+      } catch (error) {
+        // If externally aborted during retry, throw original error
+        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
+          throw error;
+        }
+        // If last retry, throw
+        if (retry === maxRetries - 1) {
+          throw error;
+        }
+        // Continue retrying for network/timeout errors
+        if (!isNetworkError(error) && !(error instanceof Error && error.name === 'AbortError')) {
+          throw error;
+        }
+      }
+    }
+
+    // Should not reach here, but throw original error as fallback
+    throw originalError instanceof Error ? originalError : new Error(String(originalError));
   }
 
   /** Number of API keys in the rotation pool. */
