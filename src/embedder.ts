@@ -717,52 +717,59 @@ export class Embedder {
       return [];
     }
 
-    // Filter out empty texts and track indices
-    const validTexts: string[] = [];
-    const validIndices: number[] = [];
+    // Check cache first — only send uncached texts to the API
+    const results: number[][] = new Array(texts.length);
+    const uncachedIndices: number[] = [];
+    const uncachedTexts: string[] = [];
 
-    texts.forEach((text, index) => {
-      if (text && text.trim().length > 0) {
-        validTexts.push(text);
-        validIndices.push(index);
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
+      if (!text || text.trim().length === 0) {
+        results[i] = [];
+        continue;
       }
-    });
+      const cached = this._cache.get(text, task);
+      if (cached) {
+        results[i] = cached;
+      } else {
+        uncachedIndices.push(i);
+        uncachedTexts.push(text);
+      }
+    }
 
-    if (validTexts.length === 0) {
-      return texts.map(() => []);
+    if (uncachedTexts.length === 0) {
+      return results;
     }
 
     try {
       const response = await this.embedWithRetry(
-        this.buildPayload(validTexts, task),
+        this.buildPayload(uncachedTexts, task),
         signal,
       );
 
-      if (!Array.isArray(response?.data) || response.data.length !== validTexts.length) {
+      if (!Array.isArray(response?.data) || response.data.length !== uncachedTexts.length) {
         throw new Error(
-          `Embedding provider returned invalid response for ${validTexts.length} inputs (unexpected result count)`
+          `Embedding provider returned invalid response for ${uncachedTexts.length} inputs (unexpected result count)`
         );
       }
 
-      // Create result array with proper length
-      const results: number[][] = new Array(texts.length);
-
-      // Fill in embeddings for valid texts
+      // Fill in embeddings for uncached texts
       response.data.forEach((item: { embedding?: unknown }, idx: number) => {
-        const originalIndex = validIndices[idx];
+        const originalIndex = uncachedIndices[idx];
         const embedding = item.embedding as number[];
 
         if (!Array.isArray(embedding) || embedding.length === 0) {
           throw new Error(
-            `Embedding provider returned invalid response for ${validTexts.length} inputs`
+            `Embedding provider returned invalid response for ${uncachedTexts.length} inputs`
           );
         }
 
         this.validateEmbedding(embedding);
+        this._cache.set(uncachedTexts[idx], task, embedding);
         results[originalIndex] = embedding;
       });
 
-      // Fill empty arrays for invalid texts
+      // Fill empty arrays for remaining texts
       for (let i = 0; i < texts.length; i++) {
         if (!results[i]) {
           results[i] = [];
@@ -780,7 +787,7 @@ export class Embedder {
           this._logger.info(`Batch embedding failed with context error, attempting chunking...`);
 
           const chunkResults = await Promise.all(
-            validTexts.map(async (text, idx) => {
+            uncachedTexts.map(async (text, idx) => {
               const chunkResult = smartChunk(text, this._model);
               if (chunkResult.chunks.length === 0) {
                 throw new Error("Chunker produced no chunks");
@@ -806,14 +813,13 @@ export class Embedder {
               // Cache the averaged embedding for the original (long) text.
               this._cache.set(text, task, finalEmbedding);
 
-              return { embedding: finalEmbedding, index: validIndices[idx] };
+              return { embedding: finalEmbedding, index: uncachedIndices[idx] };
             })
           );
 
           this._logger.info(`Successfully chunked and embedded ${chunkResults.length} long documents`);
 
-          // Build results array
-          const results: number[][] = new Array(texts.length);
+          // Fill chunked results into the main results array
           chunkResults.forEach(({ embedding, index }) => {
             if (embedding.length > 0) {
               this.validateEmbedding(embedding);

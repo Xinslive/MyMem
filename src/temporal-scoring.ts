@@ -47,7 +47,7 @@ export function applyRecencyBoost(
     };
   });
 
-  return boosted.sort((a, b) => b.score - a.score);
+  return boosted;
 }
 
 // ============================================================================
@@ -71,7 +71,7 @@ export function applyImportanceWeight(results: RetrievalResult[]): RetrievalResu
       score: clamp01(r.score * factor, r.score * baseWeight),
     };
   });
-  return weighted.sort((a, b) => b.score - a.score);
+  return weighted;
 }
 
 // ============================================================================
@@ -117,7 +117,7 @@ export function applyDecayBoost(
     score: clamp01(scored[index].score, result.score * 0.3),
   }));
 
-  return reranked.sort((a, b) => b.score - a.score);
+  return reranked;
 }
 
 // ============================================================================
@@ -153,7 +153,7 @@ export function applyLengthNormalization(
     };
   });
 
-  return normalized.sort((a, b) => b.score - a.score);
+  return normalized;
 }
 
 // ============================================================================
@@ -212,7 +212,7 @@ export function applyTimeDecay(
     };
   });
 
-  return decayed.sort((a, b) => b.score - a.score);
+  return decayed;
 }
 
 // ============================================================================
@@ -242,5 +242,5 @@ export function applyLifecycleBoost(
   decayEngine.applySearchBoost(scored, now);
 
   const boosted = pairs.map((p, i) => ({ ...p.r, score: scored[i].score }));
-  return boosted.sort((a, b) => b.score - a.score);
+  return boosted;
 }

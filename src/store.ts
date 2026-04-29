@@ -183,8 +183,9 @@ export class MemoryStore {
     table: LanceDB.Table,
     column: string,
     kind: "btree" | "bitmap",
+    cachedStatus?: StoreIndexStatus,
   ): Promise<void> {
-    const current = await this.getIndexStatusInternal(table);
+    const current = cachedStatus ?? await this.getIndexStatusInternal(table);
     if (current.available.scalar.includes(column)) return;
 
     const lancedb = await loadLanceDB();
@@ -200,8 +201,8 @@ export class MemoryStore {
     });
   }
 
-  private async ensureVectorIndex(table: LanceDB.Table, totalRows: number): Promise<void> {
-    const current = await this.getIndexStatusInternal(table);
+  private async ensureVectorIndex(table: LanceDB.Table, totalRows: number, cachedStatus?: StoreIndexStatus): Promise<void> {
+    const current = cachedStatus ?? await this.getIndexStatusInternal(table);
     if (current.available.vector || totalRows < MIN_VECTOR_INDEX_ROWS) return;
 
     const lancedb = await loadLanceDB();
@@ -228,14 +229,14 @@ export class MemoryStore {
     for (const plan of scalarPlans) {
       if (status.available.scalar.includes(plan.column)) continue;
       try {
-        await this.ensureScalarIndex(table, plan.column, plan.kind);
+        await this.ensureScalarIndex(table, plan.column, plan.kind, status);
       } catch (error) {
         this.log.warn(`mymem: failed to create scalar index on ${plan.column}: ${String(error)}`);
       }
     }
 
     try {
-      await this.ensureVectorIndex(table, status.totalRows);
+      await this.ensureVectorIndex(table, status.totalRows, status);
     } catch (error) {
       this.log.warn(`mymem: failed to create vector index: ${String(error)}`);
     }
@@ -825,7 +826,6 @@ export class MemoryStore {
     let searchQuery = this.table!.query().select([
       "id",
       "text",
-      "vector",
       "category",
       "scope",
       "importance",
@@ -1122,8 +1122,7 @@ export class MemoryStore {
       // Serialize updates per store instance to avoid stale rollback races.
       // If the add fails after delete, attempt best-effort recovery without
       // overwriting a newer concurrent successful update.
-      const rollbackCandidate =
-        (await this.getById(original.id).catch(() => null)) ?? original;
+      const rollbackCandidate = original; // already have latest data from query above
       const resolvedId = escapeSqlLiteral(row.id as string);
       await this.table!.delete(`id = '${resolvedId}'`);
       try {

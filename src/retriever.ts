@@ -406,6 +406,8 @@ export class MemoryRetriever {
         denoised = decayRanked;
       }
       if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
+      // Sort once after all scoring — intermediate sorts from scoring functions removed
+      denoised.sort((a, b) => b.score - a.score);
       const deduplicated = applyMMRDiversity(denoised);
       const finalResults = deduplicated.slice(0, limit);
       trace?.startStage("final_limit", deduplicated.map((r) => r.entry.id));
@@ -536,6 +538,7 @@ export class MemoryRetriever {
     if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
 
     trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
+    denoised.sort((a, b) => b.score - a.score);
     const deduplicated = applyMMRDiversity(denoised);
     const finalResults = deduplicated.slice(0, limit);
     trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
@@ -816,6 +819,7 @@ export class MemoryRetriever {
       if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
 
       trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
+      denoised.sort((a, b) => b.score - a.score);
       const deduplicated = applyMMRDiversity(denoised);
       const finalResults = deduplicated.slice(0, limit);
       trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
