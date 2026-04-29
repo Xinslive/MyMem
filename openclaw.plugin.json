@@ -164,7 +164,7 @@
         "type": "integer",
         "minimum": 500,
         "maximum": 60000,
-        "default": 15000,
+        "default": 20000,
         "description": "Timeout for the entire auto-recall pipeline (embedding + search + rerank) in milliseconds."
       },
       "autoRecallMaxItems": {
