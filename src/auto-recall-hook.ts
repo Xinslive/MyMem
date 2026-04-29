@@ -486,7 +486,9 @@ export function registerAutoRecallHook(params: {
       }
 
       const injectedAt = Date.now();
-      await Promise.allSettled(
+      // Fire-and-forget: update injection metadata without blocking the recall result.
+      // These writes are best-effort and should not add latency to the auto-recall path.
+      void Promise.allSettled(
         selected.map(async (item) => {
           const meta = item.meta;
           const staleInjected =
@@ -515,6 +517,8 @@ export function registerAutoRecallHook(params: {
             accessibleScopes,
           );
         }),
+      ).catch((err) =>
+        api.logger.warn("mymem: injection metadata update failed: " + String(err)),
       );
 
       // Run tier maintenance asynchronously after injection
