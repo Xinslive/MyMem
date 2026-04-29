@@ -47,6 +47,7 @@ type InjectedMemory = {
   category: string;
   injectedAt: number;
   source: InjectedSource;
+  ignoreCount?: number;
 };
 
 type SessionState = {
@@ -170,6 +171,32 @@ function hasNegativeRecallSignal(text: string): boolean {
   return /\b(wrong|incorrect|not relevant|irrelevant|outdated|stale|bad recall|misremembered|you remembered wrong)\b/i.test(text) ||
     /(?:不对|不是这样|记错|无关|过时|别再提|不要再用|错误的记忆)/.test(text) ||
     containsStrongNegativeGovernanceFeedback(text);
+}
+
+/**
+ * Lightweight word-overlap check to detect when the user silently ignores
+ * recalled memories (topic change / unrelated follow-up).
+ * Returns true if the user message has very low relevance to the injected memories.
+ */
+function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boolean {
+  if (!userMessage.trim() || injectedTexts.length === 0) return false;
+  const tokenize = (s: string) => {
+    const words = s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").split(/\s+/).filter((w) => w.length >= 2);
+    return new Set(words);
+  };
+  const userTokens = tokenize(userMessage);
+  if (userTokens.size === 0) return false;
+  const memoryTokens = new Set<string>();
+  for (const text of injectedTexts) {
+    for (const t of tokenize(text)) memoryTokens.add(t);
+  }
+  if (memoryTokens.size === 0) return false;
+  let overlap = 0;
+  for (const t of userTokens) {
+    if (memoryTokens.has(t)) overlap++;
+  }
+  // Very low overlap ratio → likely topic change
+  return overlap / Math.max(userTokens.size, 1) < 0.08 && overlap < 3;
 }
 
 function extractCorrection(text: string): { oldText: string; newText: string } | null {
@@ -526,6 +553,25 @@ export function registerHookEnhancements(params: {
     session.turnCount += 1;
     const currentTurn = session.turnCount;
     const blocks: Array<{ priority: number; text: string }> = [];
+
+    // Silent negative feedback: detect when user ignores recalled memories
+    if (enhancementEnabled(config, "badRecallFeedback") && session.injected.length > 0) {
+      const userMsg = typeof event?.prompt === "string" ? event.prompt : "";
+      const recentInjected = session.injected.filter((m) => Date.now() - m.injectedAt < 300_000);
+      if (userMsg && recentInjected.length > 0 && isSilentRecallIgnore(userMsg, recentInjected.map((m) => m.text))) {
+        for (const m of recentInjected) {
+          m.ignoreCount = (m.ignoreCount || 0) + 1;
+        }
+        const toSuppress = recentInjected.filter((m) => (m.ignoreCount || 0) >= 3);
+        if (toSuppress.length > 0) {
+          try {
+            await patchBadRecall({ store, injected: toSuppress, scopeFilter, reason: "recall_ignored" });
+          } catch (err) {
+            api.logger.debug?.(`mymem: silent bad-recall patch failed: ${String(err)}`);
+          }
+        }
+      }
+    }
 
     if (enhancementEnabled(config, "toolErrorPlaybook") && session.lastToolError) {
       try {

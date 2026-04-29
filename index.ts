@@ -848,7 +848,7 @@ const myMemPlugin = {
         const lifecycleCfg = {
           enabled: config.lifecycleMaintenance?.enabled === true,
           cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 4,
-          maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 300,
+          maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 500,
           archiveThreshold: config.lifecycleMaintenance?.archiveThreshold ?? 0.15,
           dryRun: config.lifecycleMaintenance?.dryRun === true,
           deleteMode: config.lifecycleMaintenance?.deleteMode ?? "archive",

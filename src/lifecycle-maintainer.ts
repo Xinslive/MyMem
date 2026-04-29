@@ -52,7 +52,7 @@ type RowContext = {
 const DEFAULT_CONFIG: LifecycleMaintenanceConfig = {
   enabled: true,
   cooldownHours: 4,
-  maxMemoriesToScan: 300,
+  maxMemoriesToScan: 500,
   archiveThreshold: 0.15,
   dryRun: false,
   deleteMode: "archive",
@@ -92,10 +92,12 @@ function shouldSkip(meta: SmartMemoryMetadata): boolean {
 function archiveReason(meta: SmartMemoryMetadata, composite: number, archiveThreshold: number): string | null {
   if (isMemoryExpired(meta)) return "expired";
   if (meta.superseded_by) return meta.compacted === true ? "superseded_fragment" : "superseded";
-  if (meta.bad_recall_count >= 3 && composite < Math.max(archiveThreshold, 0.25)) return "bad_recall";
+  if (meta.bad_recall_count >= 3 && composite < Math.max(archiveThreshold, 0.3)) return "bad_recall";
   if (meta.compacted === true && meta.source_count === 0) return "duplicate_cluster_source";
   if (meta.noise === true) return "noise";
   if (composite < archiveThreshold && meta.tier === "peripheral" && meta.access_count === 0) return "stale_unaccessed";
+  // Memories ignored 5+ times with no positive signals get archived
+  if (meta.bad_recall_count >= 5 && composite < 0.5 && meta.tier !== "core") return "bad_recall";
   return null;
 }
 

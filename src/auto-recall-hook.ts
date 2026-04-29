@@ -276,12 +276,12 @@ export function registerAutoRecallHook(params: {
         );
       }
 
-      const configMaxItems = clampInt(config.autoRecallMaxItems ?? 3, 1, 20);
+      const configMaxItems = clampInt(config.autoRecallMaxItems ?? 6, 1, 20);
       const maxPerTurn = clampInt(config.maxRecallPerTurn ?? 10, 1, 50);
       const autoRecallMaxItems = Math.min(configMaxItems, maxPerTurn);
-      const autoRecallMaxChars = clampInt(config.autoRecallMaxChars ?? 600, 64, 8000);
-      const autoRecallPerItemMaxChars = clampInt(config.autoRecallPerItemMaxChars ?? 180, 32, 1000);
-      const autoRecallCandidatePoolSize = clampInt(config.autoRecallCandidatePoolSize ?? 8, 4, 20);
+      const autoRecallMaxChars = clampInt(config.autoRecallMaxChars ?? 800, 64, 8000);
+      const autoRecallPerItemMaxChars = clampInt(config.autoRecallPerItemMaxChars ?? 200, 32, 1000);
+      const autoRecallCandidatePoolSize = clampInt(config.autoRecallCandidatePoolSize ?? 12, 4, 30);
       const retrieveLimit = clampInt(
         Math.min(Math.max(autoRecallMaxItems * 2, autoRecallMaxItems), autoRecallCandidatePoolSize),
         autoRecallMaxItems,

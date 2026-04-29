@@ -1005,6 +1005,9 @@ export class MemoryStore {
     totalCount: number;
     scopeCounts: Record<string, number>;
     categoryCounts: Record<string, number>;
+    recentActivity: { last24h: number; last7d: number };
+    tierDistribution: Record<string, number>;
+    healthSignals: { badRecall: number; suppressed: number; lowConfidence: number };
   }> {
     await this.ensureInitialized();
 
@@ -1013,10 +1016,13 @@ export class MemoryStore {
         totalCount: 0,
         scopeCounts: {},
         categoryCounts: {},
+        recentActivity: { last24h: 0, last7d: 0 },
+        tierDistribution: {},
+        healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
       };
     }
     const whereClause = this.buildBaseWhereClause(scopeFilter);
-    let query = this.table!.query().select(["scope", "category"]);
+    let query = this.table!.query().select(["scope", "category", "timestamp", "metadata"]);
     if (whereClause) {
       query = query.where(whereClause);
     }
@@ -1027,19 +1033,47 @@ export class MemoryStore {
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
+    const tierDistribution: Record<string, number> = {};
+    const now = Date.now();
+    const h24 = 24 * 60 * 60 * 1000;
+    const d7 = 7 * h24;
+    let last24h = 0;
+    let last7d = 0;
+    let badRecall = 0;
+    let suppressed = 0;
+    let lowConfidence = 0;
 
     for (const row of results) {
       const scope = (row.scope as string | undefined) ?? "global";
       const category = row.category as string;
+      const ts = row.timestamp as number;
 
       scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
       categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+
+      if (now - ts < h24) last24h++;
+      if (now - ts < d7) last7d++;
+
+      // Parse metadata for lifecycle and health signals
+      try {
+        const meta = typeof row.metadata === "string" ? JSON.parse(row.metadata) : {};
+        const tier = meta.memory_tier || meta.memory_layer || "unknown";
+        tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
+        if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
+        if (Number(meta.suppressed_until_turn || 0) > 0) suppressed++;
+        if (typeof meta.confidence === "number" && meta.confidence < 0.4) lowConfidence++;
+      } catch {
+        // skip malformed metadata
+      }
     }
 
     return {
       totalCount,
       scopeCounts,
       categoryCounts,
+      recentActivity: { last24h, last7d },
+      tierDistribution,
+      healthSignals: { badRecall, suppressed, lowConfidence },
     };
   }
 

@@ -106,9 +106,9 @@ describe("autoRecallMaxQueryLength", () => {
 });
 
 describe("autoRecallCandidatePoolSize", () => {
-  it("defaults to 8 for low-latency auto-recall", () => {
+  it("defaults to 12 for low-latency auto-recall", () => {
     const parsed = parsePluginConfig(baseConfig());
-    assert.equal(parsed.autoRecallCandidatePoolSize, 8);
+    assert.equal(parsed.autoRecallCandidatePoolSize, 12);
   });
 
   it("clamps values below minimum (4) to 4", () => {
@@ -119,12 +119,12 @@ describe("autoRecallCandidatePoolSize", () => {
     assert.equal(parsed.autoRecallCandidatePoolSize, 4);
   });
 
-  it("clamps values above maximum (20) to 20", () => {
+  it("clamps values above maximum (30) to 30", () => {
     const parsed = parsePluginConfig({
       ...baseConfig(),
       autoRecallCandidatePoolSize: 100,
     });
-    assert.equal(parsed.autoRecallCandidatePoolSize, 20);
+    assert.equal(parsed.autoRecallCandidatePoolSize, 30);
   });
 });
 

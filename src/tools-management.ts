@@ -91,6 +91,10 @@ export function registerMemoryStatsTool(
                 ]
               : []),
             ``,
+            `Recent Activity:`,
+            `  \u2022 Last 24 hours: ${stats.recentActivity.last24h} new`,
+            `  \u2022 Last 7 days: ${stats.recentActivity.last7d} new`,
+            ``,
             `Memories by scope:`,
             ...Object.entries(stats.scopeCounts).map(
               ([s, count]) => `  \u2022 ${s}: ${count}`,
@@ -100,6 +104,16 @@ export function registerMemoryStatsTool(
             ...Object.entries(stats.categoryCounts).map(
               ([c, count]) => `  \u2022 ${c}: ${count}`,
             ),
+            ``,
+            `Lifecycle distribution:`,
+            ...Object.entries(stats.tierDistribution).map(
+              ([t, count]) => `  \u2022 ${t}: ${count}`,
+            ),
+            ``,
+            `Health signals:`,
+            `  \u2022 Bad recall count > 0: ${stats.healthSignals.badRecall}`,
+            `  \u2022 Currently suppressed: ${stats.healthSignals.suppressed}`,
+            `  \u2022 Low confidence (<0.4): ${stats.healthSignals.lowConfidence}`,
           ];
 
           // Include retrieval quality metrics if stats collector is available
