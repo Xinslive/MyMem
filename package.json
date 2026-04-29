@@ -36,7 +36,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@lancedb/lancedb": "^0.26.2",
+    "@lancedb/lancedb": "^0.27.2",
     "@sinclair/typebox": "0.34.48",
     "apache-arrow": "18.1.0",
     "json5": "^2.2.3",
@@ -50,11 +50,12 @@
     ]
   },
   "optionalDependencies": {
-    "@lancedb/lancedb-darwin-x64": "^0.26.2",
-    "@lancedb/lancedb-darwin-arm64": "^0.26.2",
-    "@lancedb/lancedb-linux-x64-gnu": "^0.26.2",
-    "@lancedb/lancedb-linux-arm64-gnu": "^0.26.2",
-    "@lancedb/lancedb-win32-x64-msvc": "^0.26.2"
+    "@lancedb/lancedb-darwin-arm64": "^0.27.2",
+    "@lancedb/lancedb-linux-x64-gnu": "^0.27.2",
+    "@lancedb/lancedb-linux-arm64-gnu": "^0.27.2",
+    "@lancedb/lancedb-linux-x64-musl": "^0.27.2",
+    "@lancedb/lancedb-linux-arm64-musl": "^0.27.2",
+    "@lancedb/lancedb-win32-x64-msvc": "^0.27.2"
   },
   "devDependencies": {
     "commander": "^14.0.0",
