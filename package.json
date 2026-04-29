@@ -1,0 +1,64 @@
+{
+  "name": "mymem",
+  "version": "2026.4.26",
+  "description": "OpenClaw enhanced LanceDB memory plugin with hybrid retrieval (Vector + BM25), cross-encoder rerank, multi-scope isolation, long-context chunking, and management CLI",
+  "type": "module",
+  "main": "index.ts",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "memory",
+    "lancedb",
+    "vector-search",
+    "bm25",
+    "hybrid-retrieval",
+    "rerank",
+    "ai-memory",
+    "long-term-memory",
+    "chunking",
+    "long-context"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Xinslive/MyMem.git"
+  },
+  "author": "win4r",
+  "license": "MIT",
+  "scripts": {
+    "test": "node scripts/run-ci-tests.mjs --all",
+    "test:cli-smoke": "node scripts/run-ci-tests.mjs --group cli-smoke",
+    "test:core-regression": "node scripts/run-ci-tests.mjs --group core-regression",
+    "test:storage-and-schema": "node scripts/run-ci-tests.mjs --group storage-and-schema",
+    "test:llm-clients-and-auth": "node scripts/run-ci-tests.mjs --group llm-clients-and-auth",
+    "test:packaging-and-workflow": "node scripts/verify-ci-test-manifest.mjs && node scripts/run-ci-tests.mjs --group packaging-and-workflow",
+    "test:openclaw-host": "node test/openclaw-host-functional.mjs",
+    "version": "node scripts/sync-plugin-version.mjs openclaw.plugin.json package.json && git add openclaw.plugin.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.26.2",
+    "@sinclair/typebox": "0.34.48",
+    "apache-arrow": "18.1.0",
+    "json5": "^2.2.3",
+    "openai": "^6.21.0",
+    "proper-lockfile": "^4.1.2",
+    "stream-json": "^1.9.1"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "optionalDependencies": {
+    "@lancedb/lancedb-darwin-x64": "^0.26.2",
+    "@lancedb/lancedb-darwin-arm64": "^0.26.2",
+    "@lancedb/lancedb-linux-x64-gnu": "^0.26.2",
+    "@lancedb/lancedb-linux-arm64-gnu": "^0.26.2",
+    "@lancedb/lancedb-win32-x64-msvc": "^0.26.2"
+  },
+  "devDependencies": {
+    "commander": "^14.0.0",
+    "jiti": "^2.6.0",
+    "typescript": "^5.9.3"
+  }
+}

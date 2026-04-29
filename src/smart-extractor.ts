@@ -1,0 +1,1667 @@
+/**
+ * Smart Memory Extractor — LLM-powered extraction pipeline
+ * Replaces regex-triggered capture with intelligent 6-category extraction.
+ *
+ * Pipeline: conversation → LLM extract → candidates → dedup → persist
+ *
+ */
+
+import type { MemoryStore, MemorySearchResult } from "./store.js";
+import type { Embedder } from "./embedder.js";
+import type { LlmClient } from "./llm-client.js";
+import {
+  buildExtractionPrompt,
+  buildDedupPrompt,
+  buildMergePrompt,
+} from "./extraction-prompts.js";
+import {
+  AdmissionController,
+  type AdmissionAuditRecord,
+  type AdmissionControlConfig,
+  type AdmissionRejectionAuditEntry,
+} from "./admission-control.js";
+import {
+  type CandidateMemory,
+  type DedupDecision,
+  type DedupResult,
+  type ExtractionStats,
+  type MemoryCategory,
+  ALWAYS_MERGE_CATEGORIES,
+  MERGE_SUPPORTED_CATEGORIES,
+  MEMORY_CATEGORIES,
+  TEMPORAL_VERSIONED_CATEGORIES,
+  normalizeCategory,
+} from "./memory-categories.js";
+import { isNoise } from "./noise-filter.js";
+import type { NoisePrototypeBank } from "./noise-prototypes.js";
+import {
+  appendRelation,
+  buildSmartMetadata,
+  deriveFactKey,
+  type MemoryRelation,
+  parseSmartMetadata,
+  stringifySmartMetadata,
+  parseSupportInfo,
+  updateSupportStats,
+} from "./smart-metadata.js";
+import {
+  isUserMdExclusiveMemory,
+  type WorkspaceBoundaryConfig,
+} from "./workspace-boundary.js";
+import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
+import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
+import { batchDedup } from "./batch-dedup.js";
+
+// ============================================================================
+// Envelope Metadata Stripping
+// ============================================================================
+
+/**
+ * Strip platform envelope metadata injected by OpenClaw channels before
+ * the conversation text reaches the extraction LLM. These envelopes contain
+ * message IDs, sender IDs, timestamps, and JSON metadata blocks that have
+ * zero informational value for memory extraction but get stored verbatim
+ * by weaker LLMs (e.g. qwen) that can't distinguish metadata from content.
+ *
+ * Targets:
+ * - "System: [YYYY-MM-DD HH:MM:SS GMT+N] Channel[account] ..." header lines
+ * - "Conversation info (untrusted metadata):" + JSON code blocks
+ * - "Sender (untrusted metadata):" + JSON code blocks
+ * - "Replied message (untrusted, for context):" + JSON code blocks
+ * - Standalone JSON blocks containing message_id/sender_id fields
+ *
+ * Note: stripLeadingRuntimeWrappers and stripRuntimeWrapperBoilerplate from
+ * the old implementation are dead code after this refactor — they are not
+ * called anywhere in the pipeline. They have been removed.
+ */
+export function stripEnvelopeMetadata(text: string): string {
+  // Matches wrapper lines: [Subagent Context] or [Subagent Task], possibly with
+  // inline content on the same line (e.g. "[Subagent Task] Reply with brief ack.").
+  // Also matches when the wrapper prefix is on its own line ("]\n" = no content after ]).
+  const WRAPPER_LINE_RE = /^\[(?:Subagent Context|Subagent Task)\](?:\s|$|\n)?/i;
+  const BOILERPLATE_RE = /^(?:Results auto-announce to your requester\.?|do not busy-poll for status\.?|Reply with a brief acknowledgment only\.?|Do not use any memory tools\.?)$/im;
+  // Anchored inline variant: only strip boilerplate when it starts the wrapper
+  // remainder. This avoids erasing legitimate inline payload that merely quotes
+  // a boilerplate phrase later in the sentence.
+  // Repeat the anchored segment so composite wrappers like "You are running...
+  // Results auto-announce..." are fully removed before preserving any payload.
+  // The subagent running phrase uses (?<=\.)\s+|$ alternation (same as old
+  // RUNTIME_WRAPPER_BOILERPLATE_RE) so that parenthetical depth like "(depth 1/1)."
+  // is included before the ending whitespace, correctly stripping the full phrase.
+  const INLINE_BOILERPLATE_RE =
+    /^(?:(?:You are running as a subagent\b.*?(?:(?<=\.)\s+|$)|Results auto-announce to your requester\.?\s*|do not busy-poll for status\.?\s*|Reply with a brief acknowledgment only\.?\s*|Do not use any memory tools\.?\s*))+/i;
+  // Anchor to start of line — prevents quoted/cited false-positives
+  const SUBAGENT_RUNNING_RE = /^You are running as a subagent\b/i;
+
+  const originalLines = text.split("\n");
+
+  // Pre-scan: determine if there are leading wrappers.
+  // Needed to decide whether boilerplate in the leading zone should be stripped
+  // (boilerplate without a wrapper prefix is preserved — it may be legitimate user text).
+  //
+  // FIX (Must Fix 2): Only scan the ACTUAL leading zone — lines before the first
+  // real user content. Previously scanned ALL lines, causing false positives when
+  // a wrapper appeared in the trailing zone (e.g. user-pasted quoted text).
+  let foundLeadingWrapper = false;
+  for (let i = 0; i < originalLines.length; i++) {
+    const trimmed = originalLines[i].trim();
+    if (trimmed === "") continue; // blank lines are part of leading zone
+    if (WRAPPER_LINE_RE.test(trimmed)) { foundLeadingWrapper = true; continue; }
+    if (BOILERPLATE_RE.test(trimmed)) continue;
+    // First real user content — stop scanning, this is the leading zone boundary
+    break;
+  }
+
+  // Single-pass state machine: find leading zone end and build result simultaneously.
+  // Key: "You are running as a subagent..." on its own line AFTER a wrapper prefix
+  // is wrapper CONTENT (must be stripped), not user content.
+  let stillInLeadingZone = true;
+  let prevWasWrapper = false;
+  let encounteredWrapperYet = false; // FIX (MAJOR): per-line flag, not global
+  const result: string[] = [];
+
+  for (let i = 0; i < originalLines.length; i++) {
+    const rawLine = originalLines[i];
+    const trimmed = rawLine.trim();
+    const isWrapper = WRAPPER_LINE_RE.test(trimmed);
+    const isBoilerplate = BOILERPLATE_RE.test(trimmed);
+    const afterPrefix = trimmed.replace(WRAPPER_LINE_RE, "").trim();
+    const isBoilerplateAfterPrefix = BOILERPLATE_RE.test(afterPrefix);
+    const isSubagentContent = prevWasWrapper && SUBAGENT_RUNNING_RE.test(trimmed);
+
+    // Strip wrapper lines only when inside the leading zone (N2 fix)
+    if (stillInLeadingZone && isWrapper) {
+      prevWasWrapper = true;
+      encounteredWrapperYet = true;
+      // 1. Strip wrapper prefix
+      let remainder = afterPrefix;
+      // 2. Remove all boilerplate phrases from remainder (handles inline
+      //    wrapper+boilerplate like "[Subagent Context] ... Results auto-announce...").
+      //    Use INLINE_BOILERPLATE_RE (anchored, includes subagent phrase) so only
+      //    leading wrapper boilerplate is removed while quoted user payload remains.
+      remainder = remainder.replace(INLINE_BOILERPLATE_RE, "").replace(/\s{2,}/g, " ").trim();
+      // 3. Keep remainder if non-empty (non-boilerplate inline content preserved);
+      //    strip the whole line if only boilerplate was present
+      result.push(remainder);
+      continue;
+    }
+
+    if (stillInLeadingZone) {
+      // Blank line — strip but do NOT exit the leading zone (Must Fix 1 fix)
+      if (trimmed === "") {
+        result.push("");
+        continue;
+      }
+
+      // Boilerplate check: use afterPrefix (wrapper-stripped content) so that
+      // inline wrapper+boilerplate like "[Subagent Task] Reply with brief ack."
+      // is correctly identified as boilerplate and removed.
+      const contentForBoilerplateCheck = isWrapper ? afterPrefix : trimmed;
+      const isBoilerplateInline = BOILERPLATE_RE.test(contentForBoilerplateCheck);
+
+      if (isBoilerplateInline) {
+        // Boilerplate in leading zone — strip only when a wrapper has ALREADY
+        // appeared on a PREVIOUS line. This correctly handles the case where
+        // boilerplate text appears BEFORE the first wrapper in the leading zone
+        // (e.g. legitimate user text matching a boilerplate phrase, followed
+        // later by a wrapper).
+        result.push(encounteredWrapperYet ? "" : rawLine);
+        continue;
+      }
+
+      if (isSubagentContent) {
+        // Multiline wrapper: "You are running as a subagent..." on its own line
+        // after a wrapper prefix — strip it; keep prevWasWrapper true
+        result.push(""); // strip
+        continue;
+      }
+
+      // Real user content — exit the leading zone permanently
+      stillInLeadingZone = false;
+      prevWasWrapper = false;
+      encounteredWrapperYet = false;
+      result.push(rawLine); // preserve
+      continue;
+    }
+
+    // After leaving leading zone — always preserve
+    result.push(rawLine);
+  }
+
+  let cleaned = result.join("\n");
+
+  // 1. Strip "System: [timestamp] Channel..." lines
+  cleaned = cleaned.replace(
+    /^System:\s*\[[\d\-: +GMT]+\]\s+\S+\[.*?\].*$/gm,
+    "",
+  );
+
+  // 2. Strip labeled metadata sections with their JSON code blocks
+  //    e.g. "Conversation info (untrusted metadata):\n```json\n{...}\n```"
+  cleaned = cleaned.replace(
+    /(?:Conversation info|Sender|Replied message)\s*\(untrusted[^)]*\):\s*```json\s*\{[\s\S]*?\}\s*```/g,
+    "",
+  );
+
+  // 3. Strip any remaining JSON blocks that look like envelope metadata
+  //    (contain message_id and sender_id fields)
+  cleaned = cleaned.replace(
+    /```json\s*(?=\{[\s\S]*?"message_id"\s*:)(?=\{[\s\S]*?"sender_id"\s*:)\{[\s\S]*?\}\s*```/g,
+    "",
+  );
+
+  // 4. Collapse excessive blank lines left by removals
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
+  return cleaned.trim();
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const SIMILARITY_THRESHOLD = 0.7;
+const MAX_SIMILAR_FOR_PROMPT = 3;
+const MAX_MEMORIES_PER_EXTRACTION = 5;
+const VALID_DECISIONS = new Set<string>([
+  "create",
+  "merge",
+  "skip",
+  "support",
+  "contextualize",
+  "contradict",
+  "supersede",
+]);
+
+// ============================================================================
+// Smart Extractor
+// ============================================================================
+
+export interface SmartExtractorConfig {
+  /** User identifier for extraction prompt. */
+  user?: string;
+  /** Minimum conversation messages before extraction triggers. */
+  extractMinMessages?: number;
+  /** Maximum characters of conversation text to process. */
+  extractMaxChars?: number;
+  /** Default scope for new memories. */
+  defaultScope?: string;
+  /** Logger function. */
+  log?: (msg: string) => void;
+  /** Debug logger function. */
+  debugLog?: (msg: string) => void;
+  /** Optional embedding-based noise prototype bank for language-agnostic noise filtering. */
+  noiseBank?: NoisePrototypeBank;
+  /** Facts reserved for workspace-managed USER.md should never enter LanceDB. */
+  workspaceBoundary?: WorkspaceBoundaryConfig;
+  /** Optional admission-control governance layer before downstream dedup/persistence. */
+  admissionControl?: AdmissionControlConfig;
+  /** Optional sink for durable reject-audit logging. */
+  onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  /** Optional sink for extraction telemetry persistence. */
+  onExtractionComplete?: (payload: {
+    sessionKey: string;
+    scope: string;
+    stats: ExtractionStats;
+  }) => Promise<void> | void;
+}
+
+export interface ExtractPersistOptions {
+  /** Target scope for newly created memories. */
+  scope?: string;
+  /**
+   * Optional store-layer scope filter override used for dedup/merge reads.
+   * - omit the field to default reads to `[scope ?? defaultScope]`
+   * - set `undefined` explicitly to preserve trusted full-bypass callers
+   * - pass `[]` to force deny-all reads (match nothing)
+   * - pass a non-empty array to restrict reads to those scopes
+   */
+  scopeFilter?: string[];
+}
+
+export class SmartExtractor {
+  private log: (msg: string) => void;
+  private debugLog: (msg: string) => void;
+  private admissionController: AdmissionController | null;
+  private persistAdmissionAudit: boolean;
+  private onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  private onExtractionComplete?: (payload: {
+    sessionKey: string;
+    scope: string;
+    stats: ExtractionStats;
+  }) => Promise<void> | void;
+
+  constructor(
+    private store: MemoryStore,
+    private embedder: Embedder,
+    private llm: LlmClient,
+    private config: SmartExtractorConfig = {},
+  ) {
+    this.log = config.log ?? (() => {});
+    this.debugLog = config.debugLog ?? (() => { });
+    this.persistAdmissionAudit =
+      config.admissionControl?.enabled === true &&
+      config.admissionControl.auditMetadata !== false;
+    this.onAdmissionRejected = config.onAdmissionRejected;
+    this.onExtractionComplete = config.onExtractionComplete;
+    this.admissionController =
+      config.admissionControl?.enabled === true
+        ? new AdmissionController(
+            this.store,
+            this.llm,
+            config.admissionControl,
+            this.debugLog,
+          )
+        : null;
+  }
+
+  /** Exposes the AdmissionController for the feedback loop's prior adaptation. */
+  getAdmissionController(): AdmissionController | null {
+    return this.admissionController;
+  }
+
+  // --------------------------------------------------------------------------
+  // Main entry point
+  // --------------------------------------------------------------------------
+
+  /**
+   * Extract memories from a conversation text and persist them.
+   * Returns extraction statistics.
+   */
+  async extractAndPersist(
+    conversationText: string,
+    sessionKey: string = "unknown",
+    options: ExtractPersistOptions = {},
+  ): Promise<ExtractionStats> {
+    const startedAt = Date.now();
+    const stats: ExtractionStats = { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };
+    let candidateCount = 0;
+    let cappedCandidateCount = 0;
+    let processableCandidateCount = 0;
+    let duplicateSkipped = 0;
+    let batchDedupMs = 0;
+    let batchEmbedMs = 0;
+    let processMs = 0;
+    let flushMs = 0;
+    const attachTelemetry = () => {
+      stats.telemetry = {
+        totalMs: Date.now() - startedAt,
+        candidateCount,
+        cappedCandidateCount,
+        processableCandidateCount,
+        duplicateSkipped,
+        batchDedupMs,
+        batchEmbedMs,
+        processMs,
+        flushMs,
+      };
+    };
+    const targetScope = options.scope ?? this.config.defaultScope ?? "global";
+    // Distinguish "no override supplied" from explicit bypass/override values.
+    // - omitted `scopeFilter` => default to `[targetScope]`
+    // - explicit `undefined` => preserve full-bypass semantics for trusted callers
+    // - explicit `[]` or non-empty array => pass through unchanged
+    const hasExplicitScopeFilter = "scopeFilter" in options;
+    const scopeFilter = hasExplicitScopeFilter
+      ? options.scopeFilter
+      : [targetScope];
+
+    // Step 1: LLM extraction
+    const candidates = await this.extractCandidates(conversationText);
+    candidateCount = candidates.length;
+
+    if (candidates.length === 0) {
+      this.log("mymem: smart-extractor: no memories extracted");
+      // LLM returned zero candidates → strongest noise signal → feedback to noise bank
+      this.learnAsNoise(conversationText);
+      attachTelemetry();
+      if (this.onExtractionComplete) {
+        await this.onExtractionComplete({
+          sessionKey,
+          scope: targetScope,
+          stats,
+        });
+      }
+      return stats;
+    }
+
+    this.log(
+      `mymem: smart-extractor: extracted ${candidates.length} candidate(s)`,
+    );
+
+    // Step 1b: Batch-internal dedup — embed candidate abstracts and remove near-duplicates
+    //          before expensive per-candidate LLM dedup calls (see src/batch-dedup.ts)
+    const capped = candidates.slice(0, MAX_MEMORIES_PER_EXTRACTION);
+    cappedCandidateCount = capped.length;
+    let survivingCandidates = capped;
+    const batchDedupStartedAt = Date.now();
+    try {
+      const abstracts = capped.map((c) => c.abstract);
+      const vectors = await this.embedder.embedBatch(abstracts);
+      const safeVectors = vectors.map((v) => v || []);
+      const dedupResult = batchDedup(abstracts, safeVectors);
+      if (dedupResult.duplicateIndices.length > 0) {
+        survivingCandidates = dedupResult.survivingIndices.map((i) => capped[i]);
+        duplicateSkipped = dedupResult.duplicateIndices.length;
+        stats.skipped += dedupResult.duplicateIndices.length;
+        this.log(
+          `mymem: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`,
+        );
+      }
+    } catch (err) {
+      this.log(
+        `mymem: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`,
+      );
+    } finally {
+      batchDedupMs = Date.now() - batchDedupStartedAt;
+    }
+
+    // Step 2: Process each surviving candidate through dedup pipeline.
+    //
+    // Optimization: filter boundary-excluded candidates BEFORE batch embedding
+    // to avoid wasting embed API calls on candidates that will be skipped.
+    // See MR1 from code review.
+    const processableCandidates: { index: number; candidate: CandidateMemory }[] = [];
+    for (let i = 0; i < survivingCandidates.length; i++) {
+      const c = survivingCandidates[i];
+      if (
+        isUserMdExclusiveMemory(
+          {
+            memoryCategory: c.category,
+            abstract: c.abstract,
+            content: c.content,
+          },
+          this.config.workspaceBoundary,
+        )
+      ) {
+        stats.skipped += 1;
+        stats.boundarySkipped = (stats.boundarySkipped ?? 0) + 1;
+        this.log(
+          `mymem: smart-extractor: skipped USER.md-exclusive [${c.category}] ${c.abstract.slice(0, 60)}`,
+        );
+        continue;
+      }
+      processableCandidates.push({ index: i, candidate: c });
+    }
+    processableCandidateCount = processableCandidates.length;
+
+    // Pre-compute vectors for processable non-profile candidates in a single batch API call
+    // to reduce embedding round-trips from N to 1.
+    const precomputedVectors = new Map<number, number[]>();
+    const nonProfileToEmbed: { index: number; text: string }[] = [];
+    for (const { index, candidate } of processableCandidates) {
+      if (!ALWAYS_MERGE_CATEGORIES.has(candidate.category)) {
+        nonProfileToEmbed.push({ index, text: `${candidate.abstract} ${candidate.content}` });
+      }
+    }
+    if (nonProfileToEmbed.length > 0) {
+      const batchEmbedStartedAt = Date.now();
+      try {
+        const batchTexts = nonProfileToEmbed.map((e) => e.text);
+        const batchVectors = await this.embedder.embedBatch(batchTexts);
+        for (let j = 0; j < nonProfileToEmbed.length; j++) {
+          const vec = batchVectors[j];
+          if (vec && vec.length > 0) {
+            precomputedVectors.set(nonProfileToEmbed[j].index, vec);
+          }
+        }
+      } catch (err) {
+        this.log(
+          `mymem: smart-extractor: batch pre-embed failed, will embed individually: ${String(err)}`,
+        );
+      } finally {
+        batchEmbedMs = Date.now() - batchEmbedStartedAt;
+      }
+    }
+
+    // Flush-batch: buffer all store() calls within the candidate loop
+    // so they are written in a single lock acquisition at the end.
+    this.store.startBatch();
+
+    const processStartedAt = Date.now();
+    try {
+      for (const { index, candidate } of processableCandidates) {
+        try {
+          await this.processCandidate(
+            candidate,
+            conversationText,
+            sessionKey,
+            stats,
+            targetScope,
+            scopeFilter,
+            precomputedVectors.get(index),
+          );
+        } catch (err) {
+          this.log(
+            `mymem: smart-extractor: failed to process candidate [${candidate.category}]: ${String(err)}`,
+          );
+        }
+      }
+    } finally {
+      processMs = Date.now() - processStartedAt;
+    }
+
+    const flushStartedAt = Date.now();
+    await this.store.flushBatch();
+    flushMs = Date.now() - flushStartedAt;
+
+    attachTelemetry();
+    const telemetry = stats.telemetry!;
+    this.debugLog(
+      `mymem: smart-extractor telemetry total=${telemetry.totalMs}ms candidates=${candidateCount} processable=${processableCandidateCount} created=${stats.created} merged=${stats.merged} skipped=${stats.skipped} rejected=${stats.rejected ?? 0}`,
+    );
+    if (this.onExtractionComplete) {
+      await this.onExtractionComplete({
+        sessionKey,
+        scope: targetScope,
+        stats,
+      });
+    }
+    return stats;
+  }
+
+  // --------------------------------------------------------------------------
+  // Embedding Noise Pre-Filter
+  // --------------------------------------------------------------------------
+
+  /**
+   * Filter out texts that match noise prototypes by embedding similarity.
+   * Long texts (>300 chars) are passed through without checking.
+   * Only active when noiseBank is configured and initialized.
+   *
+   * Uses batch embedding to reduce API round-trips from N to 1.
+   */
+  async filterNoiseByEmbedding(texts: string[]): Promise<string[]> {
+    const noiseBank = this.config.noiseBank;
+    if (!noiseBank || !noiseBank.initialized) return texts;
+
+    // Partition: short/long texts bypass noise check; mid-length need embedding
+    const SHORT_THRESHOLD = 8;
+    const LONG_THRESHOLD = 300;
+    const bypassFlags: boolean[] = texts.map(
+      (t) => t.length <= SHORT_THRESHOLD || t.length > LONG_THRESHOLD,
+    );
+
+    const needsEmbedIndices: number[] = [];
+    const needsEmbedTexts: string[] = [];
+    for (let i = 0; i < texts.length; i++) {
+      if (!bypassFlags[i]) {
+        needsEmbedIndices.push(i);
+        needsEmbedTexts.push(texts[i]);
+      }
+    }
+
+    // Batch embed all mid-length texts in a single API call
+    let vectors: number[][] = [];
+    if (needsEmbedTexts.length > 0) {
+      try {
+        vectors = await this.embedder.embedBatch(needsEmbedTexts);
+      } catch (err) {
+        this.debugLog?.(`smart-extractor: batch embed failed: ${err}, passing through texts unchanged`);
+        // Batch failed — pass all through
+        return texts.slice();
+      }
+    }
+
+    const result: string[] = new Array(texts.length);
+    // First, fill in bypass texts (always kept)
+    for (let i = 0; i < texts.length; i++) {
+      if (bypassFlags[i]) {
+        result[i] = texts[i];
+      }
+    }
+
+    // Then, check noise for embedded texts
+    for (let j = 0; j < needsEmbedIndices.length; j++) {
+      const idx = needsEmbedIndices[j];
+      const vec = vectors[j];
+      if (!vec || vec.length === 0) {
+        result[idx] = texts[idx];
+        continue;
+      }
+      if (noiseBank.isNoise(vec)) {
+        this.debugLog(
+          `mymem: smart-extractor: embedding noise filtered: ${texts[idx].slice(0, 80)}`,
+        );
+        // Leave result[idx] as undefined — will be compacted below
+      } else {
+        result[idx] = texts[idx];
+      }
+    }
+
+    // Compact: remove undefined slots (filtered-out entries).
+    // Use explicit undefined check rather than filter(Boolean) to preserve
+    // empty strings that were legitimately in bypass slots.
+    return result.filter((x): x is string => x !== undefined);
+  }
+
+  /**
+   * Feed back conversation text to the noise prototype bank.
+   * Called when LLM extraction returns zero candidates (strongest noise signal).
+   */
+  private async learnAsNoise(conversationText: string): Promise<void> {
+    const noiseBank = this.config.noiseBank;
+    if (!noiseBank || !noiseBank.initialized) return;
+
+    try {
+      const tail = conversationText.slice(-300);
+      const vec = await this.embedder.embed(tail);
+      if (vec && vec.length > 0) {
+        noiseBank.learn(vec);
+        this.debugLog("mymem: smart-extractor: learned noise from zero-extraction");
+      }
+    } catch (err) {
+      this.debugLog?.(`smart-extractor: failed to learn noise prototype: ${err}`);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Step 1: LLM Extraction
+  // --------------------------------------------------------------------------
+
+  /**
+   * Call LLM to extract candidate memories from conversation text.
+   */
+  private async extractCandidates(
+    conversationText: string,
+  ): Promise<CandidateMemory[]> {
+    const maxChars = this.config.extractMaxChars ?? 8000;
+    const truncated =
+      conversationText.length > maxChars
+        ? conversationText.slice(-maxChars)
+        : conversationText;
+
+    // Strip platform envelope metadata injected by OpenClaw channels
+    // (e.g. "System: [2026-03-18 14:21:36 GMT+8] Feishu[default] DM | ou_...")
+    // These pollute extraction if treated as conversation content.
+    const cleaned = stripEnvelopeMetadata(truncated);
+
+    const user = this.config.user ?? "User";
+    const prompt = buildExtractionPrompt(cleaned, user);
+
+    const result = await this.llm.completeJson<{
+      memories: Array<{
+        category: string;
+        abstract: string;
+        overview: string;
+        content: string;
+      }>;
+    }>(prompt, "extract-candidates");
+
+    if (!result) {
+      this.debugLog(
+        "mymem: smart-extractor: extract-candidates returned null",
+      );
+      return [];
+    }
+    if (!result.memories || !Array.isArray(result.memories)) {
+      this.debugLog(
+        `mymem: smart-extractor: extract-candidates returned unexpected shape keys=${Object.keys(result).join(",") || "(none)"}`,
+      );
+      return [];
+    }
+
+    this.debugLog(
+      `mymem: smart-extractor: extract-candidates raw memories=${result.memories.length}`,
+    );
+
+    // Validate and normalize candidates
+    const candidates: CandidateMemory[] = [];
+    let invalidCategoryCount = 0;
+    let shortAbstractCount = 0;
+    let noiseAbstractCount = 0;
+    for (const raw of result.memories) {
+      if (!raw || typeof raw !== "object") {
+        invalidCategoryCount++;
+        this.debugLog(
+          `mymem: smart-extractor: dropping null/invalid candidate entry`,
+        );
+        continue;
+      }
+      const category = normalizeCategory(raw.category ?? "");
+      if (!category) {
+        invalidCategoryCount++;
+        this.debugLog(
+          `mymem: smart-extractor: dropping candidate due to invalid category rawCategory=${JSON.stringify(raw.category ?? "")} abstract=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`,
+        );
+        continue;
+      }
+
+      const abstract = (raw.abstract ?? "").trim();
+      const overview = (raw.overview ?? "").trim();
+      const content = (raw.content ?? "").trim();
+
+      // Skip empty or noise
+      if (!abstract || abstract.length < 5) {
+        shortAbstractCount++;
+        this.debugLog(
+          `mymem: smart-extractor: dropping candidate due to short abstract category=${category} abstract=${JSON.stringify(abstract)}`,
+        );
+        continue;
+      }
+      if (isNoise(abstract)) {
+        noiseAbstractCount++;
+        this.debugLog(
+          `mymem: smart-extractor: dropping candidate due to noise abstract category=${category} abstract=${JSON.stringify(abstract.slice(0, 120))}`,
+        );
+        continue;
+      }
+
+      candidates.push({ category, abstract, overview, content });
+    }
+
+    this.debugLog(
+      `mymem: smart-extractor: validation summary accepted=${candidates.length}, invalidCategory=${invalidCategoryCount}, shortAbstract=${shortAbstractCount}, noiseAbstract=${noiseAbstractCount}`,
+    );
+
+    return candidates;
+  }
+
+  // --------------------------------------------------------------------------
+  // Step 2: Dedup + Persist
+  // --------------------------------------------------------------------------
+
+  /**
+   * Process a single candidate memory: dedup → merge/create → store
+   *
+   * @param precomputedVector - Optional pre-embedded vector for the candidate.
+   *   When provided (from batch pre-embedding), skips the per-candidate embed
+   *   call to reduce API round-trips.
+   */
+  private async processCandidate(
+    candidate: CandidateMemory,
+    conversationText: string,
+    sessionKey: string,
+    stats: ExtractionStats,
+    targetScope: string,
+    scopeFilter?: string[],
+    precomputedVector?: number[],
+  ): Promise<void> {
+    // Profile always merges (skip dedup — admission control still applies)
+    if (ALWAYS_MERGE_CATEGORIES.has(candidate.category)) {
+      const profileResult = await this.handleProfileMerge(
+        candidate,
+        conversationText,
+        sessionKey,
+        targetScope,
+        scopeFilter,
+      );
+      if (profileResult === "rejected") {
+        stats.rejected = (stats.rejected ?? 0) + 1;
+      } else if (profileResult === "created") {
+        stats.created++;
+      } else {
+        stats.merged++;
+      }
+      return;
+    }
+
+    // Use pre-computed vector if available (batch embed optimization),
+    // otherwise fall back to per-candidate embed call.
+    const vector = precomputedVector ?? await this.embedder.embed(`${candidate.abstract} ${candidate.content}`);
+    if (!vector || vector.length === 0) {
+      this.log("mymem: smart-extractor: embedding failed, storing as-is");
+      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope);
+      stats.created++;
+      return;
+    }
+
+    // Admission control gate (before dedup)
+    const admission = this.admissionController
+      ? await this.admissionController.evaluate({
+          candidate,
+          candidateVector: vector,
+          conversationText,
+          scopeFilter: scopeFilter ?? [targetScope],
+        })
+      : undefined;
+
+    if (admission?.decision === "reject") {
+      stats.rejected = (stats.rejected ?? 0) + 1;
+      this.log(
+        `mymem: smart-extractor: admission rejected [${candidate.category}] ${candidate.abstract.slice(0, 60)} — ${admission.audit.reason}`,
+      );
+      await this.recordRejectedAdmission(
+        candidate,
+        conversationText,
+        sessionKey,
+        targetScope,
+        scopeFilter ?? [targetScope],
+        admission.audit as AdmissionAuditRecord & { decision: "reject" },
+      );
+      return;
+    }
+
+    // Dedup pipeline
+    const dedupResult = await this.deduplicate(candidate, vector, scopeFilter);
+
+    switch (dedupResult.decision) {
+      case "create":
+        await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+        stats.created++;
+        break;
+
+      case "merge":
+        if (
+          dedupResult.matchId &&
+          MERGE_SUPPORTED_CATEGORIES.has(candidate.category)
+        ) {
+          await this.handleMerge(
+            candidate,
+            dedupResult.matchId,
+            targetScope,
+            scopeFilter ?? [targetScope],
+            dedupResult.contextLabel,
+            admission?.audit,
+          );
+          stats.merged++;
+        } else {
+          // Category doesn't support merge → create instead
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          stats.created++;
+        }
+        break;
+
+      case "skip":
+        this.log(
+          `mymem: smart-extractor: skipped [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+        );
+        stats.skipped++;
+        break;
+
+      case "supersede":
+        if (
+          dedupResult.matchId &&
+          TEMPORAL_VERSIONED_CATEGORIES.has(candidate.category)
+        ) {
+          await this.handleSupersede(
+            candidate,
+            vector,
+            dedupResult.matchId,
+            sessionKey,
+            targetScope,
+            scopeFilter ?? [targetScope],
+            admission?.audit,
+          );
+          stats.created++;
+          stats.superseded = (stats.superseded ?? 0) + 1;
+        } else {
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          stats.created++;
+        }
+        break;
+
+      case "support":
+        if (dedupResult.matchId) {
+          await this.handleSupport(dedupResult.matchId, { session: sessionKey, timestamp: Date.now() }, dedupResult.reason, dedupResult.contextLabel, scopeFilter, admission?.audit);
+          stats.supported = (stats.supported ?? 0) + 1;
+        } else {
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          stats.created++;
+        }
+        break;
+
+      case "contextualize":
+        if (dedupResult.matchId) {
+          await this.handleContextualize(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+          stats.created++;
+        } else {
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          stats.created++;
+        }
+        break;
+
+      case "contradict":
+        if (dedupResult.matchId) {
+          if (
+            TEMPORAL_VERSIONED_CATEGORIES.has(candidate.category) &&
+            dedupResult.contextLabel === "general"
+          ) {
+            await this.handleSupersede(
+              candidate,
+              vector,
+              dedupResult.matchId,
+              sessionKey,
+              targetScope,
+              scopeFilter ?? [targetScope],
+              admission?.audit,
+            );
+            stats.created++;
+            stats.superseded = (stats.superseded ?? 0) + 1;
+          } else {
+            await this.handleContradict(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+            stats.created++;
+          }
+        } else {
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          stats.created++;
+        }
+        break;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Dedup Pipeline (vector pre-filter + LLM decision)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Two-stage dedup: vector similarity search → LLM decision.
+   */
+  private async deduplicate(
+    candidate: CandidateMemory,
+    candidateVector: number[],
+    scopeFilter?: string[],
+  ): Promise<DedupResult> {
+    // Stage 1: Vector pre-filter — find similar active memories.
+    // excludeInactive ensures the store over-fetches to fill N active slots,
+    // preventing superseded history from crowding out the current fact.
+    const activeSimilar = await this.store.vectorSearch(
+      candidateVector,
+      5,
+      SIMILARITY_THRESHOLD,
+      scopeFilter,
+      { excludeInactive: true },
+    );
+
+    if (activeSimilar.length === 0) {
+      return { decision: "create", reason: "No similar memories found" };
+    }
+
+    // Stage 1.5: Preference slot guard — same brand but different item
+    // should always be stored as a new memory, not merged/skipped.
+    // Example: "喜欢麦当劳的板烧鸡腿堡" and "喜欢麦当劳的麦辣鸡翅" are
+    // different preferences even though they share the same brand.
+    if (candidate.category === "preferences") {
+      const candidateSlot = inferAtomicBrandItemPreferenceSlot(candidate.content);
+      if (candidateSlot) {
+        const allDifferentItem = activeSimilar.every((r) => {
+          const existingSlot = inferAtomicBrandItemPreferenceSlot(r.entry.text);
+          // If existing is not a brand-item preference, let LLM decide
+          if (!existingSlot) return false;
+          // Same brand, different item → should not be deduped
+          return existingSlot.brand === candidateSlot.brand && existingSlot.item !== candidateSlot.item;
+        });
+        if (allDifferentItem) {
+          return { decision: "create", reason: "Same brand but different item-level preference (preference-slot guard)" };
+        }
+      }
+    }
+
+    // Stage 2: LLM decision
+    return this.llmDedupDecision(candidate, activeSimilar);
+  }
+
+  private async llmDedupDecision(
+    candidate: CandidateMemory,
+    similar: MemorySearchResult[],
+  ): Promise<DedupResult> {
+    const topSimilar = similar.slice(0, MAX_SIMILAR_FOR_PROMPT);
+    const existingFormatted = topSimilar
+      .map((r, i) => {
+        // Extract L0 abstract from metadata if available, fallback to text
+        let metaObj: Record<string, unknown> = {};
+        try {
+          metaObj = JSON.parse(r.entry.metadata || "{}");
+        } catch { }
+        const abstract = (metaObj.l0_abstract as string) || r.entry.text;
+        const overview = (metaObj.l1_overview as string) || "";
+        return `${i + 1}. [${(metaObj.memory_category as string) || r.entry.category}] ${abstract}\n   Overview: ${overview}\n   Score: ${r.score.toFixed(3)}`;
+      })
+      .join("\n");
+
+    const prompt = buildDedupPrompt(
+      candidate.abstract,
+      candidate.overview,
+      candidate.content,
+      existingFormatted,
+    );
+
+    try {
+      const data = await this.llm.completeJson<{
+        decision: string;
+        reason: string;
+        match_index?: number;
+      }>(prompt, "dedup-decision");
+
+      if (!data) {
+        this.log(
+          "mymem: smart-extractor: dedup LLM returned unparseable response, defaulting to CREATE",
+        );
+        return { decision: "create", reason: "LLM response unparseable" };
+      }
+
+      const decision = (data.decision?.toLowerCase() ??
+        "create") as DedupDecision;
+      if (!VALID_DECISIONS.has(decision)) {
+        return {
+          decision: "create",
+          reason: `Unknown decision: ${data.decision}`,
+        };
+      }
+
+      // Resolve merge target from LLM's match_index (1-based)
+      const idx = data.match_index;
+      const hasValidIndex = typeof idx === "number" && idx >= 1 && idx <= topSimilar.length;
+      const matchEntry = hasValidIndex
+        ? topSimilar[idx - 1]
+        : topSimilar[0];
+
+      // For destructive decisions (supersede), missing match_index is
+      // unsafe — we could invalidate the wrong memory. Degrade to create.
+      const destructiveDecisions = new Set(["supersede", "contradict"]);
+      if (destructiveDecisions.has(decision) && !hasValidIndex) {
+        this.log(
+          `mymem: smart-extractor: ${decision} decision has missing/invalid match_index (${idx}), degrading to create`,
+        );
+        return {
+          decision: "create",
+          reason: `${decision} degraded: missing match_index`,
+        };
+      }
+
+      return {
+        decision,
+        reason: data.reason ?? "",
+        matchId: ["merge", "support", "contextualize", "contradict", "supersede"].includes(decision) ? matchEntry?.entry.id : undefined,
+        contextLabel: typeof (data as any).context_label === "string" ? (data as any).context_label : undefined,
+      };
+    } catch (err) {
+      this.log(
+        `mymem: smart-extractor: dedup LLM failed: ${String(err)}`,
+      );
+      return { decision: "create", reason: `LLM failed: ${String(err)}` };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Merge Logic
+  // --------------------------------------------------------------------------
+
+  /**
+   * Profile always-merge: read existing profile, merge with LLM, upsert.
+   */
+  private async handleProfileMerge(
+    candidate: CandidateMemory,
+    conversationText: string,
+    sessionKey: string,
+    targetScope: string,
+    scopeFilter?: string[],
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<"merged" | "created" | "rejected"> {
+    // Find existing profile memory by category
+    const embeddingText = `${candidate.abstract} ${candidate.content}`;
+    const vector = await this.embedder.embed(embeddingText);
+
+    // Run admission control for profile candidates (they skip the main dedup path)
+    if (!admissionAudit && this.admissionController && vector && vector.length > 0) {
+      const profileAdmission = await this.admissionController.evaluate({
+        candidate,
+        candidateVector: vector,
+        conversationText,
+        scopeFilter: scopeFilter ?? [targetScope],
+      });
+      if (profileAdmission.decision === "reject") {
+        this.log(
+          `mymem: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`,
+        );
+        await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
+        return "rejected";
+      }
+      admissionAudit = profileAdmission.audit;
+    }
+
+    // Search for existing profile memories
+    const existing = await this.store.vectorSearch(
+      vector || [],
+      1,
+      0.3,
+      scopeFilter,
+    );
+    const profileMatch = existing.find((r) => {
+      try {
+        const meta = JSON.parse(r.entry.metadata || "{}");
+        return meta.memory_category === "profile";
+      } catch {
+        return false;
+      }
+    });
+
+    if (profileMatch) {
+      await this.handleMerge(
+        candidate,
+        profileMatch.entry.id,
+        targetScope,
+        scopeFilter,
+        undefined,
+        admissionAudit,
+      );
+      return "merged";
+    } else {
+      // No existing profile — create new
+      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, admissionAudit);
+      return "created";
+    }
+  }
+
+  /**
+   * Merge a candidate into an existing memory using LLM.
+   */
+  private async handleMerge(
+    candidate: CandidateMemory,
+    matchId: string,
+    targetScope: string,
+    scopeFilter?: string[],
+    contextLabel?: string,
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    let existingAbstract = "";
+    let existingOverview = "";
+    let existingContent = "";
+
+    try {
+      const existing = await this.store.getById(matchId, scopeFilter);
+      if (existing) {
+        const meta = parseSmartMetadata(existing.metadata, existing);
+        existingAbstract = meta.l0_abstract || existing.text;
+        existingOverview = meta.l1_overview || "";
+        existingContent = meta.l2_content || existing.text;
+      }
+    } catch {
+      // Fallback: store as new
+      this.log(
+        `mymem: smart-extractor: could not read existing memory ${matchId}, storing as new`,
+      );
+      const vector = await this.embedder.embed(
+        `${candidate.abstract} ${candidate.content}`,
+      );
+      await this.storeCandidate(
+        candidate,
+        vector || [],
+        "merge-fallback",
+        targetScope,
+      );
+      return;
+    }
+
+    // Call LLM to merge
+    const prompt = buildMergePrompt(
+      existingAbstract,
+      existingOverview,
+      existingContent,
+      candidate.abstract,
+      candidate.overview,
+      candidate.content,
+      candidate.category,
+    );
+
+    const merged = await this.llm.completeJson<{
+      abstract: string;
+      overview: string;
+      content: string;
+    }>(prompt, "merge-memory");
+
+    if (!merged) {
+      this.log("mymem: smart-extractor: merge LLM failed, skipping merge");
+      return;
+    }
+
+    // Re-embed the merged content
+    const mergedText = `${merged.abstract} ${merged.content}`;
+    const newVector = await this.embedder.embed(mergedText);
+
+    // Update existing memory via store.update()
+    const existing = await this.store.getById(matchId, scopeFilter);
+    const metadata = stringifySmartMetadata(
+      this.withAdmissionAudit(
+        buildSmartMetadata(existing ?? { text: merged.abstract }, {
+          l0_abstract: merged.abstract,
+          l1_overview: merged.overview,
+          l2_content: merged.content,
+          memory_category: candidate.category,
+          tier: "working",
+          confidence: 0.8,
+        }),
+        admissionAudit,
+      ),
+    );
+
+    await this.store.update(
+      matchId,
+      {
+        text: merged.abstract,
+        vector: newVector,
+        metadata,
+      },
+      scopeFilter,
+    );
+
+    // Update support stats on the merged memory
+    try {
+      const updatedEntry = await this.store.getById(matchId, scopeFilter);
+      if (updatedEntry) {
+        const meta = parseSmartMetadata(updatedEntry.metadata, updatedEntry);
+        const supportInfo = parseSupportInfo(meta.support_info);
+        const updated = updateSupportStats(supportInfo, contextLabel, "support");
+        const finalMetadata = stringifySmartMetadata({ ...meta, support_info: updated });
+        await this.store.update(matchId, { metadata: finalMetadata }, scopeFilter);
+      }
+    } catch {
+      // Non-critical: merge succeeded, support stats update is best-effort
+    }
+
+    this.log(
+      `mymem: smart-extractor: merged [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} into ${matchId.slice(0, 8)}`,
+    );
+  }
+
+  /**
+   * Handle SUPERSEDE: preserve the old record as historical but mark it as no
+   * longer current, then create the new active fact.
+   */
+  private async handleSupersede(
+    candidate: CandidateMemory,
+    vector: number[],
+    matchId: string,
+    sessionKey: string,
+    targetScope: string,
+    scopeFilter: string[],
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    const existing = await this.store.getById(matchId, scopeFilter);
+    if (!existing) {
+      await this.storeCandidate(candidate, vector, sessionKey, targetScope);
+      return;
+    }
+
+    const now = Date.now();
+    const existingMeta = parseSmartMetadata(existing.metadata, existing);
+    const factKey =
+      existingMeta.fact_key ?? deriveFactKey(candidate.category, candidate.abstract);
+    const storeCategory = this.mapToStoreCategory(candidate.category);
+    const supersedeClassifyText = candidate.content || candidate.abstract;
+    const created = await this.store.store({
+      text: candidate.abstract,
+      vector,
+      category: storeCategory,
+      scope: targetScope,
+      importance: this.getDefaultImportance(candidate.category),
+      metadata: stringifySmartMetadata(
+        buildSmartMetadata(
+          {
+            text: candidate.abstract,
+            category: storeCategory,
+          },
+          {
+            l0_abstract: candidate.abstract,
+            l1_overview: candidate.overview,
+            l2_content: candidate.content,
+            memory_category: candidate.category,
+            tier: "working",
+            access_count: 0,
+            confidence: 0.7,
+            source_session: sessionKey,
+            source: "auto-capture",
+            state: "confirmed", // #350: write confirmed to unblock auto-recall
+            memory_layer: "working",
+            injected_count: 0,
+            bad_recall_count: 0,
+            suppressed_until_turn: 0,
+            valid_from: now,
+            fact_key: factKey,
+            supersedes: matchId,
+            relations: appendRelation([], {
+              type: "supersedes",
+              targetId: matchId,
+            }),
+            memory_temporal_type: classifyTemporal(supersedeClassifyText),
+            valid_until: inferExpiry(supersedeClassifyText),
+          },
+        ),
+      ),
+    });
+
+    const invalidatedMetadata = buildSmartMetadata(existing, {
+      fact_key: factKey,
+      invalidated_at: now,
+      superseded_by: created.id,
+      relations: appendRelation(existingMeta.relations, {
+        type: "superseded_by",
+        targetId: created.id,
+      }),
+    });
+
+    await this.store.update(
+      matchId,
+      { metadata: stringifySmartMetadata(invalidatedMetadata) },
+      scopeFilter,
+    );
+
+    this.log(
+      `mymem: smart-extractor: superseded [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`,
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // Context-Aware Handlers (support / contextualize / contradict)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Handle SUPPORT: update support stats on existing memory for a specific context.
+   */
+  private async handleSupport(
+    matchId: string,
+    source: { session: string; timestamp: number },
+    reason: string,
+    contextLabel?: string,
+    scopeFilter?: string[],
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    const existing = await this.store.getById(matchId, scopeFilter);
+    if (!existing) return;
+
+    const meta = parseSmartMetadata(existing.metadata, existing);
+    const supportInfo = parseSupportInfo(meta.support_info);
+    const updated = updateSupportStats(supportInfo, contextLabel, "support");
+    meta.support_info = updated;
+
+    await this.store.update(
+      matchId,
+      { metadata: stringifySmartMetadata(this.withAdmissionAudit(meta, admissionAudit)) },
+      scopeFilter,
+    );
+
+    this.log(
+      `mymem: smart-extractor: support [${contextLabel || "general"}] on ${matchId.slice(0, 8)} — ${reason}`,
+    );
+  }
+
+  /**
+   * Handle CONTEXTUALIZE: create a new entry that adds situational nuance,
+   * linked to the original via a relation in metadata.
+   */
+  private async handleContextualize(
+    candidate: CandidateMemory,
+    vector: number[],
+    matchId: string,
+    sessionKey: string,
+    targetScope: string,
+    scopeFilter?: string[],
+    contextLabel?: string,
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    const storeCategory = this.mapToStoreCategory(candidate.category);
+    const metadata = stringifySmartMetadata(this.withAdmissionAudit({
+      l0_abstract: candidate.abstract,
+      l1_overview: candidate.overview,
+      l2_content: candidate.content,
+      memory_category: candidate.category,
+      tier: "working" as const,
+      access_count: 0,
+      confidence: 0.7,
+      last_accessed_at: Date.now(),
+      source_session: sessionKey,
+      source: "auto-capture" as const,
+      state: "confirmed" as const, // #350: write confirmed to unblock auto-recall
+      memory_layer: "working" as const,
+      injected_count: 0,
+      bad_recall_count: 0,
+      suppressed_until_turn: 0,
+      contexts: contextLabel ? [contextLabel] : [],
+      relations: [{ type: "contextualizes", targetId: matchId }],
+    }, admissionAudit));
+
+    await this.store.store({
+      text: candidate.abstract,
+      vector,
+      category: storeCategory,
+      scope: targetScope,
+      importance: this.getDefaultImportance(candidate.category),
+      metadata,
+    });
+
+    this.log(
+      `mymem: smart-extractor: contextualize [${contextLabel || "general"}] new entry linked to ${matchId.slice(0, 8)}`,
+    );
+  }
+
+  /**
+   * Handle CONTRADICT: create contradicting entry + record contradiction evidence
+   * on the original memory's support stats.
+   */
+  private async handleContradict(
+    candidate: CandidateMemory,
+    vector: number[],
+    matchId: string,
+    sessionKey: string,
+    targetScope: string,
+    scopeFilter?: string[],
+    contextLabel?: string,
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    // 1. Record contradiction on the existing memory
+    const existing = await this.store.getById(matchId, scopeFilter);
+    if (existing) {
+      const meta = parseSmartMetadata(existing.metadata, existing);
+      const supportInfo = parseSupportInfo(meta.support_info);
+      const updated = updateSupportStats(supportInfo, contextLabel, "contradict");
+      meta.support_info = updated;
+      await this.store.update(
+        matchId,
+        { metadata: stringifySmartMetadata(meta) },
+        scopeFilter,
+      );
+    }
+
+    // 2. Store the contradicting entry as a new memory
+    const storeCategory = this.mapToStoreCategory(candidate.category);
+    const metadata = stringifySmartMetadata(this.withAdmissionAudit({
+      l0_abstract: candidate.abstract,
+      l1_overview: candidate.overview,
+      l2_content: candidate.content,
+      memory_category: candidate.category,
+      tier: "working" as const,
+      access_count: 0,
+      confidence: 0.7,
+      last_accessed_at: Date.now(),
+      source_session: sessionKey,
+      source: "auto-capture" as const,
+      state: "confirmed" as const, // #350: write confirmed to unblock auto-recall
+      memory_layer: "working" as const,
+      injected_count: 0,
+      bad_recall_count: 0,
+      suppressed_until_turn: 0,
+      contexts: contextLabel ? [contextLabel] : [],
+      relations: [{ type: "contradicts", targetId: matchId }],
+    }, admissionAudit));
+
+    await this.store.store({
+      text: candidate.abstract,
+      vector,
+      category: storeCategory,
+      scope: targetScope,
+      importance: this.getDefaultImportance(candidate.category),
+      metadata,
+    });
+
+    this.log(
+      `mymem: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`,
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // Store Helper
+  // --------------------------------------------------------------------------
+
+  /**
+   * Store a candidate memory as a new entry with L0/L1/L2 metadata.
+   */
+  private async storeCandidate(
+    candidate: CandidateMemory,
+    vector: number[],
+    sessionKey: string,
+    targetScope: string,
+    admissionAudit?: AdmissionAuditRecord,
+  ): Promise<void> {
+    // Map 6-category to existing store categories for backward compatibility
+    const storeCategory = this.mapToStoreCategory(candidate.category);
+
+    const classifyText = candidate.content || candidate.abstract;
+    const metadata = stringifySmartMetadata(
+      buildSmartMetadata(
+        {
+          text: candidate.abstract,
+          category: this.mapToStoreCategory(candidate.category),
+        },
+        {
+          l0_abstract: candidate.abstract,
+          l1_overview: candidate.overview,
+          l2_content: candidate.content,
+          memory_category: candidate.category,
+          tier: "working",
+          access_count: 0,
+          confidence: 0.7,
+          source_session: sessionKey,
+          source: "auto-capture",
+          state: "confirmed", // #350: write confirmed to unblock auto-recall
+          memory_layer: "working",
+          injected_count: 0,
+          bad_recall_count: 0,
+          suppressed_until_turn: 0,
+          memory_temporal_type: classifyTemporal(classifyText),
+          valid_until: inferExpiry(classifyText),
+        },
+      ),
+    );
+
+    await this.store.store({
+      text: candidate.abstract, // L0 used as the searchable text
+      vector,
+      category: storeCategory,
+      scope: targetScope,
+      importance: this.getDefaultImportance(candidate.category),
+      metadata,
+    });
+
+    this.log(
+      `mymem: smart-extractor: created [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+    );
+  }
+
+  /**
+   * Map 6-category to existing 5-category store type for backward compatibility.
+   */
+  private mapToStoreCategory(
+    category: MemoryCategory,
+  ): "preference" | "fact" | "decision" | "entity" | "other" {
+    switch (category) {
+      case "profile":
+        return "fact";
+      case "preferences":
+        return "preference";
+      case "entities":
+        return "entity";
+      case "events":
+        return "decision";
+      case "cases":
+        return "fact";
+      case "patterns":
+        return "other";
+      default:
+        return "other";
+    }
+  }
+
+  /**
+   * Get default importance score by category.
+   */
+  private getDefaultImportance(category: MemoryCategory): number {
+    switch (category) {
+      case "profile":
+        return 0.9; // Identity is very important
+      case "preferences":
+        return 0.8;
+      case "entities":
+        return 0.7;
+      case "events":
+        return 0.6;
+      case "cases":
+        return 0.8; // Problem-solution pairs are high value
+      case "patterns":
+        return 0.85; // Reusable processes are high value
+      default:
+        return 0.5;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Admission Control Helpers
+  // --------------------------------------------------------------------------
+
+  /**
+   * Embed admission audit record into metadata if audit persistence is enabled.
+   */
+  private withAdmissionAudit<T extends Record<string, unknown>>(
+    metadata: T,
+    admissionAudit?: AdmissionAuditRecord,
+  ): T & { admission_control?: AdmissionAuditRecord } {
+    if (!admissionAudit || !this.persistAdmissionAudit) {
+      return metadata as T & { admission_control?: AdmissionAuditRecord };
+    }
+    return { ...metadata, admission_control: admissionAudit };
+  }
+
+  /**
+   * Record a rejected admission to the durable audit log.
+   */
+  private async recordRejectedAdmission(
+    candidate: CandidateMemory,
+    conversationText: string,
+    sessionKey: string,
+    targetScope: string,
+    scopeFilter: string[],
+    audit: AdmissionAuditRecord & { decision: "reject" },
+  ): Promise<void> {
+    if (!this.onAdmissionRejected) {
+      return;
+    }
+    try {
+      await this.onAdmissionRejected({
+        version: "amac-v1",
+        rejected_at: Date.now(),
+        session_key: sessionKey,
+        target_scope: targetScope,
+        scope_filter: scopeFilter,
+        candidate,
+        audit,
+        conversation_excerpt: conversationText.slice(-1200),
+      });
+    } catch (err) {
+      this.log(
+        `mymem: smart-extractor: rejected admission audit write failed: ${String(err)}`,
+      );
+    }
+  }
+}
+
+// ============================================================================
+// Extraction Rate Limiter (Feature 7: Adaptive Extraction Throttling)
+// ============================================================================
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+export interface ExtractionRateLimiterOptions {
+  /** Maximum number of extractions allowed per hour (default: 0 = disabled) */
+  maxExtractionsPerHour?: number;
+}
+
+export interface ExtractionRateLimiter {
+  /** Check whether the current rate would exceed the limit */
+  isRateLimited(): boolean;
+  /** Record a new extraction timestamp */
+  recordExtraction(): void;
+  /** Get the number of extractions in the current window */
+  getRecentCount(): number;
+}
+
+/**
+ * Create an extraction rate limiter that tracks timestamps in a sliding
+ * one-hour window.
+ */
+export function createExtractionRateLimiter(
+  options: ExtractionRateLimiterOptions = {},
+): ExtractionRateLimiter {
+  const rawMaxPerHour = options.maxExtractionsPerHour;
+  const maxPerHour =
+    typeof rawMaxPerHour === "number" && Number.isFinite(rawMaxPerHour)
+      ? Math.max(0, Math.floor(rawMaxPerHour))
+      : 0;
+  const disabled = maxPerHour <= 0;
+  const timestamps: number[] = [];
+
+  function pruneOld(): void {
+    const cutoff = Date.now() - ONE_HOUR_MS;
+    while (timestamps.length > 0 && timestamps[0] < cutoff) {
+      timestamps.shift();
+    }
+  }
+
+  return {
+    isRateLimited(): boolean {
+      if (disabled) return false;
+      pruneOld();
+      return timestamps.length >= maxPerHour;
+    },
+
+    recordExtraction(): void {
+      if (disabled) return;
+      pruneOld();
+      timestamps.push(Date.now());
+    },
+
+    getRecentCount(): number {
+      if (disabled) return 0;
+      pruneOld();
+      return timestamps.length;
+    },
+  };
+}
