@@ -4,12 +4,7 @@
 
 import type * as LanceDB from "@lancedb/lancedb";
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { mkdir, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { clampInt } from "./utils.js";
@@ -34,6 +29,16 @@ import {
 import { toLanceRows, toNumberVector, mapRowToMemoryEntry } from "./store-row-mappers.js";
 import { loadLanceDB } from "./lancedb-loader.js";
 import { validateStoragePath } from "./storage-path.js";
+
+/** Async stat that returns null instead of throwing on ENOENT. */
+async function statAsync(filePath: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
+  try {
+    return await stat(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
 
 // Re-export all public symbols for backward compatibility
 export type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus } from "./store-types.js";
@@ -329,33 +334,36 @@ export class MemoryStore {
     const lockfile = await loadLockfile();
     const lockPath = join(this.config.dbPath, ".memory-write.lock");
 
-    // Ensure lock directory exists before locking (proper-lockfile v4 uses mkdir, not file)
-    if (!existsSync(lockPath)) {
-      try {
-        mkdirSync(dirname(lockPath), { recursive: true });
-      } catch (err) {
+    // Ensure lock directory exists before locking
+    try {
+      await mkdir(dirname(lockPath), { recursive: true });
+    } catch (err) {
+      // EEXIST is fine; other errors are unexpected but non-fatal
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
         this.log.warn(`failed to create lock directory: ${lockPath}: ${err}`);
       }
-      // Note: removed pre-creation of empty file - proper-lockfile v4 manages lock file itself
     }
 
-    // Proactive cleanup of stale lock artifacts (fixes stale-lock ECOMPROMISED)
-    if (existsSync(lockPath)) {
-      try {
-        const stat = statSync(lockPath);
-        const ageMs = Date.now() - stat.mtimeMs;
+    // Proactive cleanup of stale lock artifacts (fixes stale-lock ECOMPROMISED).
+    // Uses async I/O and handles ENOENT from concurrent cleanup by another process.
+    try {
+      const stat = await statAsync(lockPath);
+      if (stat) {
+        const ageMs = Date.now() - Number(stat.mtimeMs);
         const staleThresholdMs = 5 * 60 * 1000;
         if (ageMs > staleThresholdMs) {
           try {
-            unlinkSync(lockPath);
+            await unlink(lockPath);
+            this.log.warn(`cleared stale lock: ${lockPath} ageMs=${ageMs}`);
           } catch (err) {
-            this.log.warn(`failed to remove stale lock: ${lockPath}: ${err}`);
+            if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+              this.log.warn(`failed to remove stale lock: ${lockPath}: ${err}`);
+            }
           }
-          this.log.warn(`cleared stale lock: ${lockPath} ageMs=${ageMs}`);
         }
-      } catch (err) {
-        this.log.warn(`failed to check lock file status: ${lockPath}: ${err}`);
       }
+    } catch {
+      // Lock file doesn't exist or can't be read — proceed normally
     }
 
     const release = await lockfile.lock(lockPath, {
