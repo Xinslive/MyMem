@@ -161,7 +161,7 @@ export function registerAutoRecallHook(params: {
     }
   }
 
-  const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 8_000;
+  const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 20_000;
 
   function formatTimeoutDiagnostics(): string {
     const getLastDiagnostics = (retriever as unknown as {
