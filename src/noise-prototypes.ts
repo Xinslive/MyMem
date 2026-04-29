@@ -10,6 +10,10 @@
  */
 
 import type { Embedder } from "./embedder.js";
+import { cosineSimilarity } from "./utils.js";
+
+// Local alias to preserve existing call sites
+const cosine = cosineSimilarity;
 
 // ============================================================================
 // Built-in noise prototypes (multilingual)
@@ -142,22 +146,4 @@ export class NoisePrototypeBank {
             `noise-prototype-bank: learned new noise prototype (total: ${this.vectors.length})`,
         );
     }
-}
-
-// ============================================================================
-// Cosine Similarity
-// ============================================================================
-
-function cosine(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
-    let dot = 0;
-    let na = 0;
-    let nb = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i];
-        na += a[i] * a[i];
-        nb += b[i] * b[i];
-    }
-    const denom = Math.sqrt(na) * Math.sqrt(nb);
-    return denom === 0 ? 0 : dot / denom;
 }

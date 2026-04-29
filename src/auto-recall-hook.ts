@@ -519,7 +519,9 @@ export function registerAutoRecallHook(params: {
 
       // Run tier maintenance asynchronously after injection
       if (selected.length > 0) {
-        void runTierMaintenance(selected, accessibleScopes);
+        void runTierMaintenance(selected, accessibleScopes).catch((err) =>
+          api.logger.warn("mymem: tier maintenance fire-and-forget failed: " + String(err)),
+        );
       }
 
       const memoryContext = selected.map((item) => item.line).join("\n");

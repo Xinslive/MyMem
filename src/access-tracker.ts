@@ -290,7 +290,7 @@ export class AccessTracker {
   }
 
   /**
-   * Tear down the tracker — cancel timers and clear pending state.
+   * Tear down the tracker — cancel timers and flush pending state.
    */
   destroy(): void {
     this.clearTimer();
@@ -298,18 +298,19 @@ export class AccessTracker {
       this.logger.warn(
         `access-tracker: destroying with ${this.pending.size} pending writes — attempting final flush (3s timeout)`,
       );
-      // Clear synchronously BEFORE returning — async flush is best-effort.
-      this.pending.clear();
-      this._retryCount.clear();
-      // Fire-and-forget final flush with a hard 3s timeout.
-      // Route through flush() to avoid concurrent write-backs with any in-flight flush.
+      // Wait for any in-flight flush, then flush remaining pending data.
+      // flush() internally copies pending → batch and clears pending,
+      // so we clear the maps AFTER flush to avoid losing data.
       const flushWithTimeout = Promise.race([
         this.flush(),
         new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
       ]);
-      void flushWithTimeout.catch(() => {
-        // Suppress unhandled rejection during shutdown.
-      });
+      void flushWithTimeout
+        .catch(() => {})
+        .finally(() => {
+          this.pending.clear();
+          this._retryCount.clear();
+        });
     } else {
       this.pending.clear();
       this._retryCount.clear();
@@ -362,7 +363,9 @@ export class AccessTracker {
   private resetTimer(): void {
     this.clearTimer();
     this.debounceTimer = setTimeout(() => {
-      void this.flush();
+      void this.flush().catch((err) =>
+        this.logger.warn("access-tracker: debounce flush failed:", err),
+      );
     }, this.debounceMs);
   }
 

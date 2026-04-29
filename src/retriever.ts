@@ -24,7 +24,7 @@ import {
 } from "./smart-metadata.js";
 import { TraceCollector, type RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector } from "./retrieval-stats.js";
-import { clampInt } from "./utils.js";
+import { clampInt, cosineSimilarity } from "./utils.js";
 import type { Logger } from "./logger.js";
 
 // ============================================================================
@@ -562,25 +562,7 @@ function parseRerankResponse(
   }
 }
 
-// Cosine similarity for reranking fallback
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new Error("Vector dimensions must match for cosine similarity");
-  }
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  const norm = Math.sqrt(normA) * Math.sqrt(normB);
-  return norm === 0 ? 0 : dotProduct / norm;
-}
+// Cosine similarity for reranking fallback — now shared via utils.js
 
 // ============================================================================
 // Memory Retriever
@@ -726,7 +708,9 @@ export class MemoryRetriever {
       }
 
       if (source === "manual" && results.length > 0) {
-        void this.recordAccessAndMaybeTransition(results);
+        void this.recordAccessAndMaybeTransition(results).catch((err) =>
+          this.logger.debug(`[Retriever] recordAccessAndMaybeTransition failed: ${err}`),
+        );
       }
 
       // Record access for reinforcement (manual recall only)
@@ -789,7 +773,9 @@ export class MemoryRetriever {
     }
 
     if (source === "manual" && results.length > 0) {
-      void this.recordAccessAndMaybeTransition(results);
+      void this.recordAccessAndMaybeTransition(results).catch((err) =>
+        this.logger.debug(`[Retriever] recordAccessAndMaybeTransition failed: ${err}`),
+      );
     }
 
     if (this.accessTracker && source === "manual" && results.length > 0) {
@@ -1924,22 +1910,26 @@ export class MemoryRetriever {
   ): RetrievalResult[] {
     if (results.length <= 1) return results;
 
+    // Pre-convert Arrow Vector objects to plain arrays once, avoiding repeated
+    // Array.from() calls on every pairwise cosine comparison.
+    const vectorCache = new Map<string, number[]>();
+    for (const r of results) {
+      const vec = r.entry.vector;
+      if (vec?.length) {
+        vectorCache.set(r.entry.id, Array.from(vec as Iterable<number>));
+      }
+    }
+
     const selected: RetrievalResult[] = [];
     const deferred: RetrievalResult[] = [];
 
     for (const candidate of results) {
+      const cArr = vectorCache.get(candidate.entry.id);
       // Check if this candidate is too similar to any already-selected result
-      const tooSimilar = selected.some((s) => {
-        // Both must have vectors to compare.
-        // LanceDB returns Arrow Vector objects (not plain arrays),
-        // so use .length directly and Array.from() for conversion.
-        const sVec = s.entry.vector;
-        const cVec = candidate.entry.vector;
-        if (!sVec?.length || !cVec?.length) return false;
-        const sArr = Array.from(sVec as Iterable<number>);
-        const cArr = Array.from(cVec as Iterable<number>);
-        const sim = cosineSimilarity(sArr, cArr);
-        return sim > similarityThreshold;
+      const tooSimilar = cArr && selected.some((s) => {
+        const sArr = vectorCache.get(s.entry.id);
+        if (!sArr) return false;
+        return cosineSimilarity(sArr, cArr) > similarityThreshold;
       });
 
       if (tooSimilar) {

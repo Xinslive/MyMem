@@ -301,9 +301,6 @@ export class MemoryStore {
   private ftsIndexCreated = false;
   private vectorIndexCreated = false;
   private scalarIndexedColumns = new Set<string>();
-  // Tail-reset serialization: replaces unbounded promise chain with a boolean flag + FIFO queue.
-  private _updating = false;
-  private _waitQueue: Array<() => void> = [];
 
   // Flush-batch: buffer store() calls and write them in a single lock acquisition.
   private _batchBuffer: MemoryEntry[] = [];
@@ -659,7 +656,7 @@ export class MemoryStore {
           // Concurrent initialization race ??another process already added the columns
           this.log.info("mymem: migration columns already exist (concurrent init)");
         } else {
-          `could not check/migrate table schema: ${err}`
+          this.log.warn(`could not check/migrate table schema: ${err}`);
         }
       }
     } catch (_openErr) {
@@ -1061,7 +1058,7 @@ export class MemoryStore {
       searchQuery = searchQuery.where(`(${scopeConditions}) OR scope IS NULL`);
     }
 
-    const rows = await searchQuery.toArray();
+    const rows = await searchQuery.limit(1000).toArray();
     const matches: MemorySearchResult[] = [];
 
     for (const row of rows) {
@@ -1378,24 +1375,6 @@ export class MemoryStore {
     });
   }
 
-  private async runSerializedUpdate<T>(action: () => Promise<T>): Promise<T> {
-    // Tail-reset: no infinite promise chain. Uses a boolean flag + FIFO queue.
-    if (!this._updating) {
-      this._updating = true;
-      try {
-        return await action();
-      } finally {
-        this._updating = false;
-        const next = this._waitQueue.shift();
-        if (next) next();
-      }
-    } else {
-      // Already busy — enqueue and wait for the current owner to signal done.
-      return new Promise<void>((resolve) => {
-        this._waitQueue.push(resolve);
-      }).then(() => this.runSerializedUpdate(action)) as Promise<T>;
-    }
-  }
 
   async patchMetadata(
     id: string,

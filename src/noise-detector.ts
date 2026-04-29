@@ -18,6 +18,7 @@
 import type { Embedder } from "./embedder.js";
 import { isNoise as isNoiseRegex, filterNoise, ENVELOPE_NOISE_PATTERNS } from "./noise-filter.js";
 import { NoisePrototypeBank } from "./noise-prototypes.js";
+import { cosineSimilarity } from "./utils.js";
 
 // ============================================================================
 // Types
@@ -390,22 +391,8 @@ export class HybridNoiseDetector {
 }
 
 // ============================================================================
-// Cosine Similarity (duplicated from noise-prototypes.ts to avoid circular dep)
+// Cosine similarity — now shared via utils.js
 // ============================================================================
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom === 0 ? 0 : dot / denom;
-}
 
 // ============================================================================
 // Re-export for backward compatibility

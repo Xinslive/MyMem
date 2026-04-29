@@ -1780,7 +1780,6 @@ const myMemPlugin = {
           });
           return { promise: Promise.race([p, timeoutPromise]), signal: controller.signal };
         };
-        };
 
         // Embedder internal timeout is 10s; give startup checks enough headroom
         const startupTimeoutMs = 15_000;
