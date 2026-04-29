@@ -1295,9 +1295,9 @@ export class Embedder {
   }
 
   // Test connection and validate configuration
-  async test(): Promise<{ success: boolean; error?: string; dimensions?: number }> {
+  async test(signal?: AbortSignal): Promise<{ success: boolean; error?: string; dimensions?: number }> {
     try {
-      const testEmbedding = await this.embedPassage("test");
+      const testEmbedding = await this.embedPassage("test", signal);
       return {
         success: true,
         dimensions: testEmbedding.length,

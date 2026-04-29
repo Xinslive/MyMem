@@ -1759,23 +1759,27 @@ const myMemPlugin = {
         // If embedding/retrieval tests hang (bad network / slow provider), the gateway
         // may never bind its HTTP port, causing restart timeouts.
 
-        const withTimeout = async <T>(
-          p: Promise<T>,
+        const withTimeout = <T>(
+          factory: (signal: AbortSignal) => Promise<T>,
           ms: number,
           label: string,
-        ): Promise<T> => {
+        ): { promise: Promise<T>; signal: AbortSignal } => {
+          const controller = new AbortController();
           let timeout: ReturnType<typeof setTimeout> | undefined;
           const timeoutPromise = new Promise<never>((_, reject) => {
             timeout = setTimeout(
-              () => reject(new Error(`${label} timed out after ${ms}ms`)),
+              () => {
+                controller.abort();
+                reject(new Error(`${label} timed out after ${ms}ms`));
+              },
               ms,
             );
           });
-          try {
-            return await Promise.race([p, timeoutPromise]);
-          } finally {
+          const p = factory(controller.signal).finally(() => {
             if (timeout) clearTimeout(timeout);
-          }
+          });
+          return { promise: Promise.race([p, timeoutPromise]), signal: controller.signal };
+        };
         };
 
         // Embedder internal timeout is 10s; give startup checks enough headroom
@@ -1785,10 +1789,10 @@ const myMemPlugin = {
           try {
             // Test components (bounded time)
             const embedTest = await withTimeout(
-              embedder.test(),
+              (signal) => embedder.test(signal),
               startupTimeoutMs,
               "embedder.test()",
-            );
+            ).promise;
             // Avoid retriever.test() here: it performs another embedding call and
             // can hit slow external providers during gateway startup. Retrieval
             // is still exercised by normal recall paths; startup health should
