@@ -441,12 +441,89 @@ const MAX_EMBED_DEPTH = 3;
 
 /** Global timeout for a single embedding operation (ms). */
 const EMBED_TIMEOUT_MS = 20_000;
+/** Global cap for concurrent provider-bound embedding requests across all Embedder instances. */
+const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;
 
 /**
  * Strictly decreasing character limit for forced truncation.
  * Each recursion level MUST reduce input by this factor to guarantee progress.
  */
 const STRICT_REDUCTION_FACTOR = 0.5; // Each retry must be at most 50% of previous
+
+interface PendingPermit {
+  resolve: (release: () => void) => void;
+  reject: (reason: unknown) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+class ConcurrencyLimiter {
+  private readonly limit: number;
+  private inUse = 0;
+  private readonly queue: PendingPermit[] = [];
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error("aborted");
+    }
+
+    if (this.inUse < this.limit) {
+      this.inUse += 1;
+      return this.makeRelease();
+    }
+
+    return new Promise<() => void>((resolve, reject) => {
+      const pending: PendingPermit = { resolve, reject, signal };
+      if (signal) {
+        pending.onAbort = () => {
+          const idx = this.queue.indexOf(pending);
+          if (idx >= 0) {
+            this.queue.splice(idx, 1);
+          }
+          reject(signal.reason ?? new Error("aborted"));
+        };
+        signal.addEventListener("abort", pending.onAbort, { once: true });
+      }
+      this.queue.push(pending);
+    });
+  }
+
+  private makeRelease(): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.releaseNext();
+    };
+  }
+
+  private releaseNext(): void {
+    while (this.queue.length > 0) {
+      const pending = this.queue.shift();
+      if (!pending) break;
+
+      if (pending.signal?.aborted) {
+        pending.onAbort && pending.signal.removeEventListener("abort", pending.onAbort);
+        pending.reject(pending.signal.reason ?? new Error("aborted"));
+        continue;
+      }
+
+      if (pending.onAbort && pending.signal) {
+        pending.signal.removeEventListener("abort", pending.onAbort);
+      }
+      pending.resolve(this.makeRelease());
+      return;
+    }
+
+    this.inUse = Math.max(0, this.inUse - 1);
+  }
+}
+
+const globalEmbedRequestLimiter = new ConcurrencyLimiter(GLOBAL_EMBED_CONCURRENCY_LIMIT);
 
 export function getVectorDimensions(model: string, overrideDims?: number): number {
   if (overrideDims && overrideDims > 0) {
@@ -603,6 +680,16 @@ export class Embedder {
     return /localhost:11434|127\.0\.0\.1:11434|\/ollama\b/i.test(this._baseURL);
   }
 
+  /** Serialize provider-bound work through a shared global concurrency gate. */
+  private async withGlobalConcurrencyLimit<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const release = await globalEmbedRequestLimiter.acquire(signal);
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
   /**
    * Call embeddings.create using native fetch (bypasses OpenAI SDK).
    * Used exclusively for Ollama endpoints where AbortController must work
@@ -629,21 +716,24 @@ export class Embedder {
     // If a model doesn't support that endpoint, failure will be silent from the user's perspective.
     // This is acceptable because most Ollama embedding models support /v1/embeddings.
     if (Array.isArray(payload.input)) {
-      const response = await fetch(base + "/v1/embeddings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: payload.model,
-          input: payload.input,
-          // NOTE: Other provider options (encoding_format, normalized, dimensions, etc.)
-          // from buildPayload() are intentionally not included. Ollama embedding models
-          // do not support these parameters, so omitting them is correct.
+      const response = await this.withGlobalConcurrencyLimit(
+        () => fetch(base + "/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: payload.model,
+            input: payload.input,
+            // NOTE: Other provider options (encoding_format, normalized, dimensions, etc.)
+            // from buildPayload() are intentionally not included. Ollama embedding models
+            // do not support these parameters, so omitting them is correct.
+          }),
+          signal,
         }),
         signal,
-      });
+      );
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");
@@ -672,18 +762,21 @@ export class Embedder {
     }
 
     // Single request: use /api/embeddings + prompt (PR #621 fix)
-    const response = await fetch(base + "/api/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: payload.model,
-        prompt: payload.input,
+    const response = await this.withGlobalConcurrencyLimit(
+      () => fetch(base + "/api/embeddings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: payload.model,
+          prompt: payload.input,
+        }),
+        signal,
       }),
       signal,
-    });
+    );
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -729,7 +822,10 @@ export class Embedder {
       const client = this.nextClient();
       try {
         // Pass signal to OpenAI SDK if provided (SDK v6+ supports this)
-        return await client.embeddings.create(payload, signal ? { signal } : undefined);
+        return await this.withGlobalConcurrencyLimit(
+          () => client.embeddings.create(payload, signal ? { signal } : undefined),
+          signal,
+        );
       } catch (error) {
         // If aborted, re-throw immediately
         if (error instanceof Error && error.name === 'AbortError') {

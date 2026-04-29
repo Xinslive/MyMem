@@ -84,3 +84,40 @@ test("different query embedding tasks do not share inflight work", async () => {
   assert.equal(tasks.length, 2);
   assert.deepEqual(new Set(tasks), new Set(["retrieval.query", "retrieval.passage"]));
 });
+
+test("embedding provider requests are capped at 10 globally across embedder instances", async () => {
+  const first = new Embedder({
+    provider: "openai-compatible",
+    apiKey: "test-key-1",
+    model: "text-embedding-3-small",
+  });
+  const second = new Embedder({
+    provider: "openai-compatible",
+    apiKey: "test-key-2",
+    model: "text-embedding-3-small",
+  });
+
+  let calls = 0;
+  let active = 0;
+  let maxActive = 0;
+  const create = async () => {
+    calls += 1;
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    active -= 1;
+    return { data: [{ embedding: new Array(1536).fill(0.3) }] };
+  };
+
+  first.clients = [{ embeddings: { create } }];
+  second.clients = [{ embeddings: { create } }];
+
+  const results = await Promise.all([
+    ...Array.from({ length: 8 }, (_, idx) => first.embedQuery(`first-${idx}`)),
+    ...Array.from({ length: 8 }, (_, idx) => second.embedQuery(`second-${idx}`)),
+  ]);
+
+  assert.equal(calls, 16);
+  assert.equal(results.length, 16);
+  assert.equal(maxActive, 10);
+});
