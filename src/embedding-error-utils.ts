@@ -47,7 +47,15 @@ function isNetworkError(error: unknown): boolean {
   return /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|fetch failed|network error|socket hang up|connection refused|getaddrinfo/i.test(msg);
 }
 
-export { getErrorMessage, getErrorStatus, getErrorCode, isAuthError, isNetworkError };
+/** Check if an error is a request abort (timeout or client-side cancellation). */
+function isAbortError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  const msg = getErrorMessage(error);
+  return /request was aborted|the operation was aborted|aborted|aborterror/i.test(msg)
+    && !/authentication|auth|api key|forbidden/i.test(msg);
+}
+
+export { getErrorMessage, getErrorStatus, getErrorCode, isAuthError, isNetworkError, isAbortError };
 
 export function formatEmbeddingProviderError(
   error: unknown,

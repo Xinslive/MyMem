@@ -32,6 +32,7 @@ import {
   getErrorCode,
   isAuthError,
   isNetworkError,
+  isAbortError,
 } from "./embedding-error-utils.js";
 import type { Logger } from "./logger.js";
 
@@ -372,10 +373,10 @@ export class Embedder {
         return await this.embedWithNativeFetch(payload, signal);
       } catch (error) {
         // Only retry Ollama on network/timeout errors, not user abort
-        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
+        if (isAbortError(error) && signal?.aborted) {
           throw error;
         }
-        if (isNetworkError(error) || (error instanceof Error && error.name === 'AbortError')) {
+        if (isNetworkError(error) || isAbortError(error)) {
           return await this.retryWithBackoff(
             () => this.embedWithNativeFetch(payload, signal),
             signal,
@@ -399,7 +400,7 @@ export class Embedder {
         );
       } catch (error) {
         // If externally aborted, re-throw immediately
-        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
+        if (isAbortError(error) && signal?.aborted) {
           throw error;
         }
 
@@ -414,7 +415,7 @@ export class Embedder {
         }
 
         // Network error or internal timeout: retry with backoff
-        if (isNetworkError(error) || (error instanceof Error && error.name === 'AbortError')) {
+        if (isNetworkError(error) || isAbortError(error)) {
           return await this.retryWithBackoff(
             () => this.withGlobalConcurrencyLimit(
               () => client.embeddings.create(payload, signal ? { signal } : undefined),
@@ -430,7 +431,7 @@ export class Embedder {
           try {
             return await this.embedWithNativeFetch(payload, signal);
           } catch (fallbackError) {
-            if (fallbackError instanceof Error && fallbackError.name === "AbortError" && signal?.aborted) {
+            if (isAbortError(fallbackError) && signal?.aborted) {
               throw fallbackError;
             }
           }
@@ -487,7 +488,7 @@ export class Embedder {
         return await fn();
       } catch (error) {
         // If externally aborted during retry, throw original error
-        if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) {
+        if (isAbortError(error) && signal?.aborted) {
           throw error;
         }
         // If last retry, throw
@@ -495,7 +496,7 @@ export class Embedder {
           throw error;
         }
         // Continue retrying for network/timeout errors
-        if (!isNetworkError(error) && !(error instanceof Error && error.name === 'AbortError')) {
+        if (!isNetworkError(error) && !isAbortError(error)) {
           throw error;
         }
       }
