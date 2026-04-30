@@ -51,6 +51,7 @@ import {
   applyDecayBoost,
   applyLengthNormalization,
   applyTimeDecay,
+  applyFallbackScoring,
 } from "./temporal-scoring.js";
 import { applyMMRDiversity } from "./mmr-diversity.js";
 
@@ -396,12 +397,12 @@ export class MemoryRetriever {
       );
 
       markStage("vector.postProcess");
-      // When decayEngine is active, skip temporal scoring here because
-      // decayEngine already handles recency + importance + time decay.
-      // When recencyEngine is available (lightweight mode), use it to
-      // replace the three separate applyXxx calls with one composite apply().
-      // Otherwise fall back to the original three-stage pipeline.
+      // Scoring pipeline (mutually exclusive modes):
+      // 1. decayEngine: handles recency + importance + time decay in one pass
+      // 2. recencyEngine: composite recency + importance + time decay
+      // 3. fallback: unified applyFallbackScoring (recency + importance + time decay)
       let temporallyRanked: RetrievalResult[];
+      let fallbackMode = false;
       if (this.decayEngine) {
         temporallyRanked = mapped;
         if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
@@ -411,19 +412,20 @@ export class MemoryRetriever {
         if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
         if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
       } else {
-        temporallyRanked = applyRecencyBoost(mapped, this.config);
+        temporallyRanked = applyFallbackScoring(mapped, this.config);
+        fallbackMode = true;
         if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        temporallyRanked = applyImportanceWeight(temporallyRanked);
         if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
       }
       const lengthNormalized = applyLengthNormalization(temporallyRanked, this.config.lengthNormAnchor);
       if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
       const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
       if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
+      // Apply decay only if not already handled by fallback scoring
       const decayRanked = this.decayEngine
         ? applyDecayBoost(hardFiltered, this.decayEngine)
-        : this.recencyEngine
-          ? temporallyRanked // composite already applied above
+        : this.recencyEngine || fallbackMode
+          ? temporallyRanked // composite/fallback already applied
           : applyTimeDecay(hardFiltered, this.config);
       if (diagnostics) diagnostics.stageCounts.afterTimeDecay = decayRanked.length;
       let denoised: RetrievalResult[];
@@ -515,6 +517,7 @@ export class MemoryRetriever {
     }
 
     let temporallyRanked: RetrievalResult[];
+    let fallbackMode2 = false;
     if (this.decayEngine) {
       temporallyRanked = mapped;
       if (diagnostics) {
@@ -530,18 +533,14 @@ export class MemoryRetriever {
         diagnostics.stageCounts.afterImportance = temporallyRanked.length;
       }
     } else {
-      trace?.startStage("recency_boost", mapped.map((r) => r.entry.id));
-      const boosted = applyRecencyBoost(mapped, this.config);
-      trace?.endStage(boosted.map((r) => r.entry.id), boosted.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterRecency = boosted.length;
-
-      trace?.startStage("importance_weight", boosted.map((r) => r.entry.id));
-      temporallyRanked = applyImportanceWeight(boosted);
-      trace?.endStage(
-        temporallyRanked.map((r) => r.entry.id),
-        temporallyRanked.map((r) => r.score),
-      );
-      if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
+      trace?.startStage("fallback_scoring", mapped.map((r) => r.entry.id));
+      temporallyRanked = applyFallbackScoring(mapped, this.config);
+      fallbackMode2 = true;
+      trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
+      if (diagnostics) {
+        diagnostics.stageCounts.afterRecency = temporallyRanked.length;
+        diagnostics.stageCounts.afterImportance = temporallyRanked.length;
+      }
     }
 
     trace?.startStage("length_normalization", temporallyRanked.map((r) => r.entry.id));
@@ -554,12 +553,12 @@ export class MemoryRetriever {
     trace?.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
-    const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "time_decay";
+    const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "fallback_scoring";
     trace?.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
     const lifecycleRanked = this.decayEngine
       ? applyDecayBoost(hardFiltered, this.decayEngine)
-      : this.recencyEngine
-        ? temporallyRanked // composite already applied
+      : this.recencyEngine || fallbackMode2
+        ? temporallyRanked // composite/fallback already applied
         : applyTimeDecay(hardFiltered, this.config);
     trace?.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
@@ -801,6 +800,7 @@ export class MemoryRetriever {
       let temporallyRanked: RetrievalResult[];
       markStage("hybrid.postProcess");
       const t4 = Date.now();
+      let fallbackMode3 = false;
       if (this.decayEngine) {
         temporallyRanked = reranked;
         if (diagnostics) {
@@ -816,18 +816,14 @@ export class MemoryRetriever {
           diagnostics.stageCounts.afterImportance = temporallyRanked.length;
         }
       } else {
-        trace?.startStage("recency_boost", reranked.map((r) => r.entry.id));
-        const boosted = applyRecencyBoost(reranked, this.config);
-        trace?.endStage(boosted.map((r) => r.entry.id), boosted.map((r) => r.score));
-        if (diagnostics) diagnostics.stageCounts.afterRecency = boosted.length;
-
-        trace?.startStage("importance_weight", boosted.map((r) => r.entry.id));
-        temporallyRanked = applyImportanceWeight(boosted);
-        trace?.endStage(
-          temporallyRanked.map((r) => r.entry.id),
-          temporallyRanked.map((r) => r.score),
-        );
-        if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
+        trace?.startStage("fallback_scoring", reranked.map((r) => r.entry.id));
+        temporallyRanked = applyFallbackScoring(reranked, this.config);
+        fallbackMode3 = true;
+        trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
+        if (diagnostics) {
+          diagnostics.stageCounts.afterRecency = temporallyRanked.length;
+          diagnostics.stageCounts.afterImportance = temporallyRanked.length;
+        }
       }
 
       trace?.startStage("length_normalization", temporallyRanked.map((r) => r.entry.id));
@@ -840,12 +836,12 @@ export class MemoryRetriever {
       trace?.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
       if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
-      const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "time_decay";
+      const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "fallback_scoring";
       trace?.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
       const lifecycleRanked = this.decayEngine
         ? applyDecayBoost(hardFiltered, this.decayEngine)
-        : this.recencyEngine
-          ? temporallyRanked // composite already applied
+        : this.recencyEngine || fallbackMode3
+          ? temporallyRanked // composite/fallback already applied
           : applyTimeDecay(hardFiltered, this.config);
       trace?.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
       if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;

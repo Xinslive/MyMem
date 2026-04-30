@@ -684,6 +684,28 @@ export class MemoryStore {
     return entry;
   }
 
+  /**
+   * Batch fetch multiple entries by ID in a single query.
+   * Returns a Map for O(1) lookup. Missing IDs are silently omitted.
+   */
+  async getByIds(ids: string[]): Promise<Map<string, MemoryEntry>> {
+    await this.ensureInitialized();
+    if (ids.length === 0) return new Map();
+
+    const safeIds = ids.map(id => `'${escapeSqlLiteral(id)}'`).join(",");
+    const rows = await this.table!
+      .query()
+      .where(`id IN (${safeIds})`)
+      .toArray();
+
+    const result = new Map<string, MemoryEntry>();
+    for (const row of rows) {
+      const entry = mapRowToMemoryEntry(row);
+      result.set(entry.id, entry);
+    }
+    return result;
+  }
+
   async vectorSearch(vector: number[], limit = 5, minScore = 0.3, scopeFilter?: string[], options?: { excludeInactive?: boolean; overFetchMultiplier?: number }): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
 
@@ -1103,6 +1125,47 @@ export class MemoryStore {
       }
 
       return updated;
+    });
+  }
+
+  /**
+   * Batch update metadata for multiple entries in a single lock acquisition.
+   * Each patch specifies an ID and the new metadata string.
+   * Missing IDs are silently skipped. Returns the number of entries updated.
+   */
+  async updateBatchMetadata(
+    patches: Array<{ id: string; metadata: string }>,
+  ): Promise<number> {
+    await this.ensureInitialized();
+    if (patches.length === 0) return 0;
+
+    return this.runWithFileLock(async () => {
+      const updatedRows: MemoryEntry[] = [];
+
+      for (const patch of patches) {
+        const safeId = escapeSqlLiteral(patch.id);
+        const rows = await this.table!
+          .query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
+          .where(`id = '${safeId}'`)
+          .limit(1)
+          .toArray();
+
+        if (rows.length === 0) continue; // entry deleted or not found
+        const original = mapRowToMemoryEntry(rows[0]);
+        updatedRows.push({ ...original, metadata: patch.metadata });
+      }
+
+      if (updatedRows.length === 0) return 0;
+
+      // Single mergeInsert for all updated rows
+      await this.table!
+        .mergeInsert(["id"])
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(toLanceRows(updatedRows));
+
+      return updatedRows.length;
     });
   }
 

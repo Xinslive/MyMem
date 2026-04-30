@@ -325,38 +325,117 @@ export class AccessTracker {
     const batch = new Map(this.pending);
     this.pending.clear();
 
+    if (batch.size === 0) return;
+
+    // Use batch methods if available (MemoryStore), otherwise fall back to
+    // individual calls (for mock stores in tests or duck-typed implementations).
+    const hasBatchMethods = typeof (this.store as any).getByIds === "function"
+      && typeof (this.store as any).updateBatchMetadata === "function";
+
+    if (hasBatchMethods) {
+      await this.doFlushBatch(batch);
+    } else {
+      await this.doFlushIndividual(batch);
+    }
+  }
+
+  /** Batch flush: single read query + single lock write. */
+  private async doFlushBatch(batch: Map<string, number>): Promise<void> {
+    // Phase A: Batch read all entries in a single query
+    const ids = [...batch.keys()];
+    let entries: Map<string, import("./store.js").MemoryEntry>;
+    try {
+      entries = await (this.store as any).getByIds(ids);
+    } catch (err) {
+      for (const [id, delta] of batch) {
+        this.pending.set(id, (this.pending.get(id) ?? 0) + delta);
+      }
+      this.logger.warn("access-tracker: batch getByIds failed, requeued all:", err);
+      return;
+    }
+
+    // Phase B: Build metadata patches
+    const patches: Array<{ id: string; metadata: string }> = [];
+    for (const [id, delta] of batch) {
+      const entry = entries.get(id);
+      if (!entry) {
+        this._retryCount.delete(id);
+        continue;
+      }
+      patches.push({ id, metadata: buildUpdatedMetadata(entry.metadata, delta) });
+    }
+
+    if (patches.length === 0) return;
+
+    // Phase C: Batch write in a single lock acquisition
+    try {
+      await (this.store as any).updateBatchMetadata(patches);
+      for (const patch of patches) {
+        this._retryCount.delete(patch.id);
+      }
+    } catch (err) {
+      this.requeueFailedPatches(batch, patches, err);
+    }
+  }
+
+  /** Individual flush: per-entry read + write (fallback for mock stores). */
+  private async doFlushIndividual(batch: Map<string, number>): Promise<void> {
     for (const [id, delta] of batch) {
       try {
         const current = await this.store.getById(id);
         if (!current) {
-          // ID not found — memory was deleted or outside current scope.
-          // Do NOT retry or warn; just drop silently and clear any retry counter.
           this._retryCount.delete(id);
           continue;
         }
-
         const updatedMeta = buildUpdatedMetadata(current.metadata, delta);
         await this.store.update(id, { metadata: updatedMeta });
-        this._retryCount.delete(id); // success — clear retry counter
+        this._retryCount.delete(id);
       } catch (err) {
-        const retryCount = (this._retryCount.get(id) ?? 0) + 1;
-        if (retryCount > this._maxRetries) {
-          // Exceeded max retries — drop and log error.
-          this._retryCount.delete(id);
-          this.logger.error?.(
-            `access-tracker: dropping ${id.slice(0, 8)} after ${retryCount} failed retries`,
-          );
-        } else {
-          this._retryCount.set(id, retryCount);
-          // Requeue: merge new delta with pending (safe because _retryCount is now independent,
-          // so delta represents "unflushed retry" only, not accumulated retry amplification).
-          this.pending.set(id, (this.pending.get(id) ?? 0) + delta);
-          this.logger.warn(
-            `access-tracker: write-back failed for ${id.slice(0, 8)} (attempt ${retryCount}/${this._maxRetries}):`,
-            err,
-          );
-        }
+        this.handleSingleFailure(id, delta, err);
       }
+    }
+  }
+
+  /** Requeue patches that failed during batch write. */
+  private requeueFailedPatches(
+    batch: Map<string, number>,
+    patches: Array<{ id: string; metadata: string }>,
+    err: unknown,
+  ): void {
+    for (const patch of patches) {
+      const retryCount = (this._retryCount.get(patch.id) ?? 0) + 1;
+      if (retryCount > this._maxRetries) {
+        this._retryCount.delete(patch.id);
+        this.logger.error?.(
+          `access-tracker: dropping ${patch.id.slice(0, 8)} after ${retryCount} failed retries`,
+        );
+      } else {
+        this._retryCount.set(patch.id, retryCount);
+        const delta = batch.get(patch.id) ?? 0;
+        this.pending.set(patch.id, (this.pending.get(patch.id) ?? 0) + delta);
+        this.logger.warn(
+          `access-tracker: batch write failed for ${patch.id.slice(0, 8)} (attempt ${retryCount}/${this._maxRetries}):`,
+          err,
+        );
+      }
+    }
+  }
+
+  /** Handle single-entry failure (individual flush path). */
+  private handleSingleFailure(id: string, delta: number, err: unknown): void {
+    const retryCount = (this._retryCount.get(id) ?? 0) + 1;
+    if (retryCount > this._maxRetries) {
+      this._retryCount.delete(id);
+      this.logger.error?.(
+        `access-tracker: dropping ${id.slice(0, 8)} after ${retryCount} failed retries`,
+      );
+    } else {
+      this._retryCount.set(id, retryCount);
+      this.pending.set(id, (this.pending.get(id) ?? 0) + delta);
+      this.logger.warn(
+        `access-tracker: write-back failed for ${id.slice(0, 8)} (attempt ${retryCount}/${this._maxRetries}):`,
+        err,
+      );
     }
   }
 

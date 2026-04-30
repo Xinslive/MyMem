@@ -351,11 +351,18 @@ export async function rerankResults(
     }
   }
 
-  // Fallback: lightweight cosine similarity rerank
+  // Fallback: lightweight cosine similarity rerank.
+  // Uses BM25 base score (not the fused score) to avoid double-counting vector
+  // similarity — the fused score already incorporates vector search results.
   try {
     const reranked = results.map((result) => {
       const cosineScore = cosineSimilarity(queryVector, result.entry.vector);
-      const combinedScore = result.score * 0.7 + cosineScore * 0.3;
+      // BM25 confirms keyword relevance; cosine confirms semantic relevance.
+      // Neither alone is sufficient — blend them independently.
+      const bm25Base = result.sources.bm25?.score ?? 0;
+      const combinedScore = bm25Base > 0
+        ? bm25Base * 0.3 + cosineScore * 0.7
+        : cosineScore;
 
       return {
         ...result,

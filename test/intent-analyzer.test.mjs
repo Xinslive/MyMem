@@ -5,15 +5,16 @@ import { analyzeIntent, applyCategoryBoost, formatAtDepth } from "../src/intent-
 describe("analyzeIntent", () => {
   it("detects preference intent (English)", () => {
     const result = analyzeIntent("What is my preferred coding style?");
-    assert.equal(result.label, "preference");
+    // Composite intent: matches both "preference" and "fact" rules
+    assert.ok(result.label.includes("preference"));
     assert.equal(result.confidence, "high");
-    assert.equal(result.depth, "l0");
+    assert.equal(result.depth, "l1"); // deepest of l0 (pref) + l1 (fact)
     assert.ok(result.categories.includes("preference"));
   });
 
   it("detects preference intent (Chinese)", () => {
     const result = analyzeIntent("我的代码风格偏好是什么？");
-    assert.equal(result.label, "preference");
+    assert.ok(result.label.includes("preference"));
     assert.equal(result.confidence, "high");
   });
 

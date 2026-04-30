@@ -91,6 +91,8 @@ export interface SmartExtractorConfig {
   admissionControl?: AdmissionControlConfig;
   /** Optional sink for durable reject-audit logging. */
   onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  /** Optional callback when a candidate passes admission control. */
+  onAdmissionAdmitted?: (category: string) => void;
   /** Optional sink for extraction telemetry persistence. */
   onExtractionComplete?: (payload: {
     sessionKey: string;
@@ -118,6 +120,7 @@ export class SmartExtractor {
   private admissionController: AdmissionController | null;
   private persistAdmissionAudit: boolean;
   private onAdmissionRejected?: (entry: AdmissionRejectionAuditEntry) => Promise<void> | void;
+  private onAdmissionAdmitted?: (category: string) => void;
   private onExtractionComplete?: (payload: {
     sessionKey: string;
     scope: string;
@@ -136,6 +139,7 @@ export class SmartExtractor {
       config.admissionControl?.enabled === true &&
       config.admissionControl.auditMetadata !== false;
     this.onAdmissionRejected = config.onAdmissionRejected;
+    this.onAdmissionAdmitted = config.onAdmissionAdmitted;
     this.onExtractionComplete = config.onExtractionComplete;
     this.admissionController =
       config.admissionControl?.enabled === true
@@ -638,6 +642,11 @@ export class SmartExtractor {
         admission.audit as AdmissionAuditRecord & { decision: "reject" },
       );
       return;
+    }
+
+    // Record admitted for feedback loop prior adaptation
+    if (admission?.decision === "pass_to_dedup") {
+      this.onAdmissionAdmitted?.(candidate.category);
     }
 
     // Dedup pipeline

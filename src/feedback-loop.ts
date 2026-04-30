@@ -194,6 +194,7 @@ export class FeedbackLoop {
   private processedErrors = new ProcessedErrorTracker();
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
+  private admittedCounts: Record<string, number> = {};
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private adaptationTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -255,6 +256,12 @@ export class FeedbackLoop {
     if (this.config.noiseLearning.fromRejections) {
       this.rejectionBuffer.push(entry);
     }
+  }
+
+  /** Record an admitted memory by category for prior adaptation. */
+  onAdmissionAdmitted(category: string): void {
+    if (this.disposed || !this.config.enabled) return;
+    this.admittedCounts[category] = (this.admittedCounts[category] ?? 0) + 1;
   }
 
   onSelfImprovementError(params: { summary: string; details?: string; area?: string }): void {
@@ -439,23 +446,16 @@ export class FeedbackLoop {
 
       const stats: Record<string, { admitted: number; rejected: number }> = {};
       for (const cat of MEMORY_CATEGORIES) {
-        stats[cat] = { admitted: 0, rejected: 0 };
+        stats[cat] = {
+          admitted: this.admittedCounts[cat] ?? 0,
+          rejected: 0,
+        };
       }
 
       for (const entry of rejectedEntries) {
         const cat = String(entry.candidate?.category ?? "other");
         if (cat in stats) {
           stats[cat].rejected++;
-        }
-      }
-
-      // Estimate admitted counts from base prior ratios:
-      // base_prior encodes expected admission rate; use it to infer total from rejection count
-      for (const cat of MEMORY_CATEGORIES) {
-        if (stats[cat].rejected > 0) {
-          const basePrior = admissionConfig.typePriors[cat] ?? 0.5;
-          const estimatedTotal = Math.max(stats[cat].rejected, this.config.priorAdaptation.minObservations);
-          stats[cat].admitted = Math.round(estimatedTotal * basePrior);
         }
       }
 

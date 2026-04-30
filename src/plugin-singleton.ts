@@ -238,6 +238,9 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         workspaceBoundary: config.workspaceBoundary,
         admissionControl: config.admissionControl,
         onAdmissionRejected,
+        onAdmissionAdmitted: (category: string) => {
+          _singletonState?.feedbackLoop?.onAdmissionAdmitted(category);
+        },
         onExtractionComplete: telemetryStore.enabled
           ? ({ sessionKey, scope, stats }) => telemetryStore.recordExtraction(sessionKey, scope, stats)
           : undefined,

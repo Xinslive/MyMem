@@ -38,12 +38,18 @@ export function applyMMRDiversity(
 
   for (const candidate of results) {
     const cArr = vectorCache.get(candidate.entry.id);
-    // Check if this candidate is too similar to any already-selected result
-    const tooSimilar = cArr && selected.some((s) => {
-      const sArr = vectorCache.get(s.entry.id);
-      if (!sArr) return false;
-      return cosineSimilarity(sArr, cArr) > similarityThreshold;
-    });
+    // Check if this candidate is too similar to any already-selected result.
+    // Use explicit loop with early exit instead of .some() for better performance.
+    let tooSimilar = false;
+    if (cArr) {
+      for (const s of selected) {
+        const sArr = vectorCache.get(s.entry.id);
+        if (sArr && cosineSimilarity(sArr, cArr) > similarityThreshold) {
+          tooSimilar = true;
+          break;
+        }
+      }
+    }
 
     if (tooSimilar) {
       deferred.push(candidate);

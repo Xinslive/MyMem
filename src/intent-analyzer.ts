@@ -155,12 +155,16 @@ const INTENT_RULES: IntentRule[] = [
 // Analyzer
 // ============================================================================
 
+const DEPTH_RANK: Record<RecallDepth, number> = { l0: 0, l1: 1, full: 2 };
+
 /**
  * Analyze a query to determine which memory categories and recall depth
  * are most appropriate.
  *
- * Returns a default "broad" signal if no specific intent is detected,
- * so callers can always use the result without null checks.
+ * Collects ALL matching intent rules (not just the first) to support
+ * composite queries like "上次我们为什么选择了 React" which combines
+ * experience + decision intents. Merges categories (deduplicated) and
+ * picks the deepest recall depth across matches.
  */
 export function analyzeIntent(query: string): IntentSignal {
   const trimmed = query.trim();
@@ -173,25 +177,35 @@ export function analyzeIntent(query: string): IntentSignal {
     };
   }
 
+  const matched: IntentRule[] = [];
   for (const rule of INTENT_RULES) {
     if (rule.patterns.some((p) => p.test(trimmed))) {
-      return {
-        categories: rule.categories,
-        depth: rule.depth,
-        confidence: "high",
-        label: rule.label,
-        memoryType: rule.memoryType,
-      };
+      matched.push(rule);
     }
   }
 
-  // No specific intent detected — return broad signal.
-  // All categories are eligible; use L0 to minimize token cost.
+  if (matched.length === 0) {
+    // No specific intent detected — return broad signal.
+    return {
+      categories: [],
+      depth: "l0",
+      confidence: "low",
+      label: "broad",
+    };
+  }
+
+  // Merge all matched rules: deduplicate categories, pick deepest depth
+  const allCategories = [...new Set(matched.flatMap(r => r.categories))];
+  const deepest = matched.reduce<RecallDepth>((best, r) =>
+    DEPTH_RANK[r.depth] > DEPTH_RANK[best] ? r.depth : best, matched[0].depth);
+  const memoryType = matched.find(r => r.memoryType)?.memoryType;
+
   return {
-    categories: [],
-    depth: "l0",
-    confidence: "low",
-    label: "broad",
+    categories: allCategories,
+    depth: deepest,
+    confidence: matched.length > 1 ? "high" : "high",
+    label: matched.map(r => r.label).join("+"),
+    memoryType,
   };
 }
 

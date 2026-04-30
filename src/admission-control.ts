@@ -3,6 +3,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { CandidateMemory, MemoryCategory } from "./memory-categories.js";
 import type { MemorySearchResult, MemoryStore } from "./store.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
+import { cosineSimilarity } from "./utils.js";
 
 export interface AdmissionWeights {
   utility: number;
@@ -104,11 +105,11 @@ export interface NoveltyBreakdown {
 }
 
 const DEFAULT_WEIGHTS: AdmissionWeights = {
-  utility: 0.1,
-  confidence: 0.1,
-  novelty: 0.1,
-  recency: 0.1,
-  typePrior: 0.6,
+  utility: 0.15,
+  confidence: 0.15,
+  novelty: 0.15,
+  recency: 0.15,
+  typePrior: 0.40,
 };
 
 const DEFAULT_TYPE_PRIORS: AdmissionTypePriors = {
@@ -180,11 +181,11 @@ export const ADMISSION_CONTROL_PRESETS: Record<AdmissionControlPreset, Admission
     enabled: false,
     utilityMode: "standalone",
     weights: {
-      utility: 0.08,
-      confidence: 0.1,
-      novelty: 0.08,
+      utility: 0.12,
+      confidence: 0.14,
+      novelty: 0.12,
       recency: 0.14,
-      typePrior: 0.6,
+      typePrior: 0.48,
     },
     rejectThreshold: 0.34,
     admitThreshold: 0.52,
@@ -436,28 +437,6 @@ function splitSupportSpans(conversationText: string): string[] {
   return Array.from(spans);
 }
 
-function cosineSimilarity(left: number[], right: number[]): number {
-  if (!Array.isArray(left) || !Array.isArray(right) || left.length === 0 || right.length === 0) {
-    return 0;
-  }
-
-  const size = Math.min(left.length, right.length);
-  let dot = 0;
-  let leftNorm = 0;
-  let rightNorm = 0;
-
-  for (let i = 0; i < size; i++) {
-    const l = Number(left[i]) || 0;
-    const r = Number(right[i]) || 0;
-    dot += l * r;
-    leftNorm += l * l;
-    rightNorm += r * r;
-  }
-
-  if (leftNorm === 0 || rightNorm === 0) return 0;
-  return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
-}
-
 function buildUtilityPrompt(candidate: CandidateMemory, conversationText: string): string {
   const excerpt =
     conversationText.length > 3000
@@ -597,6 +576,33 @@ export function scoreRecencyGap(
   return clamp01(1 - Math.exp(-lambda * gapDays), 1);
 }
 
+/**
+ * Fast rule-based utility scoring — avoids LLM call for clear-cut cases.
+ * Returns null when the candidate needs LLM evaluation.
+ */
+function quickUtilityScore(
+  candidate: CandidateMemory,
+  conversationText: string,
+): { score: number; reason: string } | null {
+  // Very short content → low utility
+  if (candidate.content.length < 15) {
+    return { score: 0.15, reason: "content too short (<15 chars)" };
+  }
+
+  // High conversation coverage → high utility (the info is well-supported)
+  const support = scoreConfidenceSupport(candidate, conversationText);
+  if (support.coverage > 0.8) {
+    return { score: 0.85, reason: `high conversation coverage (${support.coverage.toFixed(2)})` };
+  }
+
+  // Very low coverage → low utility
+  if (support.coverage < 0.15) {
+    return { score: 0.2, reason: `low conversation coverage (${support.coverage.toFixed(2)})` };
+  }
+
+  return null; // Needs LLM evaluation
+}
+
 async function scoreUtility(
   llm: LlmClient,
   mode: AdmissionControlConfig["utilityMode"],
@@ -607,6 +613,13 @@ async function scoreUtility(
     return { score: 0.5, reason: "Utility scoring disabled" };
   }
 
+  // Fast path: rule-based scoring for clear-cut cases
+  const quickResult = quickUtilityScore(candidate, conversationText);
+  if (quickResult !== null) {
+    return quickResult;
+  }
+
+  // Slow path: LLM evaluation
   let response: { utility?: number; reason?: string } | null = null;
   try {
     response = await llm.completeJson<{ utility?: number; reason?: string }>(

@@ -77,8 +77,22 @@ export async function fuseResults(
     }
   }
 
-  // Calculate RRF scores
-  const fusedResults: RetrievalResult[] = [];
+  // Classic Reciprocal Rank Fusion (RRF): score = Σ weight_i / (k + rank_i).
+  // Rank-based scoring is scale-invariant — no normalization needed between
+  // vector and BM25 score distributions. k=60 is the standard constant from
+  // the original RRF paper (Cormack et al., 2009).
+  const RRF_K = 60;
+
+  // Phase 1: Compute raw RRF scores and collect results
+  const rawResults: Array<{
+    entry: RetrievalResult["entry"];
+    rrfRaw: number;
+    bm25Floor: number;
+    isBm25Only: boolean;
+    bm25RawScore: number;
+    sources: RetrievalResult["sources"];
+  }> = [];
+  let maxRrfRaw = 0;
 
   for (const id of allIds) {
     throwIfAborted(signal);
@@ -87,34 +101,26 @@ export async function fuseResults(
 
     // FIX(#15): BM25-only results may be "ghost" entries whose vector data was
     // deleted but whose FTS index entry lingers until the next index rebuild.
-    // Validate that the entry actually exists in the store before including it.
     if (!vectorResult && bm25Result && missingBm25OnlyIds.has(id)) continue;
 
-    // Use the result with more complete data (prefer vector result if both exist)
     const baseResult = vectorResult || bm25Result!;
+    const vectorRRF = vectorResult
+      ? config.vectorWeight / (RRF_K + vectorResult.rank)
+      : 0;
+    const bm25RRF = bm25Result
+      ? config.bm25Weight / (RRF_K + bm25Result.rank)
+      : 0;
+    const rrfRaw = vectorRRF + bm25RRF;
+    if (rrfRaw > maxRrfRaw) maxRrfRaw = rrfRaw;
 
-    // Use vector similarity as the base score.
-    // BM25 hit acts as a bonus (keyword match confirms relevance).
-    const vectorScore = vectorResult ? vectorResult.score : 0;
-    const bm25Score = bm25Result ? bm25Result.score : 0;
-    // Weighted fusion: vectorWeight/bm25Weight directly control score blending.
-    // BM25 high-score floor (>= 0.75) preserves exact keyword matches
-    // (e.g. API keys, ticket numbers) that may have low vector similarity.
-    const weightedFusion = (vectorScore * config.vectorWeight)
-                         + (bm25Score * config.bm25Weight);
-    const fusedScore = vectorResult
-      ? clamp01(
-        Math.max(
-          weightedFusion,
-          bm25Score >= 0.75 ? bm25Score * 0.92 : 0,
-        ),
-        0.1,
-      )
-      : clamp01(bm25Result!.score, 0.1);
-
-    fusedResults.push({
+    rawResults.push({
       entry: baseResult.entry,
-      score: fusedScore,
+      rrfRaw,
+      bm25Floor: bm25Result && bm25Result.score >= 0.75
+        ? bm25Result.score * 0.92
+        : 0,
+      isBm25Only: !vectorResult,
+      bm25RawScore: bm25Result?.score ?? 0,
       sources: {
         vector: vectorResult
           ? { score: vectorResult.score, rank: vectorResult.rank }
@@ -122,8 +128,34 @@ export async function fuseResults(
         bm25: bm25Result
           ? { score: bm25Result.score, rank: bm25Result.rank }
           : undefined,
-        fused: { score: fusedScore },
+        fused: { score: 0 }, // filled in phase 2
       },
+    });
+  }
+
+  // Phase 2: Normalize RRF scores to [0, 1] and apply BM25 floor protection.
+  // RRF raw scores are tiny (e.g. 0.016 for rank 1 with k=60), so we scale
+  // them to fill [0, 1] relative to the best score in this batch.
+  const rrfScale = maxRrfRaw > 0 ? 1 / maxRrfRaw : 1;
+  const fusedResults: RetrievalResult[] = [];
+
+  for (const raw of rawResults) {
+    // BM25-only results use raw BM25 score (already in [0, 1])
+    const rrfNormalized = raw.isBm25Only
+      ? raw.bm25RawScore
+      : raw.rrfRaw * rrfScale;
+
+    // BM25 high-score floor protects exact keyword matches
+    const fusedScore = clamp01(
+      Math.max(rrfNormalized, raw.bm25Floor),
+      0.1,
+    );
+
+    raw.sources.fused = { score: fusedScore };
+    fusedResults.push({
+      entry: raw.entry,
+      score: fusedScore,
+      sources: raw.sources,
     });
   }
 

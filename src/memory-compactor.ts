@@ -26,6 +26,7 @@ import type { MemoryEntry } from "./store.js";
 import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } from "./smart-metadata.js";
 import type { MemoryCategory } from "./memory-categories.js";
+import { cosineSimilarity } from "./utils.js";
 
 // ============================================================================
 // Types
@@ -108,32 +109,8 @@ interface RefinedMemory {
 }
 
 // ============================================================================
-// Math helpers
+// Math helpers (cosineSimilarity imported from utils.js)
 // ============================================================================
-
-/** Dot product of two equal-length vectors. */
-function dot(a: number[], b: number[]): number {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s;
-}
-
-/** L2 norm of a vector. */
-function norm(v: number[]): number {
-  return Math.sqrt(dot(v, v));
-}
-
-/**
- * Cosine similarity in [0, 1].
- * Returns 0 if either vector has zero norm (avoids NaN).
- */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || a.length !== b.length) return 0;
-  const na = norm(a);
-  const nb = norm(b);
-  if (na === 0 || nb === 0) return 0;
-  return Math.max(0, Math.min(1, dot(a, b) / (na * nb)));
-}
 
 function normalizeScope(scope: string | null | undefined): string {
   return scope || "global";

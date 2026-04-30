@@ -28,6 +28,23 @@ export function clamp(value: number, min: number, max: number, fallback: number 
 }
 
 /**
+ * Min-max normalize an array of scores to [0, 1].
+ * Returns 0.5 for all elements if all scores are equal.
+ */
+export function minMaxNormalize(scores: number[]): number[] {
+  if (scores.length === 0) return [];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const s of scores) {
+    if (s < min) min = s;
+    if (s > max) max = s;
+  }
+  if (max === min) return scores.map(() => 0.5);
+  const range = max - min;
+  return scores.map(s => (s - min) / range);
+}
+
+/**
  * Cosine similarity between two numeric vectors.
  * Returns 0 if dimensions mismatch or either vector is zero-length.
  */

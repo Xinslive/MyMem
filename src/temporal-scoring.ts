@@ -220,27 +220,38 @@ export function applyTimeDecay(
 // ============================================================================
 
 /**
- * Apply lifecycle-aware score adjustment (decay + tier floors).
+ * Unified fallback scoring when neither DecayEngine nor RecencyEngine is configured.
  *
- * This is intentionally lightweight:
- * - reads tier/access metadata (if any)
- * - multiplies scores by max(tierFloor, decayComposite)
+ * Replaces the three-step pipeline (applyRecencyBoost + applyImportanceWeight +
+ * applyTimeDecay) with a single multiplicative pass. The old pipeline applied
+ * recency as an additive boost AND time decay as a multiplicative penalty,
+ * causing double-counting of temporal signals.
+ *
+ * - recencyFactor: 0.5~1.0 (exponential decay, floor at 0.5)
+ * - importanceFactor: 0.7~1.0 (linear from importance)
  */
-export function applyLifecycleBoost(
+export function applyFallbackScoring(
   results: RetrievalResult[],
-  decayEngine: DecayEngine | null,
+  config: { recencyHalfLifeDays: number; recencyWeight: number },
 ): RetrievalResult[] {
-  if (!decayEngine) return results;
+  if (!config.recencyHalfLifeDays || config.recencyHalfLifeDays <= 0) return results;
 
   const now = Date.now();
-  const pairs = results.map(r => {
-    const { memory } = getDecayableFromEntry(r.entry);
-    return { r, memory };
+  const halfLife = config.recencyHalfLifeDays;
+
+  return results.map(r => {
+    const ts = r.entry.timestamp > 0 ? r.entry.timestamp : now;
+    const ageDays = (now - ts) / 86_400_000;
+    // Recency: exponential decay with floor at 0.5
+    const recencyFactor = 0.5 + 0.5 * Math.exp(-ageDays / halfLife);
+    // Importance: 0.7~1.0
+    const importance = r.entry.importance ?? 0.7;
+    const importanceFactor = 0.7 + 0.3 * importance;
+    // Combined multiplicative adjustment
+    const combined = recencyFactor * importanceFactor;
+    return {
+      ...r,
+      score: clamp01(r.score * combined, r.score * 0.35),
+    };
   });
-
-  const scored = pairs.map(p => ({ memory: p.memory, score: p.r.score }));
-  decayEngine.applySearchBoost(scored, now);
-
-  const boosted = pairs.map((p, i) => ({ ...p.r, score: scored[i].score }));
-  return boosted;
 }

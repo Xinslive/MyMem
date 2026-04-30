@@ -122,6 +122,20 @@ export class NoisePrototypeBank {
     }
 
     /**
+     * Return the maximum cosine similarity between textVector and any prototype.
+     * Used for confidence-gated learning (only learn if similar to existing noise).
+     */
+    maxSimilarity(textVector: number[]): number {
+        if (!this._initialized || this.vectors.length === 0) return 0;
+        let maxSim = 0;
+        for (const proto of this.vectors) {
+            const sim = cosine(proto, textVector);
+            if (sim > maxSim) maxSim = sim;
+        }
+        return maxSim;
+    }
+
+    /**
      * LLM feedback: add a text vector to the learned noise bank.
      * Called when LLM extraction returns zero memories (strong noise signal).
      * Deduplicates against existing prototypes (>= 0.95 similarity = skip).

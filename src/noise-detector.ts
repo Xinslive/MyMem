@@ -146,9 +146,25 @@ export class HybridNoiseDetector {
 
     const isNoise = detectionMethods.length > 0;
 
-    // Step 3: Learn from regex match if configured and regex matched
+    // Step 3: Learn from regex match if configured and regex matched.
+    // Only learn if the text is similar to existing noise prototypes (prevents
+    // false-positive regex matches from polluting the prototype bank).
     if (isNoise && detectionMethods.includes("regex") && learnOnRegexMatch && this.learnFromRegex) {
-      await this.learnFromRegexMatch(trimmed);
+      if (this.noiseBank.initialized && this.embedder) {
+        try {
+          const vec = await this.embedder.embed(trimmed);
+          if (vec && vec.length > 0) {
+            const maxSim = this.noiseBank.maxSimilarity(vec);
+            // Learn if similar to existing prototypes OR bank is still small
+            if (maxSim >= 0.5 || this.noiseBank.size < 20) {
+              this.noiseBank.learn(vec);
+              this.debugLog(`HybridNoiseDetector: learned noise from regex match (maxSim=${maxSim.toFixed(3)}): "${trimmed.slice(0, 50)}..."`);
+            }
+          }
+        } catch (err) {
+          this.debugLog(`HybridNoiseDetector: failed to learn from regex match - ${err}`);
+        }
+      }
     }
 
     return {

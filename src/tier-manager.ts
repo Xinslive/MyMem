@@ -99,7 +99,16 @@ export function createTierManager(
 
     switch (memory.tier) {
       case "peripheral": {
-        // Promote to Working?
+        // Fast-track: extremely high importance + at least 1 access
+        if (memory.importance >= 0.95 && memory.accessCount >= 1) {
+          return {
+            memoryId: memory.id,
+            fromTier: "peripheral",
+            toTier: "working",
+            reason: `Fast-track: importance=${memory.importance}, accessCount=${memory.accessCount}`,
+          };
+        }
+        // Standard promotion to Working
         if (
           memory.accessCount >= config.workingAccessThreshold &&
           decayScore.composite >= config.workingCompositeThreshold
