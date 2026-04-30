@@ -82,11 +82,77 @@ const SYNONYM_MAP: SynonymEntry[] = [
     en: ["permission", "authorization"],
     expansions: ["权限", "permission", "access", "授权", "认证"],
   },
+  // AI/ML domain
+  {
+    cn: ["向量", "嵌入"],
+    en: ["embedding", "vector"],
+    expansions: ["embedding", "vector", "向量", "嵌入", "相似度", "cosine"],
+  },
+  {
+    cn: ["提示词", "提示"],
+    en: ["prompt"],
+    expansions: ["prompt", "提示词", "指令", "system prompt", "few-shot"],
+  },
+  {
+    cn: ["模型"],
+    en: ["model", "llm"],
+    expansions: ["model", "模型", "LLM", "大模型", "推理"],
+  },
+  {
+    cn: ["知识库", "知识"],
+    en: ["rag", "knowledge"],
+    expansions: ["RAG", "知识库", "knowledge base", "检索增强", "向量数据库"],
+  },
+  // Software engineering
+  {
+    cn: ["接口", "API"],
+    en: ["api", "endpoint"],
+    expansions: ["API", "接口", "endpoint", "REST", "GraphQL"],
+  },
+  {
+    cn: ["数据库"],
+    en: ["database", "db"],
+    expansions: ["数据库", "database", "DB", "SQL", "NoSQL", "查询"],
+  },
+  {
+    cn: ["测试"],
+    en: ["test", "testing"],
+    expansions: ["测试", "test", "testing", "单元测试", "集成测试", "mock"],
+  },
+  {
+    cn: ["性能", "优化"],
+    en: ["performance", "optimize"],
+    expansions: ["性能", "优化", "performance", "optimize", "瓶颈", "profiling"],
+  },
 ];
 
 function buildWordBoundaryRegex(term: string): RegExp {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`\\b${escaped}\\b`, "i");
+}
+
+// ============================================================================
+// Learned Synonyms (populated at runtime from successful recall patterns)
+// ============================================================================
+
+const learnedSynonyms = new Map<string, string[]>();
+const MAX_LEARNED = 200;
+
+/**
+ * Learn a synonym association: when `trigger` appears in a query,
+ * add `expansion` terms to the expanded query.
+ * Called by feedback loop when a query successfully recalls memories
+ * containing terms not in the original query.
+ */
+export function addLearnedSynonym(trigger: string, expansions: string[]): void {
+  if (learnedSynonyms.size >= MAX_LEARNED) return;
+  const key = trigger.toLowerCase().trim();
+  if (!key || expansions.length === 0) return;
+  const existing = learnedSynonyms.get(key) ?? [];
+  const newTerms = expansions.filter(e => !existing.includes(e)).slice(0, 3);
+  if (newTerms.length > 0) {
+    learnedSynonyms.set(key, [...existing, ...newTerms].slice(0, 5));
+  }
 }
 
 export function expandQuery(query: string): string {
@@ -109,6 +175,21 @@ export function expandQuery(query: string): string {
     }
 
     if (additions.size >= MAX_EXPANSION_TERMS) break;
+  }
+
+  // Check learned synonyms
+  const words = lower.split(/\s+/);
+  for (const word of words) {
+    if (additions.size >= MAX_EXPANSION_TERMS) break;
+    const learned = learnedSynonyms.get(word);
+    if (learned) {
+      for (const expansion of learned) {
+        if (!lower.includes(expansion.toLowerCase())) {
+          additions.add(expansion);
+        }
+        if (additions.size >= MAX_EXPANSION_TERMS) break;
+      }
+    }
   }
 
   if (additions.size === 0) return query;

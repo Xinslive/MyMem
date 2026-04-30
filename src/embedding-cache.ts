@@ -7,17 +7,23 @@ interface CacheEntry {
 const SHORT_KEY_THRESHOLD = 200;
 
 /**
- * FNV-1a 32-bit hash — fast non-cryptographic hash for cache keys.
+ * 64-bit non-cryptographic hash via two independent FNV-1a 32-bit passes.
+ * Collision probability ~10⁻¹⁵ at 256 entries (vs ~10⁻⁶ for 32-bit).
  * ~10x faster than SHA-256 for typical embedding text lengths.
  */
-function fnv1a(input: string): string {
-  let h = 0x811c9dc5; // FNV offset basis
+function hash64(input: string): string {
+  // First pass: standard FNV-1a
+  let h1 = 0x811c9dc5;
+  // Second pass: different offset basis for independence
+  let h2 = 0x62b821d5;
   for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193); // FNV prime
+    const c = input.charCodeAt(i);
+    h1 ^= c;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= c;
+    h2 = Math.imul(h2, 0x1b873593);
   }
-  // Convert to unsigned 32-bit hex, zero-padded to 8 chars
-  return (h >>> 0).toString(16).padStart(8, "0");
+  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
 }
 
 export class EmbeddingCache {
@@ -46,8 +52,8 @@ export class EmbeddingCache {
     const composite = `${task || ""}:${text}`;
     // Short text: use raw string as key (no hash overhead)
     if (composite.length <= SHORT_KEY_THRESHOLD) return composite;
-    // Long text: fast FNV-1a hash
-    return fnv1a(composite);
+    // Long text: fast 64-bit hash
+    return hash64(composite);
   }
 
   get(text: string, task?: string): number[] | undefined {

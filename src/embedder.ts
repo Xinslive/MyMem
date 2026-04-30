@@ -132,9 +132,10 @@ export class Embedder {
   /** Enable automatic chunking for long documents (default: true) */
   private readonly _autoChunk: boolean;
   private readonly _logger: Pick<Logger, "debug" | "info" | "warn">;
-  private readonly _inflightSingle = new Map<string, Promise<number[]>>();
+  private readonly _inflightSingle = new Map<string, { promise: Promise<number[]>; createdAt: number }>();
   private readonly _signalIds = new WeakMap<AbortSignal, number>();
   private _nextSignalId = 1;
+  private _lastInflightCleanup = 0;
 
   constructor(config: EmbeddingConfig & { chunking?: boolean }) {
     // Normalize apiKey to array and resolve environment variables
@@ -652,16 +653,34 @@ export class Embedder {
     if (cached) return cached;
 
     const inflightKey = this.inflightKey(text, task, signal);
-    const inflight = this._inflightSingle.get(inflightKey);
-    if (inflight) return inflight;
+    const existing = this._inflightSingle.get(inflightKey);
+    if (existing) return existing.promise;
+
+    // Periodic cleanup of stale inflight entries (>60s old)
+    this.cleanupStaleInflight();
 
     const work = this.withTimeout((sig) => this.embedSingle(text, task, 0, sig), label, signal);
-    this._inflightSingle.set(inflightKey, work);
+    this._inflightSingle.set(inflightKey, { promise: work, createdAt: Date.now() });
     try {
       return await work;
     } finally {
-      if (this._inflightSingle.get(inflightKey) === work) {
+      if (this._inflightSingle.get(inflightKey)?.promise === work) {
         this._inflightSingle.delete(inflightKey);
+      }
+    }
+  }
+
+  /** Remove inflight entries older than 60s (likely stuck). */
+  private cleanupStaleInflight(): void {
+    const now = Date.now();
+    // Only cleanup every 30s to avoid overhead
+    if (now - this._lastInflightCleanup < 30_000) return;
+    this._lastInflightCleanup = now;
+
+    const STALE_MS = 60_000;
+    for (const [key, entry] of this._inflightSingle) {
+      if (now - entry.createdAt > STALE_MS) {
+        this._inflightSingle.delete(key);
       }
     }
   }
@@ -755,18 +774,26 @@ export class Embedder {
             })
           );
 
-          // Compute average embedding across chunks
+          // Position-weighted average: first/last chunks get higher weight
+          // because they typically contain titles, introductions, and conclusions.
+          const n = chunkEmbeddings.length;
+          const weights = chunkEmbeddings.map((_, idx) =>
+            idx === 0 ? 1.2 : idx === n - 1 ? 1.1 : 1.0
+          );
+          const totalWeight = weights.reduce((s, w) => s + w, 0);
+
           const avgEmbedding = chunkEmbeddings.reduce(
-            (sum, { embedding }) => {
+            (sum, { embedding }, idx) => {
+              const w = weights[idx];
               for (let i = 0; i < embedding.length; i++) {
-                sum[i] += embedding[i];
+                sum[i] += embedding[i] * w;
               }
               return sum;
             },
             new Array(this.dimensions).fill(0)
           );
 
-          const finalEmbedding = avgEmbedding.map(v => v / chunkEmbeddings.length);
+          const finalEmbedding = avgEmbedding.map(v => v / totalWeight);
 
           // Cache the result for the original text (using its hash)
           this._cache.set(text, task, finalEmbedding);
@@ -875,17 +902,25 @@ export class Embedder {
                 chunkResult.chunks.map((chunk) => this.embedSingle(chunk, task, 0, signal))
               );
 
+              // Position-weighted average for chunk embeddings
+              const n = embeddings.length;
+              const weights = embeddings.map((_, idx) =>
+                idx === 0 ? 1.2 : idx === n - 1 ? 1.1 : 1.0
+              );
+              const totalWeight = weights.reduce((s, w) => s + w, 0);
+
               const avgEmbedding = embeddings.reduce(
-                (sum, emb) => {
+                (sum, emb, idx) => {
+                  const w = weights[idx];
                   for (let i = 0; i < emb.length; i++) {
-                    sum[i] += emb[i];
+                    sum[i] += emb[i] * w;
                   }
                   return sum;
                 },
                 new Array(this.dimensions).fill(0)
               );
 
-              const finalEmbedding = avgEmbedding.map((v) => v / embeddings.length);
+              const finalEmbedding = avgEmbedding.map((v) => v / totalWeight);
 
               // Cache the averaged embedding for the original (long) text.
               this._cache.set(text, task, finalEmbedding);

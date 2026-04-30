@@ -67,20 +67,88 @@ export function recommendedVectorPartitions(totalRows: number): number {
   return Math.max(8, Math.pow(2, Math.round(Math.log2(rough))));
 }
 
+/**
+ * Tokenize text into lowercase terms. Handles CJK characters as individual
+ * tokens and splits Latin text on word boundaries.
+ */
+function tokenizeForSearch(text: string): string[] {
+  const lower = text.toLowerCase();
+  const tokens: string[] = [];
+  let current = "";
+  for (const ch of lower) {
+    // CJK character → individual token
+    if (/[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯]/.test(ch)) {
+      if (current) { tokens.push(current); current = ""; }
+      tokens.push(ch);
+      continue;
+    }
+    // Word character → accumulate
+    if (/[\p{L}\p{N}]/u.test(ch)) {
+      current += ch;
+      continue;
+    }
+    // Separator → flush
+    if (current) { tokens.push(current); current = ""; }
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * Token-based lexical scoring with coverage weighting.
+ *
+ * Improvements over the old substring-match approach:
+ * - Order-independent: "deploy config" matches "config deploy"
+ * - Per-term matching: partial matches still score
+ * - Coverage-based: score proportional to matched query terms
+ * - Exact substring bonus preserved for backward compatibility
+ */
 export function scoreLexicalHit(query: string, candidates: Array<{ text: string; weight: number }>): number {
   const normalizedQuery = normalizeSearchText(query);
   if (!normalizedQuery) return 0;
 
-  let score = 0;
+  const queryTokens = tokenizeForSearch(normalizedQuery);
+  if (queryTokens.length === 0) return 0;
+
+  // Deduplicate query tokens for coverage calculation
+  const queryTokenSet = new Set(queryTokens);
+
+  let bestScore = 0;
   for (const candidate of candidates) {
+    if (!candidate.text) continue;
     const normalized = normalizeSearchText(candidate.text);
     if (!normalized) continue;
-    if (normalized.includes(normalizedQuery)) {
-      score = Math.max(score, Math.min(0.95, 0.72 + normalizedQuery.length * 0.02) * candidate.weight);
+
+    // Token-based matching: count how many unique query tokens appear in candidate
+    const candidateTokens = tokenizeForSearch(normalized);
+    const candidateTokenSet = new Set(candidateTokens);
+    let matchedTokens = 0;
+    for (const qt of queryTokenSet) {
+      if (candidateTokenSet.has(qt)) matchedTokens++;
     }
+
+    if (matchedTokens === 0) continue;
+
+    // Coverage: fraction of query tokens found
+    const coverage = matchedTokens / queryTokenSet.size;
+
+    // Base score from coverage (0.5 ~ 0.92)
+    let score = 0.5 + 0.42 * coverage;
+
+    // Exact substring bonus (backward compat: rewards precise matches)
+    if (normalized.includes(normalizedQuery)) {
+      score = Math.max(score, 0.88);
+    }
+
+    // Full coverage bonus
+    if (coverage === 1) {
+      score = Math.max(score, 0.92);
+    }
+
+    bestScore = Math.max(bestScore, Math.min(0.95, score) * candidate.weight);
   }
 
-  return score;
+  return bestScore;
 }
 
 // ── ID Resolution ──────────────────────────────────────────────────────
