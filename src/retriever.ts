@@ -45,8 +45,6 @@ import {
 import { rerankResults } from "./reranker.js";
 import { fuseResults } from "./rrf-fusion.js";
 import {
-  applyRecencyBoost,
-  applyImportanceWeight,
   applyRecencyComposite,
   applyDecayBoost,
   applyLengthNormalization,
@@ -924,7 +922,7 @@ export class MemoryRetriever {
     error?: string;
   }> {
     try {
-      const results = await this.retrieve({
+      const _results = await this.retrieve({
         query,
         limit: 1,
       });

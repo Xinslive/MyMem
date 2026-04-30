@@ -69,7 +69,7 @@ export class ConcurrencyLimiter {
       if (!pending) break;
 
       if (pending.signal?.aborted) {
-        pending.onAbort && pending.signal.removeEventListener("abort", pending.onAbort);
+        if (pending.onAbort) pending.signal.removeEventListener("abort", pending.onAbort);
         pending.reject(pending.signal.reason ?? new Error("aborted"));
         continue;
       }

@@ -4,16 +4,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { PluginConfig, SessionStrategy, ReflectionErrorState, AgentWorkspaceMap } from "./src/plugin-types.js";
-import { DEFAULT_SELF_IMPROVEMENT_REMINDER, SELF_IMPROVEMENT_NOTE_PREFIX, DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, REFLECTION_FALLBACK_MARKER, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
-import { homedir, tmpdir } from "node:os";
-import { join, dirname, basename } from "node:path";
-import { readFile, readdir, writeFile, mkdir, appendFile, unlink, stat } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
+import { DEFAULT_REFLECTION_MESSAGE_COUNT, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
 
 // Detect CLI mode: when running as a CLI subcommand (e.g. `openclaw mymem stats`),
 // OpenClaw sets OPENCLAW_CLI=1 in the process environment. Registration and
@@ -22,98 +13,33 @@ import { spawn } from "node:child_process";
 const isCliMode = () => process.env.OPENCLAW_CLI === "1";
 
 // Import extracted utilities
-import { redactSecrets, summarizeRecentConversationMessages, extractTextContent, shouldSkipReflectionMessage, isExplicitRememberCommand, summarizeAgentEndMessages } from "./src/session-utils.js";
-import { resolveEnvVars, parsePositiveInt, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveHookAgentId, resolveSourceFromSessionKey, pruneMapIfOver, resolveLlmTimeoutMs } from "./src/config-utils.js";
-import { clampInt } from "./src/utils.js";
-import { getDefaultDbPath, getDefaultWorkspaceDir, getDefaultMdMirrorDir, resolveWorkspaceDirFromContext } from "./src/path-utils.js";
-import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress, buildAutoCaptureConversationKeyFromSessionKey, isInternalReflectionSessionKey } from "./src/auto-capture-utils.js";
-import { withTimeout, tryParseJsonObject, extractJsonObjectFromOutput, extractReflectionTextFromCliResult, clipDiagnostic, asNonEmptyString } from "./src/cli-utils.js";
+import { extractTextContent, shouldSkipReflectionMessage } from "./src/session-utils.js";
+import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, pruneMapIfOver, resolveLlmTimeoutMs } from "./src/config-utils.js";
+import { getDefaultWorkspaceDir, getDefaultMdMirrorDir, resolveWorkspaceDirFromContext } from "./src/path-utils.js";
+import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress } from "./src/auto-capture-utils.js";
 import { parsePluginConfig } from "./src/plugin-config-parser.js";
 import { getPluginVersion } from "./src/version-utils.js";
-import { sortFileNamesByMtimeDesc } from "./src/file-utils.js";
-import { findPreviousSessionFile, resolveAgentWorkspaceMap, createMdMirrorWriter, createAdmissionRejectionAuditWriter, type MdMirrorWriter } from "./src/workspace-utils.js";
-import { readSessionConversationForReflection, readSessionConversationWithResetFallback, buildReflectionPrompt, buildReflectionFallbackText, loadSelfImprovementReminderContent } from "./src/session-recovery-utils.js";
-import { resolveAgentPrimaryModelRef, isAgentDeclaredInConfig, splitProviderModel } from "./src/agent-config-utils.js";
-import { TelemetryStore, resolveTelemetryDir } from "./src/telemetry.js";
+import { findPreviousSessionFile, createMdMirrorWriter } from "./src/workspace-utils.js";
+import { readSessionConversationWithResetFallback } from "./src/session-recovery-utils.js";
 
 // Import core components
-import { MemoryStore, validateStoragePath } from "./src/store.js";
-import { createEmbedder, getVectorDimensions } from "./src/embedder.js";
-import { createRetriever, DEFAULT_RETRIEVAL_CONFIG } from "./src/retriever.js";
-import { RetrievalStatsCollector } from "./src/retrieval-stats.js";
-import { createScopeManager, resolveScopeFilter, isSystemBypassId, parseAgentIdFromSessionKey } from "./src/scopes.js";
-import { createMigrator } from "./src/migrate.js";
 import { registerAllMemoryTools } from "./src/tools.js";
-import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./src/self-improvement-files.js";
-// Adaptive retrieval utilities are now used only in auto-recall-hook.ts
-import { parseClawteamScopes, applyClawteamScopes } from "./src/clawteam-scope.js";
-import {
-  runCompaction,
-  shouldRunCompaction,
-  recordCompactionRun,
-  type CompactionConfig,
-  type CompactorLifecycle,
-} from "./src/memory-compactor.js";
-import {
-  runLifecycleMaintenance,
-  shouldRunLifecycleMaintenance,
-  recordLifecycleMaintenanceRun,
-} from "./src/lifecycle-maintainer.js";
+import { resolveScopeFilter, parseAgentIdFromSessionKey } from "./src/scopes.js";
 import {
   runPreferenceDistiller,
-  shouldRunPreferenceDistiller,
-  recordPreferenceDistillerRun,
 } from "./src/preference-distiller.js";
 import {
   runExperienceCompiler,
-  shouldRunExperienceCompiler,
-  recordExperienceCompilerRun,
 } from "./src/experience-compiler.js";
-import { runWithReflectionTransientRetryOnce } from "./src/reflection-retry.js";
 import { resolveReflectionSessionSearchDirs } from "./src/session-recovery.js";
-import { storeReflectionToLanceDB } from "./src/reflection-store.js";
-import { extractReflectionLearningGovernanceCandidates } from "./src/reflection-slices.js";
 import { createMemoryCLI } from "./cli.js";
-import { isNoise } from "./src/noise-filter.js";
 import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
 import { summarizeTextPreview, summarizeMessageContent } from "./src/capture-detection.js";
-import { shouldCapture, detectCategory } from "./src/capture-detector.js";
-
-// Import smart extraction & lifecycle components
-import { SmartExtractor, createExtractionRateLimiter } from "./src/smart-extractor.js";
-import { compressTexts, estimateConversationValue } from "./src/session-compressor.js";
-import { NoisePrototypeBank } from "./src/noise-prototypes.js";
-import { HybridNoiseDetector } from "./src/noise-detector.js";
 import { createLlmClient } from "./src/llm-client.js";
-import type { LlmClient } from "./src/llm-client.js";
-import { createDecayEngine, DEFAULT_DECAY_CONFIG } from "./src/decay-engine.js";
-import { RecencyEngine, DEFAULT_RECENCY_CONFIG } from "./src/recency-engine.js";
-import { createTierManager, DEFAULT_TIER_CONFIG } from "./src/tier-manager.js";
 import { createMemoryUpgrader } from "./src/memory-upgrader.js";
-import {
-  buildSmartMetadata,
-  parseSmartMetadata,
-  stringifySmartMetadata,
-} from "./src/smart-metadata.js";
-import {
-  type WorkspaceBoundaryConfig,
-} from "./src/workspace-boundary.js";
-import {
-  normalizeAdmissionControlConfig,
-  resolveRejectedAuditFilePath,
-  type AdmissionControlConfig,
-  type AdmissionRejectionAuditEntry,
-  type AdmissionTypePriors,
-} from "./src/admission-control.js";
-import {
-  FeedbackLoop,
-  normalizeFeedbackLoopConfig,
-} from "./src/feedback-loop.js";
-// intent-analyzer imports moved to auto-recall-hook.ts
 
 // Import singleton state management
 import {
-  type PluginSingletonState,
   initPluginState,
   getSingletonState,
   setSingletonState,
@@ -147,7 +73,8 @@ import { createAutoBackup } from "./src/auto-backup.js";
 import { registerAutoCaptureHook } from "./src/auto-capture-hook.js";
 import { registerAutoRecallHook } from "./src/auto-recall-hook.js";
 import { registerSelfImprovementHook } from "./src/self-improvement-hook.js";
-import { createHookEnhancementState, registerHookEnhancements } from "./src/hook-enhancements.js";
+import { registerHookEnhancements } from "./src/hook-enhancements.js";
+import { registerGatewayMaintenance } from "./src/plugin-registration.js";
 
 const myMemPlugin = {
   id: "mymem",
@@ -184,15 +111,15 @@ const myMemPlugin = {
       smartExtractor,
       smartExtractionLlmClient,
       decayEngine,
-      recencyEngine,
-      hybridNoiseDetector,
+      recencyEngine: _recencyEngine,
+      hybridNoiseDetector: _hybridNoiseDetector,
       tierManager,
       extractionRateLimiter,
       feedbackLoop,
       telemetryStore,
-      reflectionErrorStateBySession,
-      reflectionDerivedBySession,
-      reflectionByAgentCache,
+      reflectionErrorStateBySession: _reflectionErrorStateBySession,
+      reflectionDerivedBySession: _reflectionDerivedBySession,
+      reflectionByAgentCache: _reflectionByAgentCache,
       recallHistory,
       turnCounter,
       lastRawUserMessage,
@@ -391,151 +318,16 @@ const myMemPlugin = {
       }
     );
 
-    if (
-      config.memoryCompaction?.enabled ||
-      config.lifecycleMaintenance?.enabled ||
-      (config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill) ||
-      (config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill)
-    ) {
-      api.on("gateway_start", () => {
-        const compactionStateFile = join(
-          dirname(resolvedDbPath),
-          ".compaction-state.json",
-        );
-        const lifecycleStateFile = join(
-          dirname(resolvedDbPath),
-          ".lifecycle-maintenance-state.json",
-        );
-        const distillerStateFile = join(
-          dirname(resolvedDbPath),
-          ".preference-distiller-state.json",
-        );
-        const compilerStateFile = join(
-          dirname(resolvedDbPath),
-          ".experience-compiler-state.json",
-        );
-        const compactionCfg: CompactionConfig | null = config.memoryCompaction?.enabled ? {
-          enabled: true,
-          minAgeDays: config.memoryCompaction!.minAgeDays ?? 7,
-          similarityThreshold: config.memoryCompaction!.similarityThreshold ?? 0.88,
-          minClusterSize: config.memoryCompaction!.minClusterSize ?? 2,
-          maxMemoriesToScan: config.memoryCompaction!.maxMemoriesToScan ?? 200,
-          dryRun: config.memoryCompaction!.dryRun === true,
-          cooldownHours: config.memoryCompaction!.cooldownHours ?? 4,
-          mergeMode: config.memoryCompaction!.mergeMode ?? "llm",
-          deleteSourceMemories: config.memoryCompaction!.deleteSourceMemories !== false,
-          maxLlmClustersPerRun: config.memoryCompaction!.maxLlmClustersPerRun ?? 10,
-        } : null;
-        const lifecycleCfg = {
-          enabled: config.lifecycleMaintenance?.enabled === true,
-          cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 4,
-          maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 500,
-          archiveThreshold: config.lifecycleMaintenance?.archiveThreshold ?? 0.15,
-          dryRun: config.lifecycleMaintenance?.dryRun === true,
-          deleteMode: config.lifecycleMaintenance?.deleteMode ?? "archive",
-          deleteReasons: config.lifecycleMaintenance?.deleteReasons ?? ["expired", "superseded", "bad_recall", "stale_unaccessed"],
-          hardDeleteReasons: config.lifecycleMaintenance?.hardDeleteReasons ?? ["duplicate_cluster_source", "noise", "superseded_fragment"],
-        };
-
-        // Lifecycle dependencies for post-compaction entry initialization.
-        const compactionLifecycle: CompactorLifecycle = {
-          store: {
-            getById: store.getById.bind(store),
-            update: async (entry) => { await store.update(entry.id, {
-              text: entry.text,
-              vector: entry.vector,
-              importance: entry.importance,
-              category: entry.category,
-              metadata: entry.metadata,
-            }); },
-          },
-        };
-
-        Promise.all([
-          config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
-            ? shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
-            : Promise.resolve(false),
-          config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill
-            ? shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 4)
-            : Promise.resolve(false),
-          lifecycleCfg.enabled ? shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
-          compactionCfg ? shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),
-        ])
-          .then(async ([runDistiller, runCompiler, runLifecycle, runCompact]) => {
-            let distillResult: Awaited<ReturnType<typeof runPreferenceDistiller>> | null = null;
-            let compilerResult: Awaited<ReturnType<typeof runExperienceCompiler>> | null = null;
-            let pruneResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
-            let tierResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
-            let compactionResult: Awaited<ReturnType<typeof runCompaction>> | null = null;
-
-            if (runDistiller) {
-              distillResult = await runPreferenceDistiller(
-                { store, embedder, logger: api.logger },
-                config.preferenceDistiller,
-              );
-              await recordPreferenceDistillerRun(distillerStateFile);
-            }
-
-            if (runCompiler) {
-              compilerResult = await runExperienceCompiler(
-                { store, embedder, logger: api.logger },
-                config.experienceCompiler,
-              );
-              await recordExperienceCompilerRun(compilerStateFile);
-            }
-
-            if (runLifecycle) {
-              pruneResult = await runLifecycleMaintenance(
-                { store, decayEngine, tierManager, logger: api.logger },
-                { ...lifecycleCfg, phase: "prune" },
-              );
-            }
-
-            if (runCompact && compactionCfg) {
-              await recordCompactionRun(compactionStateFile);
-              compactionResult = await runCompaction(
-                store as any,
-                embedder,
-                compactionCfg,
-                undefined,
-                api.logger,
-                compactionLifecycle,
-                smartExtractionLlmClient ?? undefined,
-              );
-            }
-
-            if (runLifecycle) {
-              tierResult = await runLifecycleMaintenance(
-                { store, decayEngine, tierManager, logger: api.logger },
-                { ...lifecycleCfg, phase: "tier" },
-              );
-              await recordLifecycleMaintenanceRun(lifecycleStateFile);
-            }
-
-            if (distillResult || compilerResult || pruneResult || compactionResult || tierResult) {
-              api.logger.info(
-                `memory-maintenance [auto]: ` +
-                `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
-                `compiled=${compilerResult?.created ?? 0}/${compilerResult?.updated ?? 0} ` +
-                `lifecycleScanned=${(pruneResult?.scanned ?? 0) + (tierResult?.scanned ?? 0)} ` +
-                `compactionScanned=${compactionResult?.scanned ?? 0} ` +
-                `clusters=${compactionResult?.clustersFound ?? 0} ` +
-                `created=${compactionResult?.memoriesCreated ?? 0} ` +
-                `deleted=${(pruneResult?.deleted ?? 0) + (compactionResult?.memoriesDeleted ?? 0)} ` +
-                `deleteReasons=${JSON.stringify(pruneResult?.deleteReasons ?? {})} ` +
-                `llmRefined=${compactionResult?.llmRefined ?? 0} ` +
-                `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
-                `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
-                `archived=${pruneResult?.archived ?? 0} ` +
-                `promoted=${tierResult?.promoted ?? 0} demoted=${tierResult?.demoted ?? 0}`,
-              );
-            }
-          })
-          .catch((err) => {
-            api.logger.warn(`memory-maintenance [auto]: failed: ${String(err)}`);
-          });
-      });
-    }
+    registerGatewayMaintenance({
+      api,
+      config,
+      store,
+      embedder,
+      decayEngine,
+      tierManager,
+      smartExtractionLlmClient,
+      resolvedDbPath,
+    });
 
     // ========================================================================
     // Register CLI Commands

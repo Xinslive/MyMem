@@ -3,7 +3,6 @@
  */
 
 import type { RetrievalResult } from "./retriever-types.js";
-import { cosineSimilarity } from "./utils.js";
 
 /**
  * MMR-inspired diversity filter: greedily select results that are both

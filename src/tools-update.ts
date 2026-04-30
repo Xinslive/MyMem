@@ -14,7 +14,6 @@ import {
   fallbackToolLogger,
   retrieveWithRetry,
   sanitizeMemoryForSerialization,
-  deriveManualMemoryLayer,
 } from "./tools-shared.js";
 import type { MemoryEntry } from "./store.js";
 import { isNoise } from "./noise-filter.js";
@@ -185,7 +184,7 @@ export function registerMemoryUpdateTool(
                 const newEntry = await context.store.store({
                   text,
                   vector: newVector,
-                  category: category ? (category as any) : existing.category,
+                  category: category ? (category as MemoryEntry["category"]) : existing.category,
                   scope: existing.scope,
                   importance:
                     importance !== undefined
@@ -235,7 +234,7 @@ export function registerMemoryUpdateTool(
           }
           // --- End temporal supersede guard ---
 
-          const updates: Record<string, any> = {};
+          const updates: Record<string, unknown> = {};
           if (text) updates.text = text;
           if (newVector) updates.vector = newVector;
           if (importance !== undefined)
@@ -245,7 +244,7 @@ export function registerMemoryUpdateTool(
           // Rebuild smart metadata when text or importance changes (#544)
           if (text && existing) {
             const meta = parseSmartMetadata(existing.metadata, existing);
-            const effectiveCategory = (category as any) ?? meta.memory_category;
+            const effectiveCategory = (category ?? meta.memory_category) as "profile" | "preferences" | "entities" | "events" | "cases" | "patterns";
             const updatedMeta = buildSmartMetadata(existing, {
               l0_abstract: text,
               l1_overview: `- ${text}`,

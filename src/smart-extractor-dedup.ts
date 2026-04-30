@@ -178,7 +178,7 @@ export async function llmDedupDecision(
       decision,
       reason: data.reason ?? "",
       matchId: ["merge", "support", "contextualize", "contradict", "supersede"].includes(decision) ? matchEntry?.entry.id : undefined,
-      contextLabel: typeof (data as any).context_label === "string" ? (data as any).context_label : undefined,
+      contextLabel: typeof (data as Record<string, unknown>).context_label === "string" ? (data as Record<string, unknown>).context_label as string : undefined,
     };
   } catch (err) {
     ctx.log.warn(

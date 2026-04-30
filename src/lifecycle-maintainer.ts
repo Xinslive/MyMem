@@ -7,7 +7,6 @@ import type { MemoryEntry, MemoryStore } from "./store.js";
 import {
   getDecayableFromEntry,
   isMemoryExpired,
-  parseSmartMetadata,
   stringifySmartMetadata,
   type SmartMemoryMetadata,
 } from "./smart-metadata.js";

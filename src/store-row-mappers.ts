@@ -1,4 +1,4 @@
-import type { MemoryEntry } from "./store-types.js";
+import type { MemoryEntry, LanceRow } from "./store-types.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 
 export function toLanceRows(entries: MemoryEntry[]): Record<string, unknown>[] {
@@ -17,7 +17,7 @@ export function toNumberVector(value: unknown): number[] {
   return Array.from(maybeIterable, (item) => Number(item));
 }
 
-export function mapRowToMemoryEntry(row: any, includeVector = true): MemoryEntry {
+export function mapRowToMemoryEntry(row: LanceRow, includeVector = true): MemoryEntry {
   const entry: MemoryEntry = {
     id: row.id as string,
     text: row.text as string,

@@ -13,10 +13,7 @@ import {
   stringEnum,
   resolveWorkspaceDir,
   escapeRegExp,
-  extractLearningSection,
-  extractLearningField,
   parseLearningBacklogEntries,
-  normalizeDistillRuleText,
   buildSelfImprovementDistillPatch,
   type LearningBacklogEntry,
 } from "./tools-shared.js";

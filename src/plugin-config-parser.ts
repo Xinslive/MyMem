@@ -240,11 +240,11 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           if (rerankConfigured && typeof retrieval.rerankProvider === "string" && retrieval.rerankProvider.includes("${")) {
             retrieval.rerankProvider = resolveEnvVars(retrieval.rerankProvider);
           }
-          return retrieval as any;
+          return retrieval as PluginConfig["retrieval"];
         })()
         : undefined,
-    decay: typeof cfg.decay === "object" && cfg.decay !== null ? cfg.decay as any : undefined,
-    tier: typeof cfg.tier === "object" && cfg.tier !== null ? cfg.tier as any : undefined,
+    decay: typeof cfg.decay === "object" && cfg.decay !== null ? cfg.decay as PluginConfig["decay"] : undefined,
+    tier: typeof cfg.tier === "object" && cfg.tier !== null ? cfg.tier as PluginConfig["tier"] : undefined,
     smartExtraction: cfg.smartExtraction !== false,
     llm: (() => {
       const raw = typeof cfg.llm === "object" && cfg.llm !== null ? cfg.llm as Record<string, unknown> : {};
@@ -262,11 +262,11 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         model: typeof raw.model === "string" ? raw.model.trim() : undefined,
         baseURL: typeof raw.baseURL === "string" ? resolveEnvVars(raw.baseURL.trim()) : undefined,
         timeoutMs: parsePositiveInt(raw.timeoutMs) ?? 90000,
-      } as any;
+      } as PluginConfig["llm"];
     })(),
     extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 5,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8000,
-    scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as any : undefined,
+    scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as PluginConfig["scopes"] : undefined,
     enableManagementTools: cfg.enableManagementTools !== false,
     sessionStrategy,
     selfImprovement: typeof cfg.selfImprovement === "object" && cfg.selfImprovement !== null

@@ -136,7 +136,7 @@ Rules:
 
 function simpleEnrich(
   text: string,
-  category: MemoryCategory,
+  _category: MemoryCategory,
 ): Pick<EnrichedMetadata, "l0_abstract" | "l1_overview" | "l2_content"> {
   // L0: first sentence or first 80 chars
   const firstSentence = text.match(/^[^.!?。！？\n]+[.!?。！？]?/)?.[0] || text;

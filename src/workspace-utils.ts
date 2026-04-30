@@ -73,8 +73,9 @@ export function resolveAgentWorkspaceMap(api: OpenClawPluginApi): AgentWorkspace
   const map: AgentWorkspaceMap = {};
 
   // Try api.config first (runtime config)
-  const agents = Array.isArray((api as any).config?.agents?.list)
-    ? (api as any).config.agents.list
+  const apiExtended = api as unknown as { config?: { agents?: { list?: Array<{ id?: string; workspace?: string }> } } };
+  const agents = Array.isArray(apiExtended.config?.agents?.list)
+    ? apiExtended.config.agents.list
     : [];
 
   for (const agent of agents) {

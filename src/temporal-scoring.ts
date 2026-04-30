@@ -3,15 +3,13 @@
  */
 
 import type { RetrievalResult } from "./retriever-types.js";
-import type { DecayEngine, DecayableMemory } from "./decay-engine.js";
+import type { DecayEngine } from "./decay-engine.js";
 import type { RecencyEngine, RecencyEntry } from "./recency-engine.js";
 import {
-  parseAccessMetadata,
   accessMetadataFromParsed,
   computeEffectiveHalfLife,
 } from "./access-tracker.js";
 import {
-  getDecayableFromEntry,
   parseSmartMetadata,
   toLifecycleMemory,
 } from "./smart-metadata.js";

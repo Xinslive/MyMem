@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { NoisePrototypeBank } from "./noise-prototypes.js";
 import type { Embedder } from "./embedder.js";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
-import { MEMORY_CATEGORIES, type MemoryCategory } from "./memory-categories.js";
+import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
 
 // ============================================================================

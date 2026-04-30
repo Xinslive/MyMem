@@ -188,7 +188,7 @@ export function getObservedAdmissionCategory(
   entry: AdmissionAuditedMemoryLike,
 ): string {
   const legacyCategory = LEGACY_STORE_CATEGORIES.has(entry.category ?? "") ? entry.category : undefined;
-  return parseSmartMetadata(entry.metadata, { ...entry, category: legacyCategory as any }).memory_category || entry.category || "patterns";
+  return parseSmartMetadata(entry.metadata, { ...entry, category: legacyCategory as "preference" | "fact" | "decision" | "entity" | "other" | undefined }).memory_category || entry.category || "patterns";
 }
 
 export function buildAdmissionCategoryBreakdown(

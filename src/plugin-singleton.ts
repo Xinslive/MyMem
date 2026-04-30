@@ -5,7 +5,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { PluginConfig, ReflectionErrorState } from "./plugin-types.js";
+import type { ReflectionErrorState } from "./plugin-types.js";
 import { DIAG_BUILD_TAG } from "./plugin-constants.js";
 import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs } from "./config-utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir } from "./path-utils.js";

@@ -7,7 +7,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { PluginConfig, ReflectionThinkLevel, ReflectionInjectMode, ReflectionErrorSignal, ReflectionErrorState } from "./plugin-types.js";
+import type { PluginConfig, ReflectionErrorSignal, ReflectionErrorState } from "./plugin-types.js";
 import type { Embedder } from "./embedder.js";
 import type { MemoryStore } from "./store.js";
 import type { ScopeManager } from "./scopes.js";
@@ -161,7 +161,7 @@ function createReflectionSessionHelpers(state: {
 // ============================================================================
 
 export function registerMemoryReflectionHook(params: ReflectionHookParams): void {
-  const { api, config, store, embedder, scopeManager, mdMirror, smartExtractionLlmClient, resolvedDbPath, singletonState, isCliMode } = params;
+  const { api, config, store, embedder, scopeManager, mdMirror, smartExtractionLlmClient: _smartExtractionLlmClient, resolvedDbPath, singletonState, isCliMode } = params;
   const {
     reflectionErrorStateBySession,
     reflectionDerivedBySession,

@@ -6,7 +6,7 @@
  *
  */
 
-import type { MemoryStore, MemorySearchResult } from "./store.js";
+import type { MemoryStore } from "./store.js";
 import type { Embedder } from "./embedder.js";
 import type { LlmClient } from "./llm-client.js";
 import {
@@ -21,7 +21,6 @@ import {
 import {
   type CandidateMemory,
   type ExtractionStats,
-  type MemoryCategory,
   ALWAYS_MERGE_CATEGORIES,
   MERGE_SUPPORTED_CATEGORIES,
   TEMPORAL_VERSIONED_CATEGORIES,

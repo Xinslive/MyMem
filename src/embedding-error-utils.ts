@@ -6,22 +6,24 @@ function getErrorMessage(error: unknown): string {
 
 function getErrorStatus(error: unknown): number | undefined {
   if (!error || typeof error !== "object") return undefined;
-  const err = error as Record<string, any>;
+  const err = error as Record<string, unknown>;
   if (typeof err.status === "number") return err.status;
   if (typeof err.statusCode === "number") return err.statusCode;
   if (err.error && typeof err.error === "object") {
-    if (typeof err.error.status === "number") return err.error.status;
-    if (typeof err.error.statusCode === "number") return err.error.statusCode;
+    const nested = err.error as Record<string, unknown>;
+    if (typeof nested.status === "number") return nested.status;
+    if (typeof nested.statusCode === "number") return nested.statusCode;
   }
   return undefined;
 }
 
 function getErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
-  const err = error as Record<string, any>;
+  const err = error as Record<string, unknown>;
   if (typeof err.code === "string") return err.code;
-  if (err.error && typeof err.error === "object" && typeof err.error.code === "string") {
-    return err.error.code;
+  const nested = err.error as Record<string, unknown> | undefined;
+  if (nested && typeof nested === "object" && typeof nested.code === "string") {
+    return nested.code;
   }
   return undefined;
 }

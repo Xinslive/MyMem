@@ -8,7 +8,6 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import {
   type ToolContext,
   resolveToolContext,
-  resolveRuntimeAgentId,
   memoryCategoryEnum,
   clamp01,
   deriveManualMemoryCategory,
@@ -17,7 +16,7 @@ import {
 } from "./tools-shared.js";
 import { stripEnvelopeMetadata } from "./smart-extractor.js";
 import { isNoise } from "./noise-filter.js";
-import { isSystemBypassId, resolveScopeFilter } from "./scopes.js";
+import { isSystemBypassId } from "./scopes.js";
 import {
   appendRelation,
   buildSmartMetadata,

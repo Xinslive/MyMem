@@ -107,7 +107,7 @@ export class RecencyEngine {
    * Calculate recency score for a single entry.
    */
   score(entry: RecencyEntry): RecencyScore {
-    const { now, ageDays, accessCount, lastAccessedAt, temporalType, importance } =
+    const { now: _now, ageDays, accessCount, lastAccessedAt, temporalType, importance } =
       parseEntry(entry);
 
     // Recency: simple exponential decay from timestamp

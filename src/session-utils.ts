@@ -5,7 +5,6 @@
  */
 
 import { isNoise } from "./noise-filter.js";
-import { shouldCapture, sanitizeForContext, summarizeTextPreview } from "./capture-detection.js";
 
 /**
  * Extracts text content from various message content formats.

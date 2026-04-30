@@ -119,7 +119,7 @@ export async function storeCandidate(
   vector: number[],
   sessionKey: string,
   targetScope: string,
-  admissionAudit?: AdmissionAuditRecord,
+  _admissionAudit?: AdmissionAuditRecord,
 ): Promise<void> {
   // Map 6-category to existing store categories for backward compatibility
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
@@ -364,7 +364,7 @@ export async function handleSupersede(
   sessionKey: string,
   targetScope: string,
   scopeFilter: string[],
-  admissionAudit?: AdmissionAuditRecord,
+  _admissionAudit?: AdmissionAuditRecord,
 ): Promise<void> {
   const existing = await ctx.store.getById(matchId, scopeFilter);
   if (!existing) {

@@ -33,7 +33,10 @@
     "test:packaging-and-workflow": "node scripts/verify-ci-test-manifest.mjs && node scripts/run-ci-tests.mjs --group packaging-and-workflow",
     "test:openclaw-host": "node test/openclaw-host-functional.mjs",
     "version": "node scripts/sync-plugin-version.mjs openclaw.plugin.json package.json && git add openclaw.plugin.json",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src/ index.ts cli.ts",
+    "lint:fix": "eslint src/ index.ts cli.ts --fix",
+    "test:coverage": "c8 --reporter=text --reporter=lcov node scripts/run-ci-tests.mjs --all"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",
@@ -51,15 +54,19 @@
   },
   "optionalDependencies": {
     "@lancedb/lancedb-darwin-arm64": "^0.27.2",
-    "@lancedb/lancedb-linux-x64-gnu": "^0.27.2",
     "@lancedb/lancedb-linux-arm64-gnu": "^0.27.2",
-    "@lancedb/lancedb-linux-x64-musl": "^0.27.2",
     "@lancedb/lancedb-linux-arm64-musl": "^0.27.2",
+    "@lancedb/lancedb-linux-x64-gnu": "^0.27.2",
+    "@lancedb/lancedb-linux-x64-musl": "^0.27.2",
     "@lancedb/lancedb-win32-x64-msvc": "^0.27.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "c8": "^11.0.0",
     "commander": "^14.0.0",
+    "eslint": "^10.2.1",
     "jiti": "^2.6.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.1"
   }
 }

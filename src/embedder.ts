@@ -12,10 +12,8 @@ import OpenAI from "openai";
 import { smartChunk } from "./chunker.js";
 import { EmbeddingCache } from "./embedding-cache.js";
 import {
-  ConcurrencyLimiter,
   globalEmbedRequestLimiter,
   EMBED_TIMEOUT_MS,
-  GLOBAL_EMBED_CONCURRENCY_LIMIT,
   MAX_EMBED_DEPTH,
   STRICT_REDUCTION_FACTOR,
 } from "./concurrency-limiter.js";
@@ -27,10 +25,6 @@ import {
 } from "./embedding-provider.js";
 import {
   formatEmbeddingProviderError,
-  getErrorMessage,
-  getErrorStatus,
-  getErrorCode,
-  isAuthError,
   isNetworkError,
   isAbortError,
 } from "./embedding-error-utils.js";
@@ -38,6 +32,22 @@ import type { Logger } from "./logger.js";
 
 // Re-export for backward compat
 export { formatEmbeddingProviderError };
+
+/** Payload shape for OpenAI-compatible embedding requests. */
+interface EmbedPayload {
+  model: string;
+  input: string | string[];
+  encoding_format?: "base64" | "float";
+  normalized?: boolean;
+  dimensions?: number;
+  task?: string;
+  [key: string]: unknown;
+}
+
+/** Response shape from /v1/embeddings endpoint. */
+interface EmbedResponse {
+  data: Array<{ embedding: number[] }>;
+}
 
 // ============================================================================
 // Types & Configuration
@@ -169,7 +179,7 @@ export class Embedder {
 
     // Create a client pool — one OpenAI client per key
     this.clients = resolvedKeys.map(key => {
-      let defaultHeaders: Record<string, string> = {};
+      const defaultHeaders: Record<string, string> = {};
       let baseURL = config.baseURL;
 
       if (config.provider === "azure-openai" || profile === "azure-openai") {
@@ -215,7 +225,7 @@ export class Embedder {
   private isRateLimitError(error: unknown): boolean {
     if (!error || typeof error !== "object") return false;
 
-    const err = error as Record<string, any>;
+    const err = error as Record<string, unknown>;
 
     // HTTP status: 429 (rate limit) or 503 (service overload)
     if (err.status === 429 || err.status === 503) return true;
@@ -224,7 +234,7 @@ export class Embedder {
     if (err.code === "rate_limit_exceeded" || err.code === "insufficient_quota") return true;
 
     // Nested error object (some providers)
-    const nested = err.error;
+    const nested = err.error as Record<string, unknown> | undefined;
     if (nested && typeof nested === "object") {
       if (nested.type === "rate_limit_exceeded" || nested.type === "insufficient_quota") return true;
       if (nested.code === "rate_limit_exceeded" || nested.code === "insufficient_quota") return true;
@@ -269,7 +279,7 @@ export class Embedder {
    * See: https://github.com/Xinslive/MyMem/issues/620
    * Fix: https://github.com/Xinslive/MyMem/issues/629
    */
-  private async embedWithNativeFetch(payload: any, signal?: AbortSignal): Promise<any> {
+  private async embedWithNativeFetch(payload: EmbedPayload, signal?: AbortSignal): Promise<EmbedResponse> {
     if (!this._baseURL) {
       throw new Error("embedWithNativeFetch requires a baseURL");
     }
@@ -314,7 +324,7 @@ export class Embedder {
       if (
         !Array.isArray(data?.data) ||
         data.data.length !== payload.input.length ||
-        data.data.some((item: any) => {
+        data.data.some((item: { embedding: number[] }) => {
           const embedding = item?.embedding;
           return !Array.isArray(embedding) || embedding.length === 0;
         })
@@ -367,7 +377,7 @@ export class Embedder {
    * because AbortController does not reliably abort Ollama's HTTP connections
    * through the SDK's HTTP client on Node.js.
    */
-  private async embedWithRetry(payload: any, signal?: AbortSignal): Promise<any> {
+  private async embedWithRetry(payload: EmbedPayload, signal?: AbortSignal): Promise<EmbedResponse> {
     // Use native fetch for Ollama to ensure proper AbortController support
     if (this.isOllamaProvider()) {
       try {
@@ -396,7 +406,7 @@ export class Embedder {
       try {
         // Pass signal to OpenAI SDK if provided (SDK v6+ supports this)
         return await this.withGlobalConcurrencyLimit(
-          () => client.embeddings.create(payload, signal ? { signal } : undefined),
+          () => client.embeddings.create(payload, signal ? { signal } : undefined) as Promise<EmbedResponse>,
           signal,
         );
       } catch (error) {
@@ -419,7 +429,7 @@ export class Embedder {
         if (isNetworkError(error) || isAbortError(error)) {
           return await this.retryWithBackoff(
             () => this.withGlobalConcurrencyLimit(
-              () => client.embeddings.create(payload, signal ? { signal } : undefined),
+              () => client.embeddings.create(payload, signal ? { signal } : undefined) as Promise<EmbedResponse>,
               signal,
             ),
             signal,
@@ -597,8 +607,8 @@ export class Embedder {
     }
   }
 
-  private buildPayload(input: string | string[], task?: string): any {
-    const payload: any = {
+  private buildPayload(input: string | string[], task?: string): EmbedPayload {
+    const payload: EmbedPayload = {
       model: this.model,
       input,
     };
@@ -950,13 +960,13 @@ export class Embedder {
 
           return results;
         } catch (chunkError) {
-          const friendly = formatEmbeddingProviderError(error, {
+          const friendly = formatEmbeddingProviderError(chunkError, {
             baseURL: this._baseURL,
             model: this._model,
             mode: "batch",
           });
           throw new Error(`Failed to embed documents after chunking attempt: ${friendly}`, {
-            cause: error instanceof Error ? error : undefined,
+            cause: chunkError instanceof Error ? chunkError : undefined,
           });
         }
       }

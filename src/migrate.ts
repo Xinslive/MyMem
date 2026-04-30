@@ -280,7 +280,7 @@ export class MemoryMigrator {
         sourceDbPath: sourcePath,
         entryCount: entries.length > 0 ? undefined : 0,
       };
-    } catch (error) {
+    } catch {
       return {
         needed: false,
         sourceFound: true,

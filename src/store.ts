@@ -3,6 +3,7 @@
  */
 
 import type * as LanceDB from "@lancedb/lancedb";
+import { Index as LanceDbIndex } from "@lancedb/lancedb";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -10,7 +11,7 @@ import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
 
-import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus } from "./store-types.js";
+import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus, LanceRow, LanceIndex } from "./store-types.js";
 import {
   FULL_ENTRY_COLUMNS,
   LIST_ENTRY_COLUMNS,
@@ -27,9 +28,8 @@ import {
   scoreLexicalHit,
   resolveMemoryId,
 } from "./store-sql-utils.js";
-import { toLanceRows, toNumberVector, mapRowToMemoryEntry } from "./store-row-mappers.js";
+import { toLanceRows, mapRowToMemoryEntry } from "./store-row-mappers.js";
 import { loadLanceDB } from "./lancedb-loader.js";
-import { validateStoragePath } from "./storage-path.js";
 
 /** Async stat that returns null instead of throwing on ENOENT. */
 async function statAsync(filePath: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
@@ -67,11 +67,15 @@ export { validateStoragePath } from "./storage-path.js";
 // Cross-Process File Lock (proper-lockfile)
 // ============================================================================
 
-let lockfileModule: any = null;
+interface LockfileModule {
+  lock(path: string, options: Record<string, unknown>): Promise<() => Promise<void>>;
+}
 
-async function loadLockfile(): Promise<any> {
+let lockfileModule: LockfileModule | null = null;
+
+async function loadLockfile(): Promise<LockfileModule> {
   if (!lockfileModule) {
-    lockfileModule = await import("proper-lockfile");
+    lockfileModule = (await import("proper-lockfile")) as unknown as LockfileModule;
   }
   return lockfileModule;
 }
@@ -79,6 +83,16 @@ async function loadLockfile(): Promise<any> {
 // ============================================================================
 // Memory Store
 // ============================================================================
+
+/** Return type of MemoryStore.stats() — used for cache typing. */
+type StatsResult = {
+  totalCount: number;
+  scopeCounts: Record<string, number>;
+  categoryCounts: Record<string, number>;
+  recentActivity: { last24h: number; last7d: number };
+  tierDistribution: Record<string, number>;
+  healthSignals: { badRecall: number; suppressed: number; lowConfidence: number };
+};
 
 const TABLE_NAME = "memories";
 
@@ -98,7 +112,7 @@ export class MemoryStore {
   private _serialChain: Promise<void> = Promise.resolve();
 
   // Stats result cache (invalidated on writes)
-  private _statsCache: { key: string; result: any; ts: number } | null = null;
+  private _statsCache: { key: string; result: StatsResult; ts: number } | null = null;
   private static STATS_CACHE_TTL_MS = 30_000;
 
   /** Logger instance for structured logging. */
@@ -141,9 +155,9 @@ export class MemoryStore {
     const written = await this.runWithFileLock(async () => {
       try {
         await this.table!.add(toLanceRows(entries));
-      } catch (err: any) {
-        const code = err.code || "";
-        const message = err.message || String(err);
+      } catch (err: unknown) {
+        const code = (err as Record<string, unknown>)?.code || "";
+        const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           `Failed to flush-batch store ${entries.length} memories: ${code} ${message}`,
         );
@@ -219,11 +233,9 @@ export class MemoryStore {
     const current = cachedStatus ?? await this.getIndexStatusInternal(table);
     if (current.available.scalar.includes(column)) return;
 
-    const lancedb = await loadLanceDB();
-    const config =
-      kind === "bitmap"
-        ? (lancedb as any).Index.bitmap()
-        : (lancedb as any).Index.btree();
+    const config = kind === "bitmap"
+      ? LanceDbIndex.bitmap()
+      : LanceDbIndex.btree();
     await table.createIndex(column, {
       config,
       replace: false,
@@ -236,9 +248,8 @@ export class MemoryStore {
     const current = cachedStatus ?? await this.getIndexStatusInternal(table);
     if (current.available.vector || totalRows < MIN_VECTOR_INDEX_ROWS) return;
 
-    const lancedb = await loadLanceDB();
     await table.createIndex("vector", {
-      config: (lancedb as any).Index.ivfFlat({
+      config: LanceDbIndex.ivfFlat({
         distanceType: "cosine",
         numPartitions: recommendedVectorPartitions(totalRows),
       }),
@@ -425,9 +436,9 @@ export class MemoryStore {
     let db: LanceDB.Connection;
     try {
       db = await lancedb.connect(this.config.dbPath);
-    } catch (err: any) {
-      const code = err.code || "";
-      const message = err.message || String(err);
+    } catch (err: unknown) {
+      const code = (err as Record<string, unknown>)?.code || "";
+      const message = err instanceof Error ? err.message : String(err);
       throw new Error(
         `Failed to open LanceDB at "${this.config.dbPath}": ${code} ${message}\n` +
         `  Fix: Verify the path exists and is writable. Check parent directory permissions.`,
@@ -476,7 +487,7 @@ export class MemoryStore {
           this.log.warn(`could not check/migrate table schema: ${err}`);
         }
       }
-    } catch (_openErr) {
+    } catch {
       // Table doesn't exist yet ??create it
       const schemaEntry: MemoryEntry = {
         id: "__schema__",
@@ -542,12 +553,11 @@ export class MemoryStore {
     try {
       // Check if FTS index already exists
       const indices = await table.listIndices();
-      const existingFts = indices?.find(
-        (idx: any) => idx.indexType === "FTS" || idx.columns?.includes("text"),
+      const existingFts = (indices as unknown as LanceIndex[])?.find(
+        (idx) => idx.indexType === "FTS" || idx.columns?.includes("text"),
       );
 
-      const lancedb = await loadLanceDB();
-      const ftsConfig = (lancedb as any).Index.fts({
+      const ftsConfig = LanceDbIndex.fts({
         withPosition: true,
         // ngram tokenizer: splits CJK text into 2-3 character tokens for BM25 matching.
         // Chinese "部署新版本" → ["部署","署新","新版本","版本"] enabling keyword search.
@@ -563,7 +573,7 @@ export class MemoryStore {
         // Migrate: drop old index (may have been created with "simple" tokenizer)
         // and recreate with ngram tokenizer for CJK support.
         try {
-          await table.dropIndex((existingFts as any).name || "text");
+          await table.dropIndex((existingFts as LanceIndex).name || "text");
         } catch (err) {
           this.log.warn(`dropIndex for FTS migration failed: ${err}`);
         }
@@ -602,9 +612,9 @@ export class MemoryStore {
     const stored = await this.runWithFileLock(async () => {
       try {
         await this.table!.add(toLanceRows([fullEntry]));
-      } catch (err: any) {
-        const code = err.code || "";
-        const message = err.message || String(err);
+      } catch (err: unknown) {
+        const code = (err as Record<string, unknown>)?.code || "";
+        const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           `Failed to store memory in "${this.config.dbPath}": ${code} ${message}`,
         );
@@ -896,14 +906,14 @@ export class MemoryStore {
 
     const resolved = resolveMemoryId(id);
 
-    let candidates: any[];
+    let candidates: LanceRow[];
     if (resolved.isFullId) {
       const safeId = escapeSqlLiteral(id);
       candidates = await this.table!.query()
         .select(["id", "scope"])
         .where(`id = '${safeId}'`)
         .limit(1)
-        .toArray();
+        .toArray() as unknown as LanceRow[];
     } else {
       candidates = await this.table!.query()
         .select(["id", "scope"])
@@ -1108,14 +1118,14 @@ export class MemoryStore {
     // --- Read-only operations outside lock ---
     const resolved = resolveMemoryId(id);
 
-    let rows: any[];
+    let rows: LanceRow[];
     if (resolved.isFullId) {
       const safeId = escapeSqlLiteral(id);
       rows = await this.table!.query()
         .select(FULL_ENTRY_COLUMNS as unknown as string[])
         .where(`id = '${safeId}'`)
         .limit(1)
-        .toArray();
+        .toArray() as unknown as LanceRow[];
     } else {
       rows = await this.table!.query()
         .select(FULL_ENTRY_COLUMNS as unknown as string[])
@@ -1307,9 +1317,9 @@ export class MemoryStore {
       for (const idx of indices) {
         if (idx.indexType === "FTS" || idx.columns?.includes("text")) {
           try {
-            await this.table!.dropIndex((idx as any).name || "text");
+            await this.table!.dropIndex((idx as LanceIndex).name || "text");
           } catch (err) {
-            this.log.warn(`dropIndex(${(idx as any).name || "text"}) failed:`, err);
+            this.log.warn(`dropIndex(${(idx as LanceIndex).name || "text"}) failed:`, err);
           }
         }
       }

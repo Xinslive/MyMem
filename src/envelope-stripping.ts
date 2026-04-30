@@ -33,23 +33,6 @@ const MULTI_SPACE_RE = /\s{2,}/g;
 export function stripEnvelopeMetadata(text: string): string {
   const originalLines = text.split("\n");
 
-  // Pre-scan: determine if there are leading wrappers.
-  // Needed to decide whether boilerplate in the leading zone should be stripped
-  // (boilerplate without a wrapper prefix is preserved — it may be legitimate user text).
-  //
-  // FIX (Must Fix 2): Only scan the ACTUAL leading zone — lines before the first
-  // real user content. Previously scanned ALL lines, causing false positives when
-  // a wrapper appeared in the trailing zone (e.g. user-pasted quoted text).
-  let foundLeadingWrapper = false;
-  for (let i = 0; i < originalLines.length; i++) {
-    const trimmed = originalLines[i].trim();
-    if (trimmed === "") continue; // blank lines are part of leading zone
-    if (WRAPPER_LINE_RE.test(trimmed)) { foundLeadingWrapper = true; continue; }
-    if (BOILERPLATE_RE.test(trimmed)) continue;
-    // First real user content — stop scanning, this is the leading zone boundary
-    break;
-  }
-
   // Single-pass state machine: find leading zone end and build result simultaneously.
   // Key: "You are running as a subagent..." on its own line AFTER a wrapper prefix
   // is wrapper CONTENT (must be stripped), not user content.
@@ -62,9 +45,7 @@ export function stripEnvelopeMetadata(text: string): string {
     const rawLine = originalLines[i];
     const trimmed = rawLine.trim();
     const isWrapper = WRAPPER_LINE_RE.test(trimmed);
-    const isBoilerplate = BOILERPLATE_RE.test(trimmed);
     const afterPrefix = trimmed.replace(WRAPPER_LINE_RE, "").trim();
-    const isBoilerplateAfterPrefix = BOILERPLATE_RE.test(afterPrefix);
     const isSubagentContent = prevWasWrapper && SUBAGENT_RUNNING_RE.test(trimmed);
 
     // Strip wrapper lines only when inside the leading zone (N2 fix)

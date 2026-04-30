@@ -12,7 +12,6 @@
  * unless they explicitly specify a team scope.
  */
 
-import type { ScopeDefinition } from "./scopes.js";
 import type { MemoryScopeManager } from "./scopes.js";
 
 /**
