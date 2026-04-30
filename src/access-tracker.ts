@@ -78,6 +78,11 @@ export function parseAccessMetadata(
     return { accessCount: 0, lastAccessedAt: 0 };
   }
 
+  return accessMetadataFromParsed(parsed);
+}
+
+/** Extract access metadata from an already-parsed object (avoids re-parsing). */
+export function accessMetadataFromParsed(parsed: unknown): AccessMetadata {
   if (typeof parsed !== "object" || parsed === null) {
     return { accessCount: 0, lastAccessedAt: 0 };
   }

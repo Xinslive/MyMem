@@ -7,6 +7,7 @@ import type { DecayEngine, DecayableMemory } from "./decay-engine.js";
 import type { RecencyEngine, RecencyEntry } from "./recency-engine.js";
 import {
   parseAccessMetadata,
+  accessMetadataFromParsed,
   computeEffectiveHalfLife,
 } from "./access-tracker.js";
 import {
@@ -188,12 +189,11 @@ export function applyTimeDecay(
     const ageDays = (now - ts) / 86_400_000;
 
     // Access reinforcement: frequently recalled memories decay slower
-    const { accessCount, lastAccessedAt } = parseAccessMetadata(
-      r.entry.metadata,
-    );
+    // Use pre-parsed metadata when available to avoid redundant JSON.parse
+    const meta = r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, r.entry);
+    const { accessCount, lastAccessedAt } = accessMetadataFromParsed(meta);
 
     // Dynamic memories decay 3x faster than static ones
-    const meta = parseSmartMetadata(r.entry.metadata, r.entry);
     const baseHL = meta.memory_temporal_type === "dynamic" ? halfLife / 3 : halfLife;
 
     const effectiveHL = computeEffectiveHalfLife(

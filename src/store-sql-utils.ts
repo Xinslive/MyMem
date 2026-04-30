@@ -53,12 +53,16 @@ export function prefixWhereClause(column: string, prefix: string): string {
   return `${column} LIKE '${escapeSqlLiteral(prefix)}%'`;
 }
 
+// Pre-compiled regex for index type detection (called in hot loops during index listing)
+const VECTOR_INDEX_RE = /ivf|hnsw|pq|sq|vector/i;
+const SCALAR_INDEX_RE = /btree|bitmap|label/i;
+
 export function isVectorIndexType(indexType: string): boolean {
-  return /ivf|hnsw|pq|sq|vector/i.test(indexType);
+  return VECTOR_INDEX_RE.test(indexType);
 }
 
 export function isScalarIndexType(indexType: string): boolean {
-  return /btree|bitmap|label/i.test(indexType);
+  return SCALAR_INDEX_RE.test(indexType);
 }
 
 export function recommendedVectorPartitions(totalRows: number): number {
@@ -75,6 +79,10 @@ export function recommendedVectorPartitions(totalRows: number): number {
  * CJK bigrams: "部署了" → ["部", "署", "了", "部署", "署了"]
  * This allows queries like "部署" to match "部署了新版本" via bigram overlap.
  */
+// Pre-compiled regex for CJK character detection (hot path in tokenizeForSearch)
+const CJK_RE = /[一-鿿㐀-䶿㐀-䶿-䶿぀-ゟ゠-ヿ가-힯]/;
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+
 function tokenizeForSearch(text: string): string[] {
   const lower = text.toLowerCase();
   const tokens: string[] = [];
@@ -83,7 +91,7 @@ function tokenizeForSearch(text: string): string[] {
 
   for (const ch of lower) {
     // CJK character → individual token + bigram with previous CJK
-    if (/[一-鿿㐀-䶿㐀-䶿぀-ゟ゠-ヿ가-힯]/.test(ch)) {
+    if (CJK_RE.test(ch)) {
       if (current) { tokens.push(current); current = ""; }
       tokens.push(ch);
       if (prevCjk) {
@@ -93,7 +101,7 @@ function tokenizeForSearch(text: string): string[] {
       continue;
     }
     // Word character → accumulate
-    if (/[\p{L}\p{N}]/u.test(ch)) {
+    if (WORD_CHAR_RE.test(ch)) {
       current += ch;
       prevCjk = "";
       continue;
@@ -124,6 +132,7 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
 
   // Deduplicate query tokens for coverage calculation
   const queryTokenSet = new Set(queryTokens);
+  const querySize = queryTokenSet.size;
 
   let bestScore = 0;
   for (const candidate of candidates) {
@@ -132,8 +141,7 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
     if (!normalized) continue;
 
     // Token-based matching: count how many unique query tokens appear in candidate
-    const candidateTokens = tokenizeForSearch(normalized);
-    const candidateTokenSet = new Set(candidateTokens);
+    const candidateTokenSet = new Set(tokenizeForSearch(normalized));
     let matchedTokens = 0;
     for (const qt of queryTokenSet) {
       if (candidateTokenSet.has(qt)) matchedTokens++;
@@ -142,7 +150,7 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
     if (matchedTokens === 0) continue;
 
     // Coverage: fraction of query tokens found
-    const coverage = matchedTokens / queryTokenSet.size;
+    const coverage = matchedTokens / querySize;
 
     // Base score from coverage (0.5 ~ 0.92)
     let score = 0.5 + 0.42 * coverage;
