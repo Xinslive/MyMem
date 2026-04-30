@@ -167,6 +167,14 @@ function buildWordBoundaryRegex(term: string): RegExp {
   return new RegExp(`\\b${escaped}\\b`, "i");
 }
 
+// Pre-compile all synonym regex patterns at module load time (avoids per-query allocation)
+const COMPILED_SYNONYMS: Array<{ cn: string[]; enRegex: RegExp[]; expansions: string[] }> =
+  SYNONYM_MAP.map(entry => ({
+    cn: entry.cn,
+    enRegex: entry.en.map(term => buildWordBoundaryRegex(term)),
+    expansions: entry.expansions,
+  }));
+
 // ============================================================================
 // Learned Synonyms (populated at runtime from successful recall patterns)
 // ============================================================================
@@ -197,9 +205,9 @@ export function expandQuery(query: string): string {
   const lower = query.toLowerCase();
   const additions = new Set<string>();
 
-  for (const entry of SYNONYM_MAP) {
+  for (const entry of COMPILED_SYNONYMS) {
     const cnMatch = entry.cn.some((term) => lower.includes(term.toLowerCase()));
-    const enMatch = entry.en.some((term) => buildWordBoundaryRegex(term).test(query));
+    const enMatch = entry.enRegex.some((regex) => regex.test(query));
 
     if (!cnMatch && !enMatch) continue;
 

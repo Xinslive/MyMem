@@ -3,15 +3,14 @@
  */
 
 import type { RetrievalDiagnostics } from "./retriever-types.js";
+import { clamp01 } from "./utils.js";
+
+// Re-export from canonical source to avoid duplication
+export { clamp01 };
 
 // ============================================================================
 // Numeric Helpers
 // ============================================================================
-
-export function clamp01(value: number, fallback: number): number {
-  if (!Number.isFinite(value)) return Number.isFinite(fallback) ? fallback : 0;
-  return Math.min(1, Math.max(0, value));
-}
 
 export function clamp01WithFloor(value: number, floor: number): number {
   const safeFloor = clamp01(floor, 0);

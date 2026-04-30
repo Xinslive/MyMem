@@ -30,12 +30,13 @@ export function dedupHookEvent(handlerName: string, event: any): boolean {
     for (const [k, entryTs] of _hookEventDedup) {
       if (now - entryTs > DEDUP_TTL_MS) _hookEventDedup.delete(k);
     }
-    // If still over limit after TTL pruning, remove oldest entries
+    // If still over limit, evict oldest half by insertion order (O(n), no sort)
     if (_hookEventDedup.size > DEDUP_MAX_SIZE) {
-      const entries = [..._hookEventDedup.entries()].sort((a, b) => a[1] - b[1]);
       const removeCount = _hookEventDedup.size - Math.floor(DEDUP_MAX_SIZE / 2);
+      const keys = _hookEventDedup.keys();
       for (let i = 0; i < removeCount; i++) {
-        _hookEventDedup.delete(entries[i][0]);
+        const k = keys.next().value;
+        if (k !== undefined) _hookEventDedup.delete(k);
       }
     }
   }

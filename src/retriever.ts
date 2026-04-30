@@ -332,6 +332,96 @@ export class MemoryRetriever {
     return matches || [];
   }
 
+  /**
+   * Shared post-processing pipeline for all retrieval modes.
+   * Applies temporal scoring, length normalization, hard min-score filter,
+   * optional time decay, noise filtering, sort, MMR diversity, and confidence.
+   */
+  private async applyPostProcessingPipeline(
+    results: RetrievalResult[],
+    limit: number,
+    options: {
+      skipTimeDecay?: boolean;
+      trace?: TraceCollector;
+      diagnostics?: RetrievalDiagnostics;
+    } = {},
+  ): Promise<RetrievalResult[]> {
+    const { skipTimeDecay = false, trace, diagnostics } = options;
+
+    // 1. Temporal scoring (mutually exclusive engines)
+    let temporallyRanked: RetrievalResult[];
+    if (this.decayEngine) {
+      temporallyRanked = results;
+    } else if (this.recencyEngine) {
+      if (trace) trace.startStage("recency_composite", results.map((r) => r.entry.id));
+      temporallyRanked = applyRecencyComposite(results, this.recencyEngine);
+      if (trace) trace.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
+    } else {
+      if (trace) trace.startStage("fallback_scoring", results.map((r) => r.entry.id));
+      temporallyRanked = applyFallbackScoring(results, this.config);
+      if (trace) trace.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
+    }
+    if (diagnostics) {
+      diagnostics.stageCounts.afterRecency = temporallyRanked.length;
+      diagnostics.stageCounts.afterImportance = temporallyRanked.length;
+    }
+
+    // 2. Length normalization
+    if (trace) trace.startStage("length_normalization", temporallyRanked.map((r) => r.entry.id));
+    const lengthNormalized = applyLengthNormalization(temporallyRanked, this.config.lengthNormAnchor);
+    if (trace) trace.endStage(lengthNormalized.map((r) => r.entry.id), lengthNormalized.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
+
+    // 3. Hard min-score filter
+    if (trace) trace.startStage("hard_cutoff", lengthNormalized.map((r) => r.entry.id));
+    const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
+    if (trace) trace.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
+
+    // 4. Time decay (when not already applied by temporal scoring engines)
+    let lifecycleRanked: RetrievalResult[];
+    if (skipTimeDecay) {
+      lifecycleRanked = hardFiltered;
+    } else {
+      const decayStageName = this.decayEngine ? "decay_boost" : "time_decay";
+      if (trace) trace.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
+      lifecycleRanked = this.decayEngine
+        ? applyDecayBoost(hardFiltered, this.decayEngine)
+        : applyTimeDecay(hardFiltered, this.config);
+      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
+    }
+    if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
+
+    // 5. Noise filter
+    if (trace) trace.startStage("noise_filter", lifecycleRanked.map((r) => r.entry.id));
+    let denoised: RetrievalResult[];
+    if (this.config.filterNoise) {
+      denoised = this.hybridNoiseDetector
+        ? await this.hybridNoiseDetector.filter(lifecycleRanked, (r) => r.entry.text)
+        : filterNoise(lifecycleRanked, (r) => r.entry.text);
+    } else {
+      denoised = lifecycleRanked;
+    }
+    if (trace) trace.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
+
+    // 6. Sort once after all scoring
+    if (trace) trace.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
+    denoised.sort((a, b) => b.score - a.score);
+    const deduplicated = applyMMRDiversity(denoised);
+    const finalResults = deduplicated.slice(0, limit);
+
+    // 7. Confidence scores
+    for (const result of finalResults) {
+      result.confidence = this.computeConfidence(result);
+    }
+
+    if (trace) trace.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
+
+    return finalResults;
+  }
+
   private async vectorOnlyRetrieval(
     query: string,
     limit: number,
@@ -397,70 +487,13 @@ export class MemoryRetriever {
       );
 
       markStage("vector.postProcess");
-      // Scoring pipeline (mutually exclusive modes):
-      // 1. decayEngine: handles recency + importance + time decay in one pass
-      // 2. recencyEngine: composite recency + importance + time decay
-      // 3. fallback: unified applyFallbackScoring (recency + importance + time decay)
-      let temporallyRanked: RetrievalResult[];
-      let fallbackMode = false;
-      if (this.decayEngine) {
-        temporallyRanked = mapped;
-        if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-      } else if (this.recencyEngine) {
-        temporallyRanked = applyRecencyComposite(mapped, this.recencyEngine);
-        if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-      } else {
-        temporallyRanked = applyFallbackScoring(mapped, this.config);
-        fallbackMode = true;
-        if (diagnostics) diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        if (diagnostics) diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-      }
-      const lengthNormalized = applyLengthNormalization(temporallyRanked, this.config.lengthNormAnchor);
-      if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
-      const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
-      if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
-      // Apply decay only if not already handled by fallback scoring
-      const decayRanked = this.decayEngine
-        ? applyDecayBoost(hardFiltered, this.decayEngine)
-        : this.recencyEngine || fallbackMode
-          ? temporallyRanked // composite/fallback already applied
-          : applyTimeDecay(hardFiltered, this.config);
-      if (diagnostics) diagnostics.stageCounts.afterTimeDecay = decayRanked.length;
-      let denoised: RetrievalResult[];
-      if (this.config.filterNoise) {
-        if (this.hybridNoiseDetector) {
-          // Use async hybrid noise detection (Regex + Embedding)
-          denoised = await this.hybridNoiseDetector.filter(
-            decayRanked,
-            (r) => r.entry.text,
-          );
-        } else {
-          // Fall back to fast regex-only filtering
-          denoised = filterNoise(decayRanked, (r) => r.entry.text);
-        }
-      } else {
-        denoised = decayRanked;
-      }
-      if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
-      // Sort once after all scoring — intermediate sorts from scoring functions removed
-      denoised.sort((a, b) => b.score - a.score);
-      const deduplicated = applyMMRDiversity(denoised);
-      const finalResults = deduplicated.slice(0, limit);
-
-      // Attach confidence scores
-      for (const result of finalResults) {
-        result.confidence = this.computeConfidence(result);
-      }
-
-      trace?.startStage("final_limit", deduplicated.map((r) => r.entry.id));
-      trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
-      if (diagnostics) {
-        diagnostics.stageCounts.afterRerank = mapped.length;
-        diagnostics.stageCounts.afterDiversity = deduplicated.length;
-      }
-
+      const skipTimeDecay = !!(this.decayEngine || this.recencyEngine);
+      const finalResults = await this.applyPostProcessingPipeline(mapped, limit, {
+        skipTimeDecay,
+        trace,
+        diagnostics,
+      });
+      if (diagnostics) diagnostics.stageCounts.afterRerank = mapped.length;
       return finalResults;
     } catch (error) {
       if (diagnostics) {
@@ -516,81 +549,12 @@ export class MemoryRetriever {
       diagnostics.stageCounts.afterRerank = mapped.length;
     }
 
-    let temporallyRanked: RetrievalResult[];
-    let fallbackMode2 = false;
-    if (this.decayEngine) {
-      temporallyRanked = mapped;
-      if (diagnostics) {
-        diagnostics.stageCounts.afterRecency = mapped.length;
-        diagnostics.stageCounts.afterImportance = mapped.length;
-      }
-    } else if (this.recencyEngine) {
-      trace?.startStage("recency_composite", mapped.map((r) => r.entry.id));
-      temporallyRanked = applyRecencyComposite(mapped, this.recencyEngine);
-      trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
-      if (diagnostics) {
-        diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-      }
-    } else {
-      trace?.startStage("fallback_scoring", mapped.map((r) => r.entry.id));
-      temporallyRanked = applyFallbackScoring(mapped, this.config);
-      fallbackMode2 = true;
-      trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
-      if (diagnostics) {
-        diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-        diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-      }
-    }
-
-    trace?.startStage("length_normalization", temporallyRanked.map((r) => r.entry.id));
-    const lengthNormalized = applyLengthNormalization(temporallyRanked, this.config.lengthNormAnchor);
-    trace?.endStage(lengthNormalized.map((r) => r.entry.id), lengthNormalized.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
-
-    trace?.startStage("hard_cutoff", lengthNormalized.map((r) => r.entry.id));
-    const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
-    trace?.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
-
-    const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "fallback_scoring";
-    trace?.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
-    const lifecycleRanked = this.decayEngine
-      ? applyDecayBoost(hardFiltered, this.decayEngine)
-      : this.recencyEngine || fallbackMode2
-        ? temporallyRanked // composite/fallback already applied
-        : applyTimeDecay(hardFiltered, this.config);
-    trace?.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
-
-    trace?.startStage("noise_filter", lifecycleRanked.map((r) => r.entry.id));
-    let denoised: RetrievalResult[];
-    if (this.config.filterNoise) {
-      if (this.hybridNoiseDetector) {
-        denoised = await this.hybridNoiseDetector.filter(lifecycleRanked, (r) => r.entry.text);
-      } else {
-        denoised = filterNoise(lifecycleRanked, (r) => r.entry.text);
-      }
-    } else {
-      denoised = lifecycleRanked;
-    }
-    trace?.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
-
-    trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-    denoised.sort((a, b) => b.score - a.score);
-    const deduplicated = applyMMRDiversity(denoised);
-    const finalResults = deduplicated.slice(0, limit);
-
-    // Attach confidence scores
-    for (const result of finalResults) {
-      result.confidence = this.computeConfidence(result);
-    }
-
-    trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
-
-    return finalResults;
+    const skipTimeDecay = !!(this.decayEngine || this.recencyEngine);
+    return this.applyPostProcessingPipeline(mapped, limit, {
+      skipTimeDecay,
+      trace,
+      diagnostics,
+    });
   }
 
   private async hybridRetrieval(
@@ -799,84 +763,15 @@ export class MemoryRetriever {
       }
       if (diagnostics) diagnostics.stageCounts.afterRerank = reranked.length;
 
-      let temporallyRanked: RetrievalResult[];
       markStage("hybrid.postProcess");
       const t4 = Date.now();
-      let fallbackMode3 = false;
-      if (this.decayEngine) {
-        temporallyRanked = reranked;
-        if (diagnostics) {
-          diagnostics.stageCounts.afterRecency = reranked.length;
-          diagnostics.stageCounts.afterImportance = reranked.length;
-        }
-      } else if (this.recencyEngine) {
-        trace?.startStage("recency_composite", reranked.map((r) => r.entry.id));
-        temporallyRanked = applyRecencyComposite(reranked, this.recencyEngine);
-        trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
-        if (diagnostics) {
-          diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-          diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-        }
-      } else {
-        trace?.startStage("fallback_scoring", reranked.map((r) => r.entry.id));
-        temporallyRanked = applyFallbackScoring(reranked, this.config);
-        fallbackMode3 = true;
-        trace?.endStage(temporallyRanked.map((r) => r.entry.id), temporallyRanked.map((r) => r.score));
-        if (diagnostics) {
-          diagnostics.stageCounts.afterRecency = temporallyRanked.length;
-          diagnostics.stageCounts.afterImportance = temporallyRanked.length;
-        }
-      }
-
-      trace?.startStage("length_normalization", temporallyRanked.map((r) => r.entry.id));
-      const lengthNormalized = applyLengthNormalization(temporallyRanked, this.config.lengthNormAnchor);
-      trace?.endStage(lengthNormalized.map((r) => r.entry.id), lengthNormalized.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
-
-      trace?.startStage("hard_cutoff", lengthNormalized.map((r) => r.entry.id));
-      const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
-      trace?.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
-
-      const decayStageName = this.decayEngine ? "decay_boost" : this.recencyEngine ? "recency_composite" : "fallback_scoring";
-      trace?.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
-      const lifecycleRanked = this.decayEngine
-        ? applyDecayBoost(hardFiltered, this.decayEngine)
-        : this.recencyEngine || fallbackMode3
-          ? temporallyRanked // composite/fallback already applied
-          : applyTimeDecay(hardFiltered, this.config);
-      trace?.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
-
-      trace?.startStage("noise_filter", lifecycleRanked.map((r) => r.entry.id));
-      let denoised: RetrievalResult[];
-      if (this.config.filterNoise) {
-        if (this.hybridNoiseDetector) {
-          denoised = await this.hybridNoiseDetector.filter(lifecycleRanked, (r) => r.entry.text);
-        } else {
-          denoised = filterNoise(lifecycleRanked, (r) => r.entry.text);
-        }
-      } else {
-        denoised = lifecycleRanked;
-      }
-      trace?.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
-
-      trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-      denoised.sort((a, b) => b.score - a.score);
-      const deduplicated = applyMMRDiversity(denoised);
-      const finalResults = deduplicated.slice(0, limit);
-
-      // Attach confidence scores
-      for (const result of finalResults) {
-        result.confidence = this.computeConfidence(result);
-      }
-
-      trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
-      if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
-
+      const skipTimeDecay = !!(this.decayEngine || this.recencyEngine);
+      const finalResults = await this.applyPostProcessingPipeline(reranked, limit, {
+        skipTimeDecay,
+        trace,
+        diagnostics,
+      });
       if (diagnostics?.latencyMs) diagnostics.latencyMs.postProcess = Date.now() - t4;
-
       return finalResults;
     } catch (error) {
       if (diagnostics) {

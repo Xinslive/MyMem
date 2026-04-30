@@ -23,13 +23,18 @@ export function applyMMRDiversity(
 ): RetrievalResult[] {
   if (results.length <= 1) return results;
 
-  // Pre-convert Arrow Vector objects to plain arrays once, avoiding repeated
-  // Array.from() calls on every pairwise cosine comparison.
+  // Pre-convert Arrow Vector objects to plain arrays and pre-compute norms once,
+  // avoiding repeated Array.from() and sqrt() on every pairwise cosine comparison.
   const vectorCache = new Map<string, number[]>();
+  const normCache = new Map<string, number>();
   for (const r of results) {
     const vec = r.entry.vector;
     if (vec?.length) {
-      vectorCache.set(r.entry.id, Array.from(vec as Iterable<number>));
+      const arr = Array.from(vec as Iterable<number>);
+      let norm = 0;
+      for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
+      vectorCache.set(r.entry.id, arr);
+      normCache.set(r.entry.id, Math.sqrt(norm));
     }
   }
 
@@ -38,15 +43,24 @@ export function applyMMRDiversity(
 
   for (const candidate of results) {
     const cArr = vectorCache.get(candidate.entry.id);
+    const cNorm = normCache.get(candidate.entry.id);
     // Check if this candidate is too similar to any already-selected result.
     // Use explicit loop with early exit instead of .some() for better performance.
     let tooSimilar = false;
-    if (cArr) {
+    if (cArr && cNorm) {
       for (const s of selected) {
         const sArr = vectorCache.get(s.entry.id);
-        if (sArr && cosineSimilarity(sArr, cArr) > similarityThreshold) {
-          tooSimilar = true;
-          break;
+        const sNorm = normCache.get(s.entry.id);
+        if (sArr && sNorm) {
+          const denom = sNorm * cNorm;
+          if (denom > 0) {
+            let dot = 0;
+            for (let i = 0; i < sArr.length; i++) dot += sArr[i] * cArr[i];
+            if (dot / denom > similarityThreshold) {
+              tooSimilar = true;
+              break;
+            }
+          }
         }
       }
     }

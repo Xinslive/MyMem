@@ -1187,37 +1187,35 @@ export class MemoryStore {
     await this.ensureInitialized();
     if (patches.length === 0) return 0;
 
-    const result = await this.runWithFileLock(async () => {
-      const updatedRows: MemoryEntry[] = [];
+    // Read phase — outside lock (reduces lock hold time)
+    const updatedRows: MemoryEntry[] = [];
+    for (const patch of patches) {
+      const safeId = escapeSqlLiteral(patch.id);
+      const rows = await this.table!
+        .query()
+        .select(FULL_ENTRY_COLUMNS as unknown as string[])
+        .where(`id = '${safeId}'`)
+        .limit(1)
+        .toArray();
 
-      for (const patch of patches) {
-        const safeId = escapeSqlLiteral(patch.id);
-        const rows = await this.table!
-          .query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(`id = '${safeId}'`)
-          .limit(1)
-          .toArray();
+      if (rows.length === 0) continue;
+      const original = mapRowToMemoryEntry(rows[0]);
+      updatedRows.push({ ...original, metadata: patch.metadata });
+    }
 
-        if (rows.length === 0) continue; // entry deleted or not found
-        const original = mapRowToMemoryEntry(rows[0]);
-        updatedRows.push({ ...original, metadata: patch.metadata });
-      }
+    if (updatedRows.length === 0) return 0;
 
-      if (updatedRows.length === 0) return 0;
-
-      // Single mergeInsert for all updated rows
+    // Write phase — inside lock (only the mergeInsert)
+    await this.runWithFileLock(async () => {
       await this.table!
         .mergeInsert(["id"])
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute(toLanceRows(updatedRows));
-
-      return updatedRows.length;
     });
 
     this._statsCache = null;
-    return result;
+    return updatedRows.length;
   }
 
 
