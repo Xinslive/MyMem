@@ -97,6 +97,10 @@ export class MemoryStore {
   // In-process serialization chain (Issue #598)
   private _serialChain: Promise<void> = Promise.resolve();
 
+  // Stats result cache (invalidated on writes)
+  private _statsCache: { key: string; result: any; ts: number } | null = null;
+  private static STATS_CACHE_TTL_MS = 30_000;
+
   /** Logger instance for structured logging. */
   private log: Logger;
 
@@ -146,6 +150,7 @@ export class MemoryStore {
       }
       return entries;
     });
+    this._statsCache = null;
     await this.maybeCreateDeferredVectorIndex();
     return written;
   }
@@ -606,6 +611,7 @@ export class MemoryStore {
       }
       return fullEntry;
     });
+    this._statsCache = null;
     await this.maybeCreateDeferredVectorIndex();
     return stored;
   }
@@ -643,6 +649,7 @@ export class MemoryStore {
       await this.table!.add(toLanceRows([full]));
       return full;
     });
+    this._statsCache = null;
     await this.maybeCreateDeferredVectorIndex();
     return imported;
   }
@@ -925,10 +932,12 @@ export class MemoryStore {
       throw new Error(`Memory ${resolvedId} is outside accessible scopes`);
     }
 
-    return this.runWithFileLock(async () => {
+    const result = await this.runWithFileLock(async () => {
       await this.table!.delete(`id = '${resolvedId}'`);
       return true;
     });
+    this._statsCache = null;
+    return result;
   }
 
   async list(
@@ -997,6 +1006,16 @@ export class MemoryStore {
         healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
       };
     }
+
+    // Check stats cache
+    const cacheKey = JSON.stringify(scopeFilter ?? null);
+    if (
+      this._statsCache &&
+      this._statsCache.key === cacheKey &&
+      Date.now() - this._statsCache.ts < MemoryStore.STATS_CACHE_TTL_MS
+    ) {
+      return this._statsCache.result;
+    }
     const whereClause = this.buildBaseWhereClause(scopeFilter);
     const now = Date.now();
     const h24 = 24 * 60 * 60 * 1000;
@@ -1054,7 +1073,7 @@ export class MemoryStore {
       }
     }
 
-    return {
+    const result = {
       totalCount,
       scopeCounts,
       categoryCounts,
@@ -1062,6 +1081,11 @@ export class MemoryStore {
       tierDistribution,
       healthSignals: { badRecall, suppressed, lowConfidence },
     };
+
+    // Cache the result
+    this._statsCache = { key: cacheKey, result, ts: Date.now() };
+
+    return result;
   }
 
   async update(
@@ -1081,54 +1105,56 @@ export class MemoryStore {
       throw new Error(`Memory ${id} is outside accessible scopes`);
     }
 
-    return this.runWithFileLock(async () => {
-      const resolved = resolveMemoryId(id);
+    // --- Read-only operations outside lock ---
+    const resolved = resolveMemoryId(id);
 
-      let rows: any[];
-      if (resolved.isFullId) {
-        const safeId = escapeSqlLiteral(id);
-        rows = await this.table!.query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(`id = '${safeId}'`)
-          .limit(1)
-          .toArray();
-      } else {
-        rows = await this.table!.query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(prefixWhereClause("id", id))
-          .limit(2)
-          .toArray();
-        if (rows.length > 1) {
-          throw new Error(
-            `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
-          );
-        }
+    let rows: any[];
+    if (resolved.isFullId) {
+      const safeId = escapeSqlLiteral(id);
+      rows = await this.table!.query()
+        .select(FULL_ENTRY_COLUMNS as unknown as string[])
+        .where(`id = '${safeId}'`)
+        .limit(1)
+        .toArray();
+    } else {
+      rows = await this.table!.query()
+        .select(FULL_ENTRY_COLUMNS as unknown as string[])
+        .where(prefixWhereClause("id", id))
+        .limit(2)
+        .toArray();
+      if (rows.length > 1) {
+        throw new Error(
+          `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
+        );
       }
+    }
 
-      if (rows.length === 0) return null;
+    if (rows.length === 0) return null;
 
-      const original = mapRowToMemoryEntry(rows[0]);
+    const original = mapRowToMemoryEntry(rows[0]);
 
-      // Check scope permissions
-      if (
-        scopeFilter &&
-        scopeFilter.length > 0 &&
-        !scopeFilter.includes(original.scope)
-      ) {
-        throw new Error(`Memory ${id} is outside accessible scopes`);
-      }
+    // Check scope permissions
+    if (
+      scopeFilter &&
+      scopeFilter.length > 0 &&
+      !scopeFilter.includes(original.scope)
+    ) {
+      throw new Error(`Memory ${id} is outside accessible scopes`);
+    }
 
-      // Build updated entry, preserving original timestamp
-      const updated: MemoryEntry = {
-        ...original,
-        text: updates.text ?? original.text,
-        vector: updates.vector ?? original.vector,
-        category: updates.category ?? original.category,
-        importance: updates.importance ?? original.importance,
-        timestamp: original.timestamp, // preserve original
-        metadata: updates.metadata ?? original.metadata,
-      };
+    // Build updated entry, preserving original timestamp
+    const updated: MemoryEntry = {
+      ...original,
+      text: updates.text ?? original.text,
+      vector: updates.vector ?? original.vector,
+      category: updates.category ?? original.category,
+      importance: updates.importance ?? original.importance,
+      timestamp: original.timestamp, // preserve original
+      metadata: updates.metadata ?? original.metadata,
+    };
 
+    // --- Write operation inside lock ---
+    const result = await this.runWithFileLock(async () => {
       // Use LanceDB mergeInsert for atomic upsert — eliminates the
       // delete+add race condition where a failed add could lose data.
       try {
@@ -1145,6 +1171,9 @@ export class MemoryStore {
 
       return updated;
     });
+
+    this._statsCache = null;
+    return result;
   }
 
   /**
@@ -1158,7 +1187,7 @@ export class MemoryStore {
     await this.ensureInitialized();
     if (patches.length === 0) return 0;
 
-    return this.runWithFileLock(async () => {
+    const result = await this.runWithFileLock(async () => {
       const updatedRows: MemoryEntry[] = [];
 
       for (const patch of patches) {
@@ -1186,6 +1215,9 @@ export class MemoryStore {
 
       return updatedRows.length;
     });
+
+    this._statsCache = null;
+    return result;
   }
 
 
@@ -1229,7 +1261,7 @@ export class MemoryStore {
 
     const whereClause = conditions.join(" AND ");
 
-    return this.runWithFileLock(async () => {
+    const result = await this.runWithFileLock(async () => {
       const beforeCount = await this.table!.countRows(whereClause);
 
       if (beforeCount > 0) {
@@ -1239,6 +1271,9 @@ export class MemoryStore {
 
       return Math.max(0, beforeCount - afterCount);
     });
+
+    this._statsCache = null;
+    return result;
   }
 
   async getIndexStatus(): Promise<StoreIndexStatus> {

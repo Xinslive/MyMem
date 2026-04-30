@@ -11,7 +11,7 @@
  * - timeDecayFactor:    reinforcement-aware half-life decay, multiplicative
  */
 
-import { parseSmartMetadata } from "./smart-metadata.js";
+import { parseSmartMetadata, type SmartMemoryMetadata } from "./smart-metadata.js";
 import { computeEffectiveHalfLife } from "./access-tracker.js";
 
 // ============================================================================
@@ -60,6 +60,8 @@ export interface RecencyEntry {
   timestamp: number;
   metadata?: string;
   importance?: number;
+  /** Pre-parsed metadata cache from store-row-mappers. Avoids repeated JSON.parse. */
+  _parsedMeta?: SmartMemoryMetadata;
 }
 
 function parseEntry(entry: RecencyEntry): {
@@ -74,7 +76,7 @@ function parseEntry(entry: RecencyEntry): {
 } {
   const now = Date.now();
   const createdAt = entry.timestamp > 0 ? entry.timestamp : now;
-  const meta = parseSmartMetadata(entry.metadata, entry);
+  const meta = entry._parsedMeta ?? parseSmartMetadata(entry.metadata, entry);
   const lastActive =
     meta.access_count > 0 ? meta.last_accessed_at : createdAt;
   const ageDays = Math.max(0, (now - lastActive) / MS_PER_DAY);

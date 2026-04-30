@@ -529,7 +529,7 @@ export function toLifecycleMemory(
 export function getDecayableFromEntry(
   entry: EntryLike & { id?: string },
 ): { memory: DecayableMemory; meta: SmartMemoryMetadata } {
-  const meta = parseSmartMetadata(entry.metadata, entry);
+  const meta = (entry as any)._parsedMeta ?? parseSmartMetadata(entry.metadata, entry);
   const createdAt =
     typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
       ? entry.timestamp

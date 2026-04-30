@@ -195,7 +195,7 @@ export class Embedder {
     this.dimensions = getVectorDimensions(config.model, config.dimensions);
     const cacheConfig = config.cache ?? {};
     this._cache = new EmbeddingCache(
-      cacheConfig.maxSize ?? 256,
+      cacheConfig.maxSize ?? 1024,
       cacheConfig.ttlMinutes ?? 30,
     );
   }

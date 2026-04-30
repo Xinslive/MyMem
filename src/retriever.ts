@@ -728,13 +728,15 @@ export class MemoryRetriever {
       }
 
       markStage("hybrid.fuseResults");
-      const allInputIds = [
-        ...new Set([
-          ...vectorResults.map((r) => r.entry.id),
-          ...bm25Results.map((r) => r.entry.id),
-        ]),
-      ];
-      trace?.startStage("rrf_fusion", allInputIds);
+      if (trace) {
+        const allInputIds = [
+          ...new Set([
+            ...vectorResults.map((r) => r.entry.id),
+            ...bm25Results.map((r) => r.entry.id),
+          ]),
+        ];
+        trace.startStage("rrf_fusion", allInputIds);
+      }
       const t2 = Date.now();
       const fusedResults = await fuseResults(
         vectorResults,
