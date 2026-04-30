@@ -153,7 +153,6 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
         }
 
         if (runCompact && compactionCfg) {
-          await recordCompactionRun(compactionStateFile);
           compactionResult = await runCompaction(
             store as never,
             embedder,
@@ -163,6 +162,7 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
             compactionLifecycle,
             smartExtractionLlmClient ?? undefined,
           );
+          await recordCompactionRun(compactionStateFile);
         }
 
         if (runLifecycle) {

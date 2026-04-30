@@ -4,6 +4,7 @@
  * Helper functions for working with sessions and conversation text.
  */
 
+import { createHash } from "node:crypto";
 import { isNoise } from "./noise-filter.js";
 
 /**
@@ -61,7 +62,7 @@ export function containsErrorSignal(text: string): boolean {
  * Summarizes error text for logging.
  */
 export function summarizeErrorText(text: string, maxLen = 220): string {
-  const oneLine = redactSecrets(text).replace(/\s+/g, " ").trim();
+  const oneLine = redactAll(text).replace(/\s+/g, " ").trim();
   if (!oneLine) return "(empty tool error)";
   return oneLine.length <= maxLen ? oneLine : `${oneLine.slice(0, maxLen - 3)}...`;
 }
@@ -70,8 +71,6 @@ export function summarizeErrorText(text: string, maxLen = 220): string {
  * Creates SHA256 hash of text (hex string).
  */
 export function sha256Hex(text: string): string {
-  // Dynamic import to avoid circular deps
-  const { createHash } = require("node:crypto");
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
@@ -79,7 +78,7 @@ export function sha256Hex(text: string): string {
  * Normalizes error signature for deduplication.
  */
 export function normalizeErrorSignature(text: string): string {
-  return redactSecrets(String(text || ""))
+  return redactAll(String(text || ""))
     .toLowerCase()
     .replace(/[a-z]:\\[^ \n\r\t]+/gi, "<path>")
     .replace(/\/[^ \n\r\t]+/g, "<path>")
@@ -138,7 +137,7 @@ export function summarizeRecentConversationMessages(
     const text = extractTextContent(msg.content);
     if (!text || shouldSkipReflectionMessage(role, text)) continue;
 
-    recent.push(`${role}: ${redactSecrets(text)}`);
+    recent.push(`${role}: ${redactAll(text)}`);
   }
 
   if (recent.length === 0) return null;
@@ -210,7 +209,9 @@ export function isNoiseText(text: string): boolean {
 }
 
 /**
- * Redacts secrets from text for logging.
+ * Redacts true secrets (API keys, tokens, passwords, private keys) from text.
+ * Does NOT redact PII like email addresses or file paths -- use redactPII for that.
+ * Use this in the memory pipeline so user-provided emails/paths are preserved in stored memories.
  */
 export function redactSecrets(text: string): string {
   const patterns: RegExp[] = [
@@ -230,6 +231,22 @@ export function redactSecrets(text: string): string {
     /\b(?:token|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"',;)}\]]{6,}["']?\b/gi,
     /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,
     /(?<=:\/\/)[^@\s]+:[^@\s]+(?=@)/g,
+  ];
+
+  let out = text;
+  for (const re of patterns) {
+    out = out.replace(re, (m) => (m.startsWith("Bearer") || m.startsWith("bearer") ? "Bearer [REDACTED]" : "[REDACTED]"));
+  }
+  return out;
+}
+
+/**
+ * Redacts PII (email addresses, file paths) from text.
+ * Does NOT redact secrets -- use redactSecrets for that.
+ * Use this for logging/summaries where PII should be stripped.
+ */
+export function redactPII(text: string): string {
+  const patterns: RegExp[] = [
     /\/home\/[^\s"',;)}\]]+/g,
     /\/Users\/[^\s"',;)}\]]+/g,
     /[A-Z]:\\[^\s"',;)}\]]+/g,
@@ -238,7 +255,15 @@ export function redactSecrets(text: string): string {
 
   let out = text;
   for (const re of patterns) {
-    out = out.replace(re, (m) => (m.startsWith("Bearer") || m.startsWith("bearer") ? "Bearer [REDACTED]" : "[REDACTED]"));
+    out = out.replace(re, "[REDACTED]");
   }
   return out;
+}
+
+/**
+ * Redacts both secrets and PII from text.
+ * Use for logging and summaries where both should be stripped.
+ */
+export function redactAll(text: string): string {
+  return redactPII(redactSecrets(text));
 }

@@ -16,64 +16,6 @@ import {
 import { clamp01 } from "./retriever-utils.js";
 
 // ============================================================================
-// Recency Boost
-// ============================================================================
-
-/**
- * Apply recency boost: newer memories get a small score bonus.
- * This ensures corrections/updates naturally outrank older entries
- * when semantic similarity is close.
- * Formula: boost = exp(-ageDays / halfLife) * weight
- */
-export function applyRecencyBoost(
-  results: RetrievalResult[],
-  config: { recencyHalfLifeDays: number; recencyWeight: number },
-): RetrievalResult[] {
-  const { recencyHalfLifeDays, recencyWeight } = config;
-  if (!recencyHalfLifeDays || recencyHalfLifeDays <= 0 || !recencyWeight) {
-    return results;
-  }
-
-  const now = Date.now();
-  const boosted = results.map((r) => {
-    const ts =
-      r.entry.timestamp && r.entry.timestamp > 0 ? r.entry.timestamp : now;
-    const ageDays = (now - ts) / 86_400_000;
-    const boost = Math.exp(-ageDays / recencyHalfLifeDays) * recencyWeight;
-    return {
-      ...r,
-      score: clamp01(r.score + boost, r.score),
-    };
-  });
-
-  return boosted;
-}
-
-// ============================================================================
-// Importance Weight
-// ============================================================================
-
-/**
- * Apply importance weighting: memories with higher importance get a score boost.
- * This ensures critical memories (importance=1.0) outrank casual ones (importance=0.5)
- * when semantic similarity is close.
- * Formula: score *= (baseWeight + (1 - baseWeight) * importance)
- * With baseWeight=0.7: importance=1.0 → ×1.0, importance=0.5 → ×0.85, importance=0.0 → ×0.7
- */
-export function applyImportanceWeight(results: RetrievalResult[]): RetrievalResult[] {
-  const baseWeight = 0.7;
-  const weighted = results.map((r) => {
-    const importance = r.entry.importance ?? 0.7;
-    const factor = baseWeight + (1 - baseWeight) * importance;
-    return {
-      ...r,
-      score: clamp01(r.score * factor, r.score * baseWeight),
-    };
-  });
-  return weighted;
-}
-
-// ============================================================================
 // Recency Composite (RecencyEngine)
 // ============================================================================
 

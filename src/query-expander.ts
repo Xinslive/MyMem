@@ -189,13 +189,14 @@ const MAX_LEARNED = 200;
  * containing terms not in the original query.
  */
 export function addLearnedSynonym(trigger: string, expansions: string[]): void {
-  if (learnedSynonyms.size >= MAX_LEARNED) return;
   const key = trigger.toLowerCase().trim();
   if (!key || expansions.length === 0) return;
-  const existing = learnedSynonyms.get(key) ?? [];
-  const newTerms = expansions.filter(e => !existing.includes(e)).slice(0, 3);
+  const existing = learnedSynonyms.get(key);
+  if (!existing && learnedSynonyms.size >= MAX_LEARNED) return; // only block new keys
+  const prev = existing ?? [];
+  const newTerms = expansions.filter(e => !prev.includes(e)).slice(0, 3);
   if (newTerms.length > 0) {
-    learnedSynonyms.set(key, [...existing, ...newTerms].slice(0, 5));
+    learnedSynonyms.set(key, [...prev, ...newTerms].slice(0, 5));
   }
 }
 

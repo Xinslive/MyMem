@@ -200,17 +200,30 @@ function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boo
 }
 
 function extractCorrection(text: string): { oldText: string; newText: string } | null {
-  const patterns = [
-    /(?:not|不是)\s+(.{2,80}?)\s*(?:,?\s*(?:it'?s|而是|是)\s+)(.{2,120})/i,
-    /(?:change|update|改成|更新为)\s+(.{2,80}?)\s+(?:to|为|成)\s+(.{2,120})/i,
-    /(?:以后不要|do not|don't)\s+(.{2,120})/i,
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(text);
-    if (!match) continue;
-    if (match.length >= 3) return { oldText: match[1].trim(), newText: match[2].trim() };
-    return { oldText: match[1].trim(), newText: `Do not ${match[1].trim()}` };
+  const CORRECTION_CONTEXT = /\b(actually|wrong|anymore|instead|shouldn'?t|停止|别再)\b/i;
+
+  // Pattern 1: "not X, it's Y"
+  const p1 = /(?:not|不是)\s+(.{2,80}?)\s*(?:,?\s*(?:it'?s|而是|是)\s+)(.{2,120})/i;
+  const m1 = p1.exec(text);
+  if (m1) return { oldText: m1[1].trim(), newText: m1[2].trim() };
+
+  // Pattern 2: "change/update X to Y"
+  const p2 = /(?:change|update|改成|更新为)\s+(.{2,80}?)\s+(?:to|为|成)\s+(.{2,120})/i;
+  const m2 = p2.exec(text);
+  if (m2) return { oldText: m2[1].trim(), newText: m2[2].trim() };
+
+  // Pattern 3: "don't X, use/try Y instead" — two-capture form
+  const p3 = /(?:以后不要|do not|don't)\s+(.{2,80}?)\s*,\s*(?:use|try|改为|改成|用)\s+(.{2,120})/i;
+  const m3 = p3.exec(text);
+  if (m3) return { oldText: m3[1].trim(), newText: m3[2].trim() };
+
+  // Pattern 4: "don't X" — require correction context keywords to avoid false positives
+  const p4 = /(?:以后不要|do not|don't)\s+(.{2,120})/i;
+  const m4 = p4.exec(text);
+  if (m4 && CORRECTION_CONTEXT.test(text)) {
+    return { oldText: m4[1].trim(), newText: `Do not ${m4[1].trim()}` };
   }
+
   return null;
 }
 
@@ -767,7 +780,7 @@ export function registerHookEnhancements(params: {
   api.on("session_end", (_event: any, ctx: any) => {
     const sessionKey = getSessionKey(_event, ctx);
     if (sessionKey) state.sessions.delete(sessionKey);
-  }, { priority: 18 });
+  }, { priority: 99 });
 
   (params.isCliMode?.() ? api.logger.debug : api.logger.info)?.("mymem: hook enhancements registered");
   return state;

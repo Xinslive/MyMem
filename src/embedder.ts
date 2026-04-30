@@ -314,7 +314,7 @@ export class Embedder {
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         throw new Error(
-          `Ollama batch embedding failed: ${response.status} ${response.statusText} ??${body.slice(0, 200)}`
+          `Ollama batch embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
         );
       }
 
@@ -357,7 +357,7 @@ export class Embedder {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(
-        `Ollama embedding failed: ${response.status} ${response.statusText} ??${body.slice(0, 200)}`
+        `Ollama embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
       );
     }
 
@@ -736,7 +736,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context|too long|exceed|length/i.test(errorMsg);
+      const isContextError = /context.length|token.limit|too (long|many tokens)|max.?context|context.window/i.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {
@@ -894,7 +894,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking each text
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context|too long|exceed|length/i.test(errorMsg);
+      const isContextError = /context.length|token.limit|too (long|many tokens)|max.?context|context.window/i.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {

@@ -101,9 +101,7 @@ export function createIdentityAndAddressingCandidates(text: string): CandidateMe
   }
   if (addressing) {
     const duplicateOfName = name && addressing === name;
-    if (!duplicateOfName || candidates.length === 0) {
-      candidates.push(makeCandidate("addressing", addressing, sourceText));
-    } else {
+    if (!duplicateOfName) {
       candidates.push(makeCandidate("addressing", addressing, sourceText));
     }
   }

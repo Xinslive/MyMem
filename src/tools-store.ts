@@ -230,6 +230,8 @@ export function registerMemoryStoreTool(
                 suppressed_until_turn: 0,
                 valid_from: now,
                 fact_key: factKey,
+                memory_temporal_type: temporalType,
+                valid_until: validUntil,
                 supersedes: oldEntry.id,
                 relations: appendRelation([], {
                   type: "supersedes",
@@ -271,10 +273,16 @@ export function registerMemoryStoreTool(
 
             // Dual-write to Markdown mirror if enabled
             if (context.mdMirror) {
-              await context.mdMirror(
-                { text, category: category as string, scope: targetScope, timestamp: newEntry.timestamp },
-                { source: "memory_store", agentId },
-              );
+              try {
+                await context.mdMirror(
+                  { text, category: category as string, scope: targetScope, timestamp: newEntry.timestamp },
+                  { source: "memory_store", agentId },
+                );
+              } catch (mirrorErr) {
+                (runtimeContext.logger ?? fallbackToolLogger).warn(
+                  `mymem: mdMirror failed for supersede entry ${newEntry.id.slice(0, 8)}: ${mirrorErr}`,
+                );
+              }
             }
 
             return {
@@ -329,10 +337,16 @@ export function registerMemoryStoreTool(
 
           // Dual-write to Markdown mirror if enabled
           if (context.mdMirror) {
-            await context.mdMirror(
-              { text, category: category as string, scope: targetScope, timestamp: entry.timestamp },
-              { source: "memory_store", agentId },
-            );
+            try {
+              await context.mdMirror(
+                { text, category: category as string, scope: targetScope, timestamp: entry.timestamp },
+                { source: "memory_store", agentId },
+              );
+            } catch (mirrorErr) {
+              (runtimeContext.logger ?? fallbackToolLogger).warn(
+                `mymem: mdMirror failed for entry ${entry.id.slice(0, 8)}: ${mirrorErr}`,
+              );
+            }
           }
 
           return {

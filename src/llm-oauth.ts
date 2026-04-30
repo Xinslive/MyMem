@@ -152,8 +152,17 @@ export function isOauthModelSupported(providerId: string | undefined, value: str
   return provider.modelPattern.test(normalizeOauthModel(trimmed));
 }
 
+let _warnedDefaultClientId = false;
+
 function resolveOauthClientId(providerId?: string): string {
-  return process.env.MEMORY_PRO_OAUTH_CLIENT_ID?.trim() || getOAuthProvider(providerId).clientId;
+  const envId = process.env.MEMORY_PRO_OAUTH_CLIENT_ID?.trim();
+  if (envId) return envId;
+  const provider = getOAuthProvider(providerId);
+  if (!_warnedDefaultClientId) {
+    _warnedDefaultClientId = true;
+    console.warn(`mymem: using default OAuth client ID for ${provider.label}. Set MEMORY_PRO_OAUTH_CLIENT_ID env var to override.`);
+  }
+  return provider.clientId;
 }
 
 function resolveOauthAuthorizeUrl(providerId?: string): string {
@@ -194,12 +203,16 @@ function buildSuccessHtml(): string {
   ].join("");
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function buildErrorHtml(message: string): string {
   return [
     "<!doctype html>",
     "<html><body>",
     "<h1>mymem OAuth failed</h1>",
-    `<p>${message}</p>`,
+    `<p>${escapeHtml(message)}</p>`,
     "</body></html>",
   ].join("");
 }
@@ -406,19 +419,26 @@ export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: num
 
 async function exchangeAuthorizationCode(code: string, verifier: string, providerId?: string): Promise<OAuthSession> {
   const resolvedProviderId = normalizeOAuthProviderId(providerId);
-  const response = await fetch(resolveOauthTokenUrl(resolvedProviderId), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: resolveOauthClientId(resolvedProviderId),
-      code,
-      code_verifier: verifier,
-      redirect_uri: resolveOauthRedirectUri(resolvedProviderId),
-    }),
-  });
+  const { signal, dispose } = createTimeoutSignal();
+  let response: Response;
+  try {
+    response = await fetch(resolveOauthTokenUrl(resolvedProviderId), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: resolveOauthClientId(resolvedProviderId),
+        code,
+        code_verifier: verifier,
+        redirect_uri: resolveOauthRedirectUri(resolvedProviderId),
+      }),
+      signal,
+    });
+  } finally {
+    dispose();
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -543,6 +563,11 @@ async function waitForAuthorizationCode(state: string, timeoutMs: number, provid
       reject(err);
     });
 
+    if (!["127.0.0.1", "::1", "localhost"].includes(listenHost)) {
+      clearTimeout(timer);
+      reject(new Error(`OAuth callback must listen on loopback address, got: ${listenHost}`));
+      return;
+    }
     server.listen(listenPort, listenHost);
   });
 }

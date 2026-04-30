@@ -209,7 +209,7 @@ export function analyzeIntent(query: string): IntentSignal {
   return {
     categories: allCategories,
     depth: deepest,
-    confidence: matched.length > 1 ? "high" : "high",
+    confidence: matched.length > 1 ? "high" : "medium",
     label: matched.map(r => r.label).join("+"),
     memoryType,
   };

@@ -67,7 +67,7 @@ export function registerMemoryForgetTool(
           }
 
           if (memoryId) {
-            const deleted = await context.store.delete(memoryId, scopeFilter);
+            const deleted = await runtimeContext.store.delete(memoryId, scopeFilter);
             if (deleted) {
               return {
                 content: [
@@ -89,11 +89,11 @@ export function registerMemoryForgetTool(
           }
 
           if (query) {
-            const results = await retrieveWithRetry(context.retriever, {
+            const results = await retrieveWithRetry(runtimeContext.retriever, {
               query,
               limit: 5,
               scopeFilter,
-            }, () => context.store.count());
+            }, () => runtimeContext.store.count());
 
             if (results.length === 0) {
               return {
@@ -105,7 +105,7 @@ export function registerMemoryForgetTool(
             }
 
             if (results.length === 1 && results[0].score > 0.9) {
-              const deleted = await context.store.delete(
+              const deleted = await runtimeContext.store.delete(
                 results[0].entry.id,
                 scopeFilter,
               );

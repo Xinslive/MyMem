@@ -18,7 +18,6 @@
 import type { Embedder } from "./embedder.js";
 import { isNoise as isNoiseRegex, filterNoise, ENVELOPE_NOISE_PATTERNS } from "./noise-filter.js";
 import { NoisePrototypeBank } from "./noise-prototypes.js";
-import { cosineSimilarity } from "./utils.js";
 
 // ============================================================================
 // Types
@@ -388,14 +387,10 @@ export class HybridNoiseDetector {
         return { isNoise: false };
       }
 
-      // Find max similarity to any prototype
-      let maxSimilarity = 0;
-      for (const proto of (this.noiseBank as any).vectors) {
-        const sim = cosineSimilarity(proto, vec);
-        if (sim > maxSimilarity) maxSimilarity = sim;
-      }
-
+      // Use public API to check similarity against prototypes
+      const maxSimilarity = this.noiseBank.maxSimilarity(vec);
       const threshold = 0.82; // From NoisePrototypeBank.DEFAULT_THRESHOLD
+
       return {
         isNoise: maxSimilarity >= threshold,
         similarity: maxSimilarity,

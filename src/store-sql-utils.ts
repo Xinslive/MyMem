@@ -50,7 +50,8 @@ export function combineWhereClauses(parts: Array<string | null | undefined>): st
 }
 
 export function prefixWhereClause(column: string, prefix: string): string {
-  return `${column} LIKE '${escapeSqlLiteral(prefix)}%'`;
+  const safePrefix = escapeSqlLiteral(prefix).replace(/%/g, "\\%").replace(/_/g, "\\_");
+  return `${column} LIKE '${safePrefix}%'`;
 }
 
 // Pre-compiled regex for index type detection (called in hot loops during index listing)
@@ -80,7 +81,7 @@ export function recommendedVectorPartitions(totalRows: number): number {
  * This allows queries like "部署" to match "部署了新版本" via bigram overlap.
  */
 // Pre-compiled regex for CJK character detection (hot path in tokenizeForSearch)
-const CJK_RE = /[一-鿿㐀-䶿㐀-䶿-䶿぀-ゟ゠-ヿ가-힯]/;
+const CJK_RE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯]/;
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
 
 function tokenizeForSearch(text: string): string[] {

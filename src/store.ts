@@ -108,9 +108,6 @@ export class MemoryStore {
   private _batchBuffer: MemoryEntry[] = [];
   private _batchActive = false;
 
-  // In-process serialization chain (Issue #598)
-  private _serialChain: Promise<void> = Promise.resolve();
-
   // Stats result cache (invalidated on writes)
   private _statsCache: { key: string; result: StatsResult; ts: number } | null = null;
   private static STATS_CACHE_TTL_MS = 30_000;
@@ -121,23 +118,6 @@ export class MemoryStore {
   /** Enter batch mode — subsequent store() calls buffer instead of writing immediately. */
   startBatch(): void {
     this._batchActive = true;
-  }
-
-  /**
-   * Serialize concurrent async operations through a promise chain.
-   * Each call waits for the previous one to complete before executing.
-   * Prevents unbounded memory growth by cleaning up resolved promises.
-   */
-  async runSerializedUpdate<T>(fn: () => Promise<T>): Promise<T> {
-    const prev = this._serialChain;
-    let resolve: () => void;
-    this._serialChain = new Promise<void>((r) => { resolve = r; });
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      resolve!();
-    }
   }
 
   /**
@@ -551,6 +531,13 @@ export class MemoryStore {
 
   private async createFtsIndex(table: LanceDB.Table): Promise<void> {
     try {
+      // Skip recreation if the FTS index was already created in this process
+      // lifetime. The index uses ngram tokenizer and doesn't need migration
+      // on subsequent doInitialize() calls.
+      if (this.ftsIndexCreated) {
+        return;
+      }
+
       // Check if FTS index already exists
       const indices = await table.listIndices();
       const existingFts = (indices as unknown as LanceIndex[])?.find(
@@ -587,6 +574,7 @@ export class MemoryStore {
     } catch (err) {
       throw new Error(
         `FTS index creation failed: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
   }
@@ -637,6 +625,7 @@ export class MemoryStore {
     if (!entry.id || typeof entry.id !== "string") {
       throw new Error("importEntry requires a stable id");
     }
+    resolveMemoryId(entry.id);
 
     const vector = entry.vector || [];
     if (!Array.isArray(vector) || vector.length !== this.config.vectorDim) {
@@ -943,7 +932,7 @@ export class MemoryStore {
     }
 
     const result = await this.runWithFileLock(async () => {
-      await this.table!.delete(`id = '${resolvedId}'`);
+      await this.table!.delete(`id = '${escapeSqlLiteral(resolvedId)}'`);
       return true;
     });
     this._statsCache = null;
@@ -1049,8 +1038,9 @@ export class MemoryStore {
       };
     }
 
-    // Phase 2: load only the lightweight columns (no vector, no text, no id)
-    let query = this.table!.query().select(["scope", "category", "timestamp", "metadata"]);
+    // Phase 2: load lightweight columns (no vector) and use mapRowToMemoryEntry
+    // so that parsed metadata is cached in _parsedMeta for reuse.
+    let query = this.table!.query().select(LIST_ENTRY_COLUMNS as unknown as string[]);
     if (whereClause) {
       query = query.where(whereClause);
     }
@@ -1064,23 +1054,20 @@ export class MemoryStore {
     let lowConfidence = 0;
 
     for (const row of results) {
-      const scope = (row.scope as string | undefined) ?? "global";
-      const category = row.category as string;
+      const entry = mapRowToMemoryEntry(row, false);
+      const scope = entry.scope;
+      const category = entry.category;
 
       scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
       categoryCounts[category] = (categoryCounts[category] || 0) + 1;
 
-      // Parse metadata for lifecycle and health signals
-      try {
-        const meta = typeof row.metadata === "string" ? JSON.parse(row.metadata) : {};
-        const tier = meta.memory_tier || meta.memory_layer || "unknown";
-        tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
-        if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
-        if (Number(meta.suppressed_until_turn || 0) > 0) suppressed++;
-        if (typeof meta.confidence === "number" && meta.confidence < 0.4) lowConfidence++;
-      } catch {
-        // skip malformed metadata
-      }
+      // Use pre-parsed metadata from _parsedMeta (cached by mapRowToMemoryEntry)
+      const meta = entry._parsedMeta!;
+      const tier = String(meta.memory_tier || meta.memory_layer || "unknown");
+      tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
+      if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
+      if (Number(meta.suppressed_until_turn || 0) > 0) suppressed++;
+      if (typeof meta.confidence === "number" && meta.confidence < 0.4) lowConfidence++;
     }
 
     const result = {
@@ -1197,35 +1184,36 @@ export class MemoryStore {
     await this.ensureInitialized();
     if (patches.length === 0) return 0;
 
-    // Read phase — outside lock (reduces lock hold time)
-    const updatedRows: MemoryEntry[] = [];
-    for (const patch of patches) {
-      const safeId = escapeSqlLiteral(patch.id);
-      const rows = await this.table!
-        .query()
-        .select(FULL_ENTRY_COLUMNS as unknown as string[])
-        .where(`id = '${safeId}'`)
-        .limit(1)
-        .toArray();
+    // Read-modify-write all inside the lock to prevent TOCTOU races
+    const updatedCount = await this.runWithFileLock(async () => {
+      const updatedRows: MemoryEntry[] = [];
+      for (const patch of patches) {
+        const safeId = escapeSqlLiteral(patch.id);
+        const rows = await this.table!
+          .query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
+          .where(`id = '${safeId}'`)
+          .limit(1)
+          .toArray();
 
-      if (rows.length === 0) continue;
-      const original = mapRowToMemoryEntry(rows[0]);
-      updatedRows.push({ ...original, metadata: patch.metadata });
-    }
+        if (rows.length === 0) continue;
+        const original = mapRowToMemoryEntry(rows[0]);
+        updatedRows.push({ ...original, metadata: patch.metadata });
+      }
 
-    if (updatedRows.length === 0) return 0;
+      if (updatedRows.length === 0) return 0;
 
-    // Write phase — inside lock (only the mergeInsert)
-    await this.runWithFileLock(async () => {
       await this.table!
         .mergeInsert(["id"])
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute(toLanceRows(updatedRows));
+
+      return updatedRows.length;
     });
 
     this._statsCache = null;
-    return updatedRows.length;
+    return updatedCount;
   }
 
 
@@ -1234,15 +1222,70 @@ export class MemoryStore {
     patch: MetadataPatch,
     scopeFilter?: string[],
   ): Promise<MemoryEntry | null> {
-    const existing = await this.getById(id, scopeFilter);
-    if (!existing) return null;
+    await this.ensureInitialized();
 
-    const metadata = buildSmartMetadata(existing, patch);
-    return this.update(
-      id,
-      { metadata: stringifySmartMetadata(metadata) },
-      scopeFilter,
-    );
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) {
+      throw new Error(`Memory ${id} is outside accessible scopes`);
+    }
+
+    const resolved = resolveMemoryId(id);
+
+    // Read-modify-write all inside the lock to prevent TOCTOU races
+    return this.runWithFileLock(async () => {
+      let rows: LanceRow[];
+      if (resolved.isFullId) {
+        const safeId = escapeSqlLiteral(id);
+        rows = await this.table!.query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
+          .where(`id = '${safeId}'`)
+          .limit(1)
+          .toArray() as unknown as LanceRow[];
+      } else {
+        rows = await this.table!.query()
+          .select(FULL_ENTRY_COLUMNS as unknown as string[])
+          .where(prefixWhereClause("id", id))
+          .limit(2)
+          .toArray();
+        if (rows.length > 1) {
+          throw new Error(
+            `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
+          );
+        }
+      }
+
+      if (rows.length === 0) return null;
+
+      const existing = mapRowToMemoryEntry(rows[0]);
+
+      if (
+        scopeFilter &&
+        scopeFilter.length > 0 &&
+        !scopeFilter.includes(existing.scope)
+      ) {
+        throw new Error(`Memory ${id} is outside accessible scopes`);
+      }
+
+      const metadata = buildSmartMetadata(existing, patch);
+      const updated: MemoryEntry = {
+        ...existing,
+        metadata: stringifySmartMetadata(metadata),
+      };
+
+      try {
+        await this.table!
+          .mergeInsert(["id"])
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(toLanceRows([updated]));
+      } catch (mergeError) {
+        throw new Error(
+          `Failed to patch metadata for ${id}: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
+        );
+      }
+
+      this._statsCache = null;
+      return updated;
+    });
   }
 
   async bulkDelete(scopeFilter: string[], beforeTimestamp?: number): Promise<number> {
@@ -1257,7 +1300,7 @@ export class MemoryStore {
       conditions.push(`(${scopeConditions})`);
     }
 
-    if (beforeTimestamp) {
+    if (beforeTimestamp !== undefined) {
       conditions.push(`timestamp < ${beforeTimestamp}`);
     }
 
@@ -1282,6 +1325,13 @@ export class MemoryStore {
 
     this._statsCache = null;
     return result;
+  }
+
+  /** Release database and table references, clearing caches. */
+  close(): void {
+    this.table = null;
+    this.db = null;
+    this._statsCache = null;
   }
 
   async getIndexStatus(): Promise<StoreIndexStatus> {

@@ -150,7 +150,7 @@ export class MemoryScopeManager implements ScopeManager {
     this.validateConfiguration();
   }
 
-  private validateConfiguration(): void {
+  private validateConfiguration(warnings?: string[]): void {
     // Validate default scope exists in definitions
     if (!this.config.definitions[this.config.default]) {
       throw new Error(`Default scope '${this.config.default}' not found in definitions`);
@@ -168,7 +168,12 @@ export class MemoryScopeManager implements ScopeManager {
       }
       for (const scope of scopes) {
         if (!this.config.definitions[scope] && !this.isBuiltInScope(scope)) {
-          console.warn(`Agent '${agentId}' has access to undefined scope '${scope}'`);
+          const msg = `Agent '${agentId}' has access to undefined scope '${scope}'`;
+          if (warnings) {
+            warnings.push(msg);
+          } else {
+            console.warn(msg);
+          }
         }
       }
     }
@@ -386,21 +391,15 @@ export class MemoryScopeManager implements ScopeManager {
       },
     };
 
-    // Suppress warnings until validation succeeds
-    const originalWarn = console.warn;
     const warnings: string[] = [];
-    console.warn = (msg: string) => warnings.push(msg);
-
     this.config = next;
     try {
-      this.validateConfiguration();
+      this.validateConfiguration(warnings);
       // Emit warnings only after successful validation
-      warnings.forEach(w => originalWarn(w));
+      for (const w of warnings) console.warn(w);
     } catch (err) {
       this.config = previous;
       throw err;
-    } finally {
-      console.warn = originalWarn;
     }
   }
 

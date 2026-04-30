@@ -7,7 +7,7 @@
 import { resolveWorkspaceDirFromContext } from "./path-utils.js";
 import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./self-improvement-files.js";
 import { loadSelfImprovementReminderContent } from "./session-recovery-utils.js";
-import { containsErrorSignal, normalizeErrorSignature, redactSecrets, sha256Hex, summarizeErrorText, summarizeRecentConversationMessages } from "./session-utils.js";
+import { containsErrorSignal, normalizeErrorSignature, redactAll, sha256Hex, summarizeErrorText, summarizeRecentConversationMessages } from "./session-utils.js";
 import { isInternalReflectionSessionKey } from "./auto-capture-utils.js";
 import { dedupHookEvent } from "./hook-dedup.js";
 import type { PluginConfig } from "./plugin-types.js";
@@ -53,7 +53,7 @@ function createBeforeResetReviewKey(params: {
 }): string {
   const normalized = params.type === "error"
     ? normalizeErrorSignature(params.conversation)
-    : redactSecrets(params.conversation)
+    : redactAll(params.conversation)
       .toLowerCase()
       .replace(/\b\d+\b/g, "<n>")
       .replace(/\s+/g, " ")
@@ -176,7 +176,7 @@ export function registerSelfImprovementHook(params: {
           const key = createBeforeResetReviewKey({ type: "learning", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
             // Fire-and-forget: filesystem append should not block session reset.
-            void appendSelfImprovementEntry({
+            appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "learning",
               summary: `Review possible learning before /${reason}: ${firstSignalLine(conversation, "learning")}`,
@@ -187,8 +187,10 @@ export function registerSelfImprovementHook(params: {
               priority: hasError ? "high" : "medium",
               status: "pending",
               source,
-            }).catch((err) => api.logger.warn("self-improvement: learning append failed: " + String(err)));
-            writtenCount++;
+            }).then(
+              () => { writtenCount++; },
+              (err) => { api.logger.warn("self-improvement: learning append failed: " + String(err)); },
+            );
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate learning review skipped for session ${sessionId}`);
           }
@@ -198,7 +200,7 @@ export function registerSelfImprovementHook(params: {
           const key = createBeforeResetReviewKey({ type: "error", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
             // Fire-and-forget: filesystem append should not block session reset.
-            void appendSelfImprovementEntry({
+            appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "error",
               summary: `Review failure before /${reason}: ${firstSignalLine(conversation, "error")}`,
@@ -208,8 +210,10 @@ export function registerSelfImprovementHook(params: {
               priority: "high",
               status: "pending",
               source,
-            }).catch((err) => api.logger.warn("self-improvement: error append failed: " + String(err)));
-            writtenCount++;
+            }).then(
+              () => { writtenCount++; },
+              (err) => { api.logger.warn("self-improvement: error append failed: " + String(err)); },
+            );
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate error review skipped for session ${sessionId}`);
           }

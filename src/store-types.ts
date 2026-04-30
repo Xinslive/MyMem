@@ -19,17 +19,6 @@ export interface LanceRow {
   [key: string]: unknown;
 }
 
-/** Extended LanceDB module shape covering the Index builder.
- *  LanceDB exports `Index` as a class but the module type doesn't expose it. */
-export interface LanceDbExtended {
-  Index: {
-    bitmap(): unknown;
-    btree(): unknown;
-    ivfFlat(config: { distanceType: string; numPartitions: number }): unknown;
-    fts(config: unknown): unknown;
-  };
-}
-
 /** LanceDB index metadata returned by table.listIndices(). */
 export interface LanceIndex {
   name: string;

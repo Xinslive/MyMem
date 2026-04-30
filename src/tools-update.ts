@@ -85,11 +85,11 @@ export function registerMemoryUpdateTool(
           const uuidLike = /^[0-9a-f]{8}(-[0-9a-f]{4}){0,4}/i.test(memoryId);
           if (!uuidLike) {
             // Treat as search query
-            const results = await retrieveWithRetry(context.retriever, {
+            const results = await retrieveWithRetry(runtimeContext.retriever, {
               query: memoryId,
               limit: 3,
               scopeFilter,
-            }, () => context.store.count());
+            }, () => runtimeContext.store.count());
             if (results.length === 0) {
               return {
                 content: [
@@ -139,7 +139,7 @@ export function registerMemoryUpdateTool(
                 details: { action: "noise_filtered" },
               };
             }
-            newVector = await context.embedder.embedPassage(text);
+            newVector = await runtimeContext.embedder.embedPassage(text);
           }
 
           // Fetch existing entry once when we may need it (text change, or
@@ -147,7 +147,7 @@ export function registerMemoryUpdateTool(
           // the temporal supersede guard and the normal-path metadata rebuild.
           let existing: MemoryEntry | null = null;
           if (text || importance !== undefined) {
-            existing = await context.store.getById(resolvedId, scopeFilter);
+            existing = await runtimeContext.store.getById(resolvedId, scopeFilter);
           }
 
           // --- Temporal supersede guard ---
@@ -181,7 +181,7 @@ export function registerMemoryUpdateTool(
                   },
                 );
 
-                const newEntry = await context.store.store({
+                const newEntry = await runtimeContext.store.store({
                   text,
                   vector: newVector,
                   category: category ? (category as MemoryEntry["category"]) : existing.category,
@@ -204,7 +204,7 @@ export function registerMemoryUpdateTool(
                       targetId: newEntry.id,
                     }),
                   });
-                  await context.store.update(
+                  await runtimeContext.store.update(
                     resolvedId,
                     { metadata: stringifySmartMetadata(invalidatedMeta) },
                     scopeFilter,
@@ -269,7 +269,7 @@ export function registerMemoryUpdateTool(
             updates.metadata = stringifySmartMetadata(updatedMeta);
           }
 
-          const updated = await context.store.update(
+          const updated = await runtimeContext.store.update(
             resolvedId,
             updates,
             scopeFilter,

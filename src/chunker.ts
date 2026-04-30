@@ -84,16 +84,6 @@ function countLines(s: string): number {
   return s.split(/\r\n|\n|\r/).length;
 }
 
-function _findLastIndexWithin(text: string, re: RegExp, start: number, end: number): number {
-  // Find last match start index for regex within [start, end).
-  // NOTE: `re` must NOT be global; we will scan manually.
-  const last = -1;
-  for (let i = end - 1; i >= start; i--) {
-    if (re.test(text[i])) return i;
-  }
-  return last;
-}
-
 function findSplitEnd(text: string, start: number, maxEnd: number, minEnd: number, config: ChunkerConfig): number {
   const safeMinEnd = clamp(minEnd, start + 1, maxEnd);
   const safeMaxEnd = clamp(maxEnd, safeMinEnd, text.length);

@@ -65,8 +65,9 @@ const _registeredApis = new WeakSet<OpenClawPluginApi>();
 // ============================================================================
 // Hook Event Deduplication (Phase 1)
 // ============================================================================
-//
 // OpenClaw calls register() once per scope init (5× at startup, 4× per inbound
+// message). The WeakSet guard above deduplicates these calls so that hooks and
+// tools are registered exactly once per API instance.
 import { registerMemoryReflectionHook } from "./src/reflection-hook.js";
 import { registerSessionMemoryHook } from "./src/session-memory-hook.js";
 import { createAutoBackup } from "./src/auto-backup.js";

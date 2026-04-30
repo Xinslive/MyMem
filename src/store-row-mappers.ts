@@ -14,7 +14,10 @@ export function toNumberVector(value: unknown): number[] {
   if (!value) return [];
   const maybeIterable = value as Iterable<unknown>;
   if (typeof maybeIterable[Symbol.iterator] !== "function") return [];
-  return Array.from(maybeIterable, (item) => Number(item));
+  return Array.from(maybeIterable, (item) => {
+    const n = Number(item);
+    return Number.isFinite(n) ? n : 0;
+  });
 }
 
 export function mapRowToMemoryEntry(row: LanceRow, includeVector = true): MemoryEntry {

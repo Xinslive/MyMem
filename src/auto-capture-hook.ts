@@ -134,13 +134,13 @@ export function registerAutoCaptureHook(params: {
         }
         params.autoCaptureSeenTextCount.set(sessionKey, eligibleTexts.length);
 
-        const priorRecentTexts = params.autoCaptureRecentTexts.get(sessionKey) || [];
         let texts: string[] = [];
         for (const item of newItems) {
           if (await preflightAutoCaptureText({ config, text: item.text, api, source: `agent_end:${item.role}` })) {
             texts.push(item.text);
           }
         }
+        const priorRecentTexts = params.autoCaptureRecentTexts.get(sessionKey) || [];
         if (texts.length === 1 && isExplicitRememberCommand(texts[0]) && priorRecentTexts.length > 0) {
           texts = [...priorRecentTexts.slice(-1), ...texts];
         }

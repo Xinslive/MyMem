@@ -10,7 +10,6 @@ import {
   type ToolContext,
   resolveToolContext,
   resolveRuntimeAgentId,
-  resolveAgentId,
   memoryCategoryEnum,
   normalizeInlineText,
   truncateText,
@@ -49,9 +48,9 @@ export function registerMemoryStatsTool(
         try {
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
           // Determine accessible scopes
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (context.scopeManager.isAccessible(scope, agentId)) {
+            if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               scopeFilter = [scope];
             } else {
               return {
@@ -66,11 +65,11 @@ export function registerMemoryStatsTool(
             }
           }
 
-          const stats = await context.store.stats(scopeFilter);
-          const scopeManagerStats = context.scopeManager.getStats();
-          const retrievalConfig = context.retriever.getConfig();
-          const indexStatus = typeof (context.store as any).getIndexStatus === "function"
-            ? await (context.store as any).getIndexStatus()
+          const stats = await runtimeContext.store.stats(scopeFilter);
+          const scopeManagerStats = runtimeContext.scopeManager.getStats();
+          const retrievalConfig = runtimeContext.retriever.getConfig();
+          const indexStatus = typeof (runtimeContext.store as any).getIndexStatus === "function"
+            ? await (runtimeContext.store as any).getIndexStatus()
             : null;
           const persistentSummary = context.telemetry
             ? await context.telemetry.getPersistentSummary()
@@ -81,7 +80,7 @@ export function registerMemoryStatsTool(
             `\u2022 Total memories: ${stats.totalCount}`,
             `\u2022 Available scopes: ${scopeManagerStats.totalScopes}`,
             `\u2022 Retrieval mode: ${retrievalConfig.mode}`,
-            `\u2022 FTS support: ${context.store.hasFtsSupport ? "Yes" : "No"}`,
+            `\u2022 FTS support: ${runtimeContext.store.hasFtsSupport ? "Yes" : "No"}`,
             ...(indexStatus
               ? [
                   `\u2022 Vector index: ${indexStatus.available.vector ? "Yes" : "No"}`,
@@ -115,7 +114,7 @@ export function registerMemoryStatsTool(
           ];
 
           // Include retrieval quality metrics if stats collector is available
-          const statsCollector = context.retriever.getStatsCollector();
+          const statsCollector = runtimeContext.retriever.getStatsCollector();
           let retrievalStats = undefined;
           if (statsCollector && statsCollector.count > 0) {
             retrievalStats = statsCollector.getStats();
@@ -172,7 +171,7 @@ export function registerMemoryStatsTool(
                 ...retrievalConfig,
                 rerankApiKey: retrievalConfig.rerankApiKey ? "***" : undefined,
               },
-              hasFtsSupport: context.store.hasFtsSupport,
+              hasFtsSupport: runtimeContext.store.hasFtsSupport,
               retrievalStats,
               indexStatus,
               telemetry: context.telemetry
@@ -209,7 +208,7 @@ export function registerMemoryDebugTool(
 ) {
   api.registerTool(
     (toolCtx) => {
-      const agentId = resolveAgentId((toolCtx as any)?.agentId, context.agentId) ?? "main";
+      const runtimeContext = resolveToolContext(context, toolCtx);
       return {
         name: "memory_debug",
         label: "Memory Debug",
@@ -224,15 +223,16 @@ export function registerMemoryDebugTool(
             Type.String({ description: "Specific memory scope to search in (optional)" }),
           ),
         }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
           const { query, limit = 5, scope } = params as {
             query: string; limit?: number; scope?: string;
           };
           try {
             const safeLimit = clampInt(limit, 1, 20);
-            let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+            const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
+            let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
             if (scope) {
-              if (context.scopeManager.isAccessible(scope, agentId)) {
+              if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
                 scopeFilter = [scope];
               } else {
                 return {
@@ -242,7 +242,7 @@ export function registerMemoryDebugTool(
               }
             }
 
-            const { results, trace } = await context.retriever.retrieveWithTrace({
+            const { results, trace } = await runtimeContext.retriever.retrieveWithTrace({
               query, limit: safeLimit, scopeFilter, source: "manual",
             });
 
@@ -363,9 +363,9 @@ export function registerMemoryListTool(
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
 
           // Determine accessible scopes
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (context.scopeManager.isAccessible(scope, agentId)) {
+            if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               scopeFilter = [scope];
             } else {
               return {
@@ -380,7 +380,7 @@ export function registerMemoryListTool(
             }
           }
 
-          const entries = await context.store.list(
+          const entries = await runtimeContext.store.list(
             scopeFilter,
             category,
             safeLimit,
@@ -511,9 +511,9 @@ export function registerMemoryPromoteTool(
           }
 
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (!context.scopeManager.isAccessible(scope, agentId)) {
+            if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -614,9 +614,9 @@ export function registerMemoryArchiveTool(
           }
 
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (!context.scopeManager.isAccessible(scope, agentId)) {
+            if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -688,9 +688,9 @@ export function registerMemoryCompactTool(
 
           const safeLimit = clampInt(limit, 20, 1000);
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (!context.scopeManager.isAccessible(scope, agentId)) {
+            if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -786,9 +786,9 @@ export function registerMemoryExplainRankTool(
 
           const safeLimit = clampInt(limit, 1, 20);
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
-          let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+          let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
           if (scope) {
-            if (!context.scopeManager.isAccessible(scope, agentId)) {
+            if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },

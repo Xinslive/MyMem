@@ -7,7 +7,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ReflectionErrorState } from "./plugin-types.js";
 import { DIAG_BUILD_TAG } from "./plugin-constants.js";
-import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs } from "./config-utils.js";
+import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs, pruneMapIfOver } from "./config-utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir } from "./path-utils.js";
 import { parsePluginConfig } from "./plugin-config-parser.js";
 import { getPluginVersion } from "./version-utils.js";
@@ -321,6 +321,24 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const autoCaptureSeenTextCount = new Map<string, number>();
   const autoCapturePendingIngressTexts = new Map<string, string[]>();
   const autoCaptureRecentTexts = new Map<string, string[]>();
+
+  // Periodically prune unbounded session-keyed Maps to prevent memory leaks
+  const SESSION_MAP_MAX = 500;
+  const sessionMapsToPrune: Map<unknown, unknown>[] = [
+    reflectionErrorStateBySession,
+    reflectionDerivedBySession,
+    reflectionByAgentCache,
+    recallHistory,
+    turnCounter,
+    lastRawUserMessage,
+    autoCaptureSeenTextCount,
+    autoCapturePendingIngressTexts,
+    autoCaptureRecentTexts,
+  ];
+  const _pruneInterval = setInterval(() => {
+    for (const map of sessionMapsToPrune) pruneMapIfOver(map, SESSION_MAP_MAX);
+  }, 5 * 60_000); // every 5 minutes
+  if (typeof _pruneInterval === "object" && "unref" in _pruneInterval) _pruneInterval.unref();
 
   const logReg = isCliMode() ? api.logger.debug : api.logger.info;
   logReg(
