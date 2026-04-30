@@ -44,19 +44,23 @@ const FORCE_RETRIEVE_PATTERNS = [
  * We strip such prefixes so command-style prompts are properly detected and we
  * can skip auto-recall injection (saves tokens).
  */
+// Pre-compiled regex for metadata stripping (called on every incoming message)
+const METADATA_STRIP_RE = /^(Conversation info|Sender) \(untrusted metadata\):[\s\S]*?\n\s*\n/gim;
+const CRON_PREFIX_RE = /^\[cron:[^\]]+\]\s*/i;
+const TIMESTAMP_PREFIX_RE = /^\[[A-Za-z]{3}\s\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\s[^\]]+\]\s*/;
+const CJK_DETECT_RE = /[一-鿿぀-ゟ゠-ヿ가-힯]/;
+
 function normalizeQuery(query: string): string {
   let s = query.trim();
 
   // 1. Strip OpenClaw injected metadata headers (Conversation info or Sender).
-  // Use a global regex to strip all metadata blocks including following blank lines.
-  const metadataPattern = /^(Conversation info|Sender) \(untrusted metadata\):[\s\S]*?\n\s*\n/gim;
-  s = s.replace(metadataPattern, "");
+  s = s.replace(METADATA_STRIP_RE, "");
 
   // 2. Strip OpenClaw cron wrapper prefix.
-  s = s.trim().replace(/^\[cron:[^\]]+\]\s*/i, "");
+  s = s.trim().replace(CRON_PREFIX_RE, "");
 
   // 3. Strip OpenClaw timestamp prefix [Mon 2026-03-02 04:21 GMT+8].
-  s = s.trim().replace(/^\[[A-Za-z]{3}\s\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\s[^\]]+\]\s*/, "");
+  s = s.trim().replace(TIMESTAMP_PREFIX_RE, "");
 
   const result = s.trim();
   return result;
@@ -89,7 +93,7 @@ export function shouldSkipRetrieval(query: string, minLength?: number): boolean 
 
   // Skip very short non-question messages (likely commands or affirmations)
   // CJK characters carry more meaning per character, so use a lower threshold
-  const hasCJK = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(trimmed);
+  const hasCJK = CJK_DETECT_RE.test(trimmed);
   const defaultMinLength = hasCJK ? 6 : 15;
   if (trimmed.length < defaultMinLength && !trimmed.includes('?') && !trimmed.includes('？')) return true;
 

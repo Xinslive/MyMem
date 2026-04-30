@@ -18,25 +18,19 @@
  * the old implementation are dead code after this refactor — they are not
  * called anywhere in the pipeline. They have been removed.
  */
-export function stripEnvelopeMetadata(text: string): string {
-  // Matches wrapper lines: [Subagent Context] or [Subagent Task], possibly with
-  // inline content on the same line (e.g. "[Subagent Task] Reply with brief ack.").
-  // Also matches when the wrapper prefix is on its own line ("]\n" = no content after ]).
-  const WRAPPER_LINE_RE = /^\[(?:Subagent Context|Subagent Task)\](?:\s|$|\n)?/i;
-  const BOILERPLATE_RE = /^(?:Results auto-announce to your requester\.?|do not busy-poll for status\.?|Reply with a brief acknowledgment only\.?|Do not use any memory tools\.?)$/im;
-  // Anchored inline variant: only strip boilerplate when it starts the wrapper
-  // remainder. This avoids erasing legitimate inline payload that merely quotes
-  // a boilerplate phrase later in the sentence.
-  // Repeat the anchored segment so composite wrappers like "You are running...
-  // Results auto-announce..." are fully removed before preserving any payload.
-  // The subagent running phrase uses (?<=\.)\s+|$ alternation (same as old
-  // RUNTIME_WRAPPER_BOILERPLATE_RE) so that parenthetical depth like "(depth 1/1)."
-  // is included before the ending whitespace, correctly stripping the full phrase.
-  const INLINE_BOILERPLATE_RE =
-    /^(?:(?:You are running as a subagent\b.*?(?:(?<=\.)\s+|$)|Results auto-announce to your requester\.?\s*|do not busy-poll for status\.?\s*|Reply with a brief acknowledgment only\.?\s*|Do not use any memory tools\.?\s*))+/i;
-  // Anchor to start of line — prevents quoted/cited false-positives
-  const SUBAGENT_RUNNING_RE = /^You are running as a subagent\b/i;
+// Pre-compiled regex patterns for envelope stripping (called on every extraction)
+const WRAPPER_LINE_RE = /^\[(?:Subagent Context|Subagent Task)\](?:\s|$|\n)?/i;
+const BOILERPLATE_RE = /^(?:Results auto-announce to your requester\.?|do not busy-poll for status\.?|Reply with a brief acknowledgment only\.?|Do not use any memory tools\.?)$/im;
+const INLINE_BOILERPLATE_RE =
+  /^(?:(?:You are running as a subagent\b.*?(?:(?<=\.)\s+|$)|Results auto-announce to your requester\.?\s*|do not busy-poll for status\.?\s*|Reply with a brief acknowledgment only\.?\s*|Do not use any memory tools\.?\s*))+/i;
+const SUBAGENT_RUNNING_RE = /^You are running as a subagent\b/i;
+const SYSTEM_LINE_RE = /^System:\s*\[[\d\-: +GMT]+\]\s+\S+\[.*?\].*$/gm;
+const METADATA_JSON_BLOCK_RE = /(?:Conversation info|Sender|Replied message)\s*\(untrusted[^)]*\):\s*```json\s*\{[\s\S]*?\}\s*```/g;
+const ENVELOPE_JSON_BLOCK_RE = /```json\s*(?=\{[\s\S]*?"message_id"\s*:)(?=\{[\s\S]*?"sender_id"\s*:)\{[\s\S]*?\}\s*```/g;
+const EXCESS_BLANK_LINES_RE = /\n{3,}/g;
+const MULTI_SPACE_RE = /\s{2,}/g;
 
+export function stripEnvelopeMetadata(text: string): string {
   const originalLines = text.split("\n");
 
   // Pre-scan: determine if there are leading wrappers.
@@ -83,7 +77,7 @@ export function stripEnvelopeMetadata(text: string): string {
       //    wrapper+boilerplate like "[Subagent Context] ... Results auto-announce...").
       //    Use INLINE_BOILERPLATE_RE (anchored, includes subagent phrase) so only
       //    leading wrapper boilerplate is removed while quoted user payload remains.
-      remainder = remainder.replace(INLINE_BOILERPLATE_RE, "").replace(/\s{2,}/g, " ").trim();
+      remainder = remainder.replace(INLINE_BOILERPLATE_RE, "").replace(MULTI_SPACE_RE, " ").trim();
       // 3. Keep remainder if non-empty (non-boilerplate inline content preserved);
       //    strip the whole line if only boilerplate was present
       result.push(remainder);
@@ -135,27 +129,16 @@ export function stripEnvelopeMetadata(text: string): string {
   let cleaned = result.join("\n");
 
   // 1. Strip "System: [timestamp] Channel..." lines
-  cleaned = cleaned.replace(
-    /^System:\s*\[[\d\-: +GMT]+\]\s+\S+\[.*?\].*$/gm,
-    "",
-  );
+  cleaned = cleaned.replace(SYSTEM_LINE_RE, "");
 
   // 2. Strip labeled metadata sections with their JSON code blocks
-  //    e.g. "Conversation info (untrusted metadata):\n```json\n{...}\n```"
-  cleaned = cleaned.replace(
-    /(?:Conversation info|Sender|Replied message)\s*\(untrusted[^)]*\):\s*```json\s*\{[\s\S]*?\}\s*```/g,
-    "",
-  );
+  cleaned = cleaned.replace(METADATA_JSON_BLOCK_RE, "");
 
   // 3. Strip any remaining JSON blocks that look like envelope metadata
-  //    (contain message_id and sender_id fields)
-  cleaned = cleaned.replace(
-    /```json\s*(?=\{[\s\S]*?"message_id"\s*:)(?=\{[\s\S]*?"sender_id"\s*:)\{[\s\S]*?\}\s*```/g,
-    "",
-  );
+  cleaned = cleaned.replace(ENVELOPE_JSON_BLOCK_RE, "");
 
   // 4. Collapse excessive blank lines left by removals
-  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  cleaned = cleaned.replace(EXCESS_BLANK_LINES_RE, "\n\n");
 
   return cleaned.trim();
 }
