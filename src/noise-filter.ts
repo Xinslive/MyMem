@@ -14,6 +14,14 @@ const DENIAL_PATTERNS = [
   /i wasn'?t able to find/i,
   /no (relevant )?memories found/i,
   /i don'?t have access to/i,
+  // Chinese denial patterns
+  /我没有找到/,
+  /我不确定/,
+  /没有相关记忆/,
+  /抱歉[，,]?我不记得/,
+  /我无法确认/,
+  /没有找到相关/,
+  /我不太清楚/,
 ];
 
 // User-side meta-question patterns (about memory itself, not content)

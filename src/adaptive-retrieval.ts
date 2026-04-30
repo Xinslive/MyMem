@@ -32,6 +32,7 @@ const FORCE_RETRIEVE_PATTERNS = [
   /\b(my (name|email|phone|address|birthday|preference))\b/i,
   /\b(what did (i|we)|did i (tell|say|mention))\b/i,
   /(你记得|[你妳]記得|之前|上次|以前|还记得|還記得|提到过|提到過|说过|說過)/i,
+  /(帮我记一下|记下来|记一下|这个很重要|千万别忘了|别忘了|帮我记住)/i,
 ];
 
 /**

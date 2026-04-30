@@ -27,7 +27,7 @@ describe("analyzeIntent", () => {
   });
 
   it("detects decision intent (Chinese)", () => {
-    const result = analyzeIntent("当时决定用哪个方案？");
+    const result = analyzeIntent("为什么选了 PostgreSQL？");
     assert.equal(result.label, "decision");
     assert.equal(result.confidence, "high");
   });
@@ -90,6 +90,56 @@ describe("analyzeIntent", () => {
     assert.equal(result.confidence, "low");
     assert.deepEqual(result.categories, []);
     assert.equal(result.depth, "l0");
+  });
+
+  // --- Extended Chinese pattern tests ---
+
+  it("detects preference intent (Chinese: 用...比较好)", () => {
+    const result = analyzeIntent("这个项目用什么框架比较好？");
+    assert.ok(result.label.includes("preference"));
+    assert.equal(result.confidence, "high");
+  });
+
+  it("detects preference intent (Chinese: 推荐用)", () => {
+    const result = analyzeIntent("你推荐用哪个数据库？");
+    assert.ok(result.label.includes("preference"));
+    assert.equal(result.confidence, "high");
+  });
+
+  it("detects experience intent (Chinese: 当时)", () => {
+    const result = analyzeIntent("当时是怎么解决的？");
+    assert.ok(result.label.includes("experience"));
+    assert.equal(result.depth, "full");
+  });
+
+  it("detects experience intent (Chinese: 踩过坑)", () => {
+    const result = analyzeIntent("之前踩过坑吗？");
+    assert.ok(result.label.includes("experience"));
+    assert.equal(result.memoryType, "experience");
+  });
+
+  it("detects decision intent (Chinese: 最终决定)", () => {
+    const result = analyzeIntent("最终决定用哪个方案？");
+    assert.ok(result.label.includes("decision"));
+    assert.equal(result.confidence, "high");
+  });
+
+  it("detects entity intent (Chinese: 谁负责)", () => {
+    const result = analyzeIntent("这个模块谁负责？");
+    assert.ok(result.label.includes("entity"));
+    assert.equal(result.confidence, "high");
+  });
+
+  it("detects event intent (Chinese: 出了个bug)", () => {
+    const result = analyzeIntent("上次出了个bug是什么情况？");
+    assert.ok(result.label.includes("event"));
+    assert.equal(result.depth, "full");
+  });
+
+  it("detects fact intent (Chinese: 怎么实现的)", () => {
+    const result = analyzeIntent("这个功能怎么实现的？");
+    assert.ok(result.label.includes("fact"));
+    assert.equal(result.confidence, "high");
   });
 
   it("returns empty signal for empty input", () => {

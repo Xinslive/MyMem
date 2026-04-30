@@ -69,26 +69,38 @@ export function recommendedVectorPartitions(totalRows: number): number {
 
 /**
  * Tokenize text into lowercase terms. Handles CJK characters as individual
- * tokens and splits Latin text on word boundaries.
+ * tokens plus bigrams for better semantic matching, and splits Latin text
+ * on word boundaries.
+ *
+ * CJK bigrams: "部署了" → ["部", "署", "了", "部署", "署了"]
+ * This allows queries like "部署" to match "部署了新版本" via bigram overlap.
  */
 function tokenizeForSearch(text: string): string[] {
   const lower = text.toLowerCase();
   const tokens: string[] = [];
   let current = "";
+  let prevCjk = "";
+
   for (const ch of lower) {
-    // CJK character → individual token
-    if (/[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯]/.test(ch)) {
+    // CJK character → individual token + bigram with previous CJK
+    if (/[一-鿿㐀-䶿㐀-䶿぀-ゟ゠-ヿ가-힯]/.test(ch)) {
       if (current) { tokens.push(current); current = ""; }
       tokens.push(ch);
+      if (prevCjk) {
+        tokens.push(prevCjk + ch);
+      }
+      prevCjk = ch;
       continue;
     }
     // Word character → accumulate
     if (/[\p{L}\p{N}]/u.test(ch)) {
       current += ch;
+      prevCjk = "";
       continue;
     }
     // Separator → flush
     if (current) { tokens.push(current); current = ""; }
+    prevCjk = "";
   }
   if (current) tokens.push(current);
   return tokens;

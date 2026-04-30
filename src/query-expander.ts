@@ -124,6 +124,42 @@ const SYNONYM_MAP: SynonymEntry[] = [
     en: ["performance", "optimize"],
     expansions: ["性能", "优化", "performance", "optimize", "瓶颈", "profiling"],
   },
+  // Software engineering - collaboration
+  {
+    cn: ["问题", "缺陷", "故障"],
+    en: ["bug", "issue", "defect"],
+    expansions: ["bug", "问题", "缺陷", "故障", "issue", "修复"],
+  },
+  {
+    cn: ["重构", "重写"],
+    en: ["refactor", "rewrite"],
+    expansions: ["重构", "refactor", "重写", "优化代码", "rewrite"],
+  },
+  {
+    cn: ["审查", "代码审查"],
+    en: ["review", "code review", "CR"],
+    expansions: ["review", "审查", "代码审查", "CR", "code review"],
+  },
+  {
+    cn: ["合并", "合入"],
+    en: ["merge"],
+    expansions: ["merge", "合并", "合入", "pull request", "PR"],
+  },
+  {
+    cn: ["持续集成", "流水线"],
+    en: ["CI", "CD", "pipeline"],
+    expansions: ["CI/CD", "持续集成", "流水线", "自动部署", "pipeline"],
+  },
+  {
+    cn: ["缓存"],
+    en: ["cache", "caching"],
+    expansions: ["缓存", "cache", "Redis", "缓存策略", "cache invalidation"],
+  },
+  {
+    cn: ["并发", "多线程"],
+    en: ["concurrency", "threading", "async"],
+    expansions: ["并发", "concurrency", "多线程", "异步", "async", "锁"],
+  },
 ];
 
 function buildWordBoundaryRegex(term: string): RegExp {

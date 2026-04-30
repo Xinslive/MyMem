@@ -537,19 +537,38 @@ export class MemoryStore {
     try {
       // Check if FTS index already exists
       const indices = await table.listIndices();
-      const hasFtsIndex = indices?.some(
+      const existingFts = indices?.find(
         (idx: any) => idx.indexType === "FTS" || idx.columns?.includes("text"),
       );
 
-      if (!hasFtsIndex) {
-        // LanceDB @lancedb/lancedb >=0.26: use Index.fts() config
-        const lancedb = await loadLanceDB();
-        await table.createIndex("text", {
-          config: (lancedb as any).Index.fts({ withPosition: true }),
-          replace: false,
-          waitTimeoutSeconds: 60,
-        });
+      const lancedb = await loadLanceDB();
+      const ftsConfig = (lancedb as any).Index.fts({
+        withPosition: true,
+        // ngram tokenizer: splits CJK text into 2-3 character tokens for BM25 matching.
+        // Chinese "部署新版本" → ["部署","署新","新版本","版本"] enabling keyword search.
+        // English "deploy" → ["de","ep","pl","lo","oy","dep","eplo","ploy"] — BM25 IDF
+        // weighting ensures exact matches still score highest.
+        baseTokenizer: "ngram",
+        ngramMinLength: 2,
+        ngramMaxLength: 3,
+        lowercase: true,
+      });
+
+      if (existingFts) {
+        // Migrate: drop old index (may have been created with "simple" tokenizer)
+        // and recreate with ngram tokenizer for CJK support.
+        try {
+          await table.dropIndex((existingFts as any).name || "text");
+        } catch (err) {
+          this.log.warn(`dropIndex for FTS migration failed: ${err}`);
+        }
       }
+
+      await table.createIndex("text", {
+        config: ftsConfig,
+        replace: true,
+        waitTimeoutSeconds: 60,
+      });
     } catch (err) {
       throw new Error(
         `FTS index creation failed: ${err instanceof Error ? err.message : String(err)}`,
