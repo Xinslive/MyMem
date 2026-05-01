@@ -348,7 +348,7 @@ try {
     });
     __resetSingletonForTesting__();
     plugin.register(chunkingOffApi);
-    const chunkingOffTool = chunkingOffApi.toolFactories.memory_store({
+    const chunkingOffTool = chunkingOffApi.toolFactories.mymem_store({
       agentId: "main",
       sessionKey: "agent:main:test",
     });
@@ -377,7 +377,7 @@ try {
     });
     __resetSingletonForTesting__();
     plugin.register(chunkingOnApi);
-    const chunkingOnTool = chunkingOnApi.toolFactories.memory_store({
+    const chunkingOnTool = chunkingOnApi.toolFactories.mymem_store({
       agentId: "main",
       sessionKey: "agent:main:test",
     });
@@ -405,7 +405,7 @@ try {
     });
     __resetSingletonForTesting__();
     plugin.register(withDimensionsApi);
-    const withDimensionsTool = withDimensionsApi.toolFactories.memory_store({
+    const withDimensionsTool = withDimensionsApi.toolFactories.mymem_store({
       agentId: "main",
       sessionKey: "agent:main:test",
     });
@@ -436,7 +436,7 @@ try {
     });
     __resetSingletonForTesting__();
     plugin.register(omitDimensionsApi);
-    const omitDimensionsTool = omitDimensionsApi.toolFactories.memory_store({
+    const omitDimensionsTool = omitDimensionsApi.toolFactories.mymem_store({
       agentId: "main",
       sessionKey: "agent:main:test",
     });
