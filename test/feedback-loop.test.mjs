@@ -30,6 +30,60 @@ function tmpDir() {
   return dir;
 }
 
+function makeAdmissionConfig() {
+  return {
+    rejectThreshold: 0.45,
+    typePriors: {
+      profile: 0.95,
+      preferences: 0.9,
+      entities: 0.75,
+      events: 0.45,
+      cases: 0.8,
+      patterns: 0.85,
+    },
+  };
+}
+
+function makeRejectedAudit(category, rejectedAt, score = 0.2) {
+  return {
+    version: "amac-v1",
+    rejected_at: rejectedAt,
+    session_key: "test",
+    target_scope: "global",
+    scope_filter: ["global"],
+    candidate: {
+      category,
+      abstract: `${category} rejected candidate`,
+      overview: "",
+      content: `${category} rejected candidate content`,
+    },
+    audit: {
+      version: "amac-v1",
+      decision: "reject",
+      score,
+      reason: "test rejection",
+      thresholds: { reject: 0.45, admit: 0.6 },
+      weights: {},
+      feature_scores: {},
+      matched_existing_memory_ids: [],
+      compared_existing_memory_ids: [],
+      max_similarity: 0,
+      evaluated_at: rejectedAt,
+    },
+    conversation_excerpt: "test conversation",
+  };
+}
+
+function writeRejectedAudits(dbPath, entries) {
+  const auditDir = join(dbPath, "..", "admission-audit");
+  mkdirSync(auditDir, { recursive: true });
+  writeFileSync(
+    join(auditDir, "rejections.jsonl"),
+    entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf-8",
+  );
+}
+
 // ============================================================================
 // Config Normalization Tests
 // ============================================================================
@@ -83,6 +137,8 @@ it("normalizeFeedbackLoopConfig: priorAdaptation sub-fields", () => {
       minObservations: 5,
       learningRate: 0.2,
       maxAdjustment: 0.1,
+      observationWindowMs: 3_600_000,
+      maxRejectionAudits: 50,
     },
   });
   assert.equal(result.priorAdaptation.enabled, false);
@@ -90,6 +146,8 @@ it("normalizeFeedbackLoopConfig: priorAdaptation sub-fields", () => {
   assert.equal(result.priorAdaptation.minObservations, 5);
   assert.equal(result.priorAdaptation.learningRate, 0.2);
   assert.equal(result.priorAdaptation.maxAdjustment, 0.1);
+  assert.equal(result.priorAdaptation.observationWindowMs, 3_600_000);
+  assert.equal(result.priorAdaptation.maxRejectionAudits, 50);
 });
 
 it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
@@ -104,6 +162,8 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
     priorAdaptation: {
       learningRate: 5,    // above max (0.5), should use default
       maxAdjustment: 0,  // below min (0.01), should use default
+      observationWindowMs: 1_000, // below minimum, should use default
+      maxRejectionAudits: 1, // below minimum, should use default
     },
   });
   assert.equal(result.noiseLearning.minRejectionsForScan, DEFAULT_NOISE_LEARNING_CONFIG.minRejectionsForScan);
@@ -112,6 +172,8 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   assert.deepStrictEqual(result.noiseLearning.errorAreas, DEFAULT_NOISE_LEARNING_CONFIG.errorAreas);
   assert.equal(result.priorAdaptation.learningRate, DEFAULT_PRIOR_ADAPTATION_CONFIG.learningRate);
   assert.equal(result.priorAdaptation.maxAdjustment, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxAdjustment);
+  assert.equal(result.priorAdaptation.observationWindowMs, DEFAULT_PRIOR_ADAPTATION_CONFIG.observationWindowMs);
+  assert.equal(result.priorAdaptation.maxRejectionAudits, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxRejectionAudits);
 });
 
 // ============================================================================
@@ -375,6 +437,123 @@ it("getAdaptiveTypePriors: clamps to [0, 1]", () => {
   assert.ok(adaptive.profile <= 1.0, "profile should be clamped to 1.0");
   assert.ok(adaptive.preferences >= 0.0, "preferences should be clamped to 0.0");
   loop.dispose();
+});
+
+it("forceAdaptationCycle: ignores rejected audits outside observationWindowMs", async () => {
+  const now = Date.now();
+  const originalNow = Date.now;
+  Date.now = () => now;
+
+  let adaptivePriors = null;
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [] },
+    admissionController: {
+      setAdaptiveTypePriors: (priors) => {
+        adaptivePriors = priors;
+      },
+    },
+    config: {
+      enabled: true,
+      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
+      priorAdaptation: {
+        ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
+        minObservations: 3,
+        learningRate: 0.2,
+        observationWindowMs: 60_000,
+        maxRejectionAudits: 100,
+      },
+    },
+  });
+
+  const dir = tmpDir();
+  const dbPath = join(dir, "db");
+  const admissionConfig = makeAdmissionConfig();
+
+  try {
+    mkdirSync(dbPath, { recursive: true });
+    writeRejectedAudits(dbPath, [
+      makeRejectedAudit("events", now - 120_000),
+      makeRejectedAudit("events", now - 110_000),
+      makeRejectedAudit("events", now - 100_000),
+    ]);
+
+    await loop.forceAdaptationCycle(dbPath, admissionConfig);
+
+    assert.ok(adaptivePriors, "adaptation should set type priors");
+    assert.equal(
+      adaptivePriors.events,
+      admissionConfig.typePriors.events,
+      "old-only rejections should not lower the events prior",
+    );
+  } finally {
+    Date.now = originalNow;
+    rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
+  }
+});
+
+it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", async () => {
+  const now = Date.now();
+  const originalNow = Date.now;
+  Date.now = () => now;
+
+  let adaptivePriors = null;
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [] },
+    admissionController: {
+      setAdaptiveTypePriors: (priors) => {
+        adaptivePriors = priors;
+      },
+    },
+    config: {
+      enabled: true,
+      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
+      priorAdaptation: {
+        ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
+        minObservations: 3,
+        learningRate: 0.2,
+        observationWindowMs: 60 * 60_000,
+        maxRejectionAudits: 10,
+      },
+    },
+  });
+
+  const dir = tmpDir();
+  const dbPath = join(dir, "db");
+  const admissionConfig = makeAdmissionConfig();
+  const oldRejectedPreferences = Array.from({ length: 20 }, (_, index) =>
+    makeRejectedAudit("preferences", now - 30_000 + index, 0.1),
+  );
+  const recentRejectedEvents = Array.from({ length: 10 }, (_, index) =>
+    makeRejectedAudit("events", now - 10_000 + index, 0.1),
+  );
+
+  try {
+    mkdirSync(dbPath, { recursive: true });
+    writeRejectedAudits(dbPath, [
+      ...oldRejectedPreferences,
+      ...recentRejectedEvents,
+    ]);
+
+    await loop.forceAdaptationCycle(dbPath, admissionConfig);
+
+    assert.ok(adaptivePriors, "adaptation should set type priors");
+    assert.equal(
+      adaptivePriors.preferences,
+      admissionConfig.typePriors.preferences,
+      "older rows outside the maxRejectionAudits tail should not affect preferences",
+    );
+    assert.ok(
+      adaptivePriors.events < admissionConfig.typePriors.events,
+      "recent tail rejections should lower the events prior",
+    );
+  } finally {
+    Date.now = originalNow;
+    rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
+  }
 });
 
 // ============================================================================

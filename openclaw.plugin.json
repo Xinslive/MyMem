@@ -1247,6 +1247,20 @@
                 "maximum": 0.3,
                 "default": 0.15,
                 "description": "Maximum absolute adjustment from base prior."
+              },
+              "observationWindowMs": {
+                "type": "integer",
+                "minimum": 60000,
+                "maximum": 2592000000,
+                "default": 86400000,
+                "description": "Recent observation window for adaptive type priors. Rejections older than this window are ignored; set by default to 24 hours."
+              },
+              "maxRejectionAudits": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 100000,
+                "default": 1000,
+                "description": "Maximum recent rejected-admission audit rows to inspect per adaptation cycle."
               }
             }
           }

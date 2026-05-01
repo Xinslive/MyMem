@@ -191,6 +191,8 @@ export interface PluginConfig {
       minObservations?: number;
       learningRate?: number;
       maxAdjustment?: number;
+      observationWindowMs?: number;
+      maxRejectionAudits?: number;
     };
   };
   recallPrefix?: {

@@ -7,7 +7,7 @@
  * 2. Admission rejection rates → AdmissionController type priors (adapt over time)
  */
 
-import { readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { NoisePrototypeBank } from "./noise-prototypes.js";
 import type { Embedder } from "./embedder.js";
@@ -34,6 +34,8 @@ export interface PriorAdaptationConfig {
   minObservations: number;
   learningRate: number;
   maxAdjustment: number;
+  observationWindowMs: number;
+  maxRejectionAudits: number;
 }
 
 export interface FeedbackLoopConfig {
@@ -63,6 +65,8 @@ export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
   minObservations: 10,
   learningRate: 0.1,
   maxAdjustment: 0.15,
+  observationWindowMs: 86_400_000, // 24 hours
+  maxRejectionAudits: 1_000,
 };
 
 export const DEFAULT_FEEDBACK_LOOP_CONFIG: FeedbackLoopConfig = {
@@ -163,6 +167,62 @@ function tokenKey(text: string): string {
   return tokens.join(" ");
 }
 
+const MAX_REJECTION_AUDIT_TAIL_BYTES = 8 * 1024 * 1024;
+
+async function readTailText(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await open(filePath, "r");
+  try {
+    const stats = await handle.stat();
+    if (stats.size <= 0) return "";
+    const bytesToRead = Math.min(Math.max(1, maxBytes), stats.size);
+    const start = Math.max(0, stats.size - bytesToRead);
+    const buffer = Buffer.alloc(bytesToRead);
+    await handle.read(buffer, 0, bytesToRead, start);
+    let text = buffer.toString("utf-8");
+    if (start > 0) {
+      const firstNewline = text.indexOf("\n");
+      text = firstNewline >= 0 ? text.slice(firstNewline + 1) : "";
+    }
+    return text;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readRecentRejectionAudits(
+  filePath: string,
+  options: {
+    maxEntries: number;
+    since?: number;
+  },
+): Promise<AdmissionRejectionAuditEntry[]> {
+  const maxEntries = Math.max(1, Math.floor(options.maxEntries));
+  const content = await readTailText(filePath, MAX_REJECTION_AUDIT_TAIL_BYTES);
+  if (!content.trim()) return [];
+
+  const entries: AdmissionRejectionAuditEntry[] = [];
+  const lines = content.trim().split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0 && entries.length < maxEntries; i--) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+    if (!isRejectedAuditEntry(parsed)) continue;
+    if (options.since !== undefined && parsed.rejected_at < options.since) continue;
+    entries.push(parsed);
+  }
+
+  return entries.reverse();
+}
+
+function isRejectedAuditEntry(value: unknown): value is AdmissionRejectionAuditEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<AdmissionRejectionAuditEntry>;
+  return entry.version === "amac-v1" && entry.audit?.decision === "reject";
+}
+
 // ============================================================================
 // Processed Error Tracker (in-memory dedup)
 // ============================================================================
@@ -194,7 +254,7 @@ export class FeedbackLoop {
   private processedErrors = new ProcessedErrorTracker();
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
-  private admittedCounts: Record<string, number> = {};
+  private admittedTimestampsByCategory: Record<string, number[]> = {};
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private adaptationTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -261,7 +321,11 @@ export class FeedbackLoop {
   /** Record an admitted memory by category for prior adaptation. */
   onAdmissionAdmitted(category: string): void {
     if (this.disposed || !this.config.enabled) return;
-    this.admittedCounts[category] = (this.admittedCounts[category] ?? 0) + 1;
+    const now = Date.now();
+    const timestamps = this.admittedTimestampsByCategory[category] ?? [];
+    timestamps.push(now);
+    this.admittedTimestampsByCategory[category] = timestamps;
+    this.pruneAdmittedTimestamps(now);
   }
 
   onSelfImprovementError(params: { summary: string; details?: string; area?: string }): void {
@@ -339,15 +403,9 @@ export class FeedbackLoop {
 
     const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
     try {
-      const content = await readFile(filePath, "utf-8");
-      const entries: AdmissionRejectionAuditEntry[] = content
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          try { return JSON.parse(line); } catch { return null; }
-        })
-        .filter((e): e is AdmissionRejectionAuditEntry => e !== null && e.version === "amac-v1" && e.audit?.decision === "reject");
+      const entries = await readRecentRejectionAudits(filePath, {
+        maxEntries: this.config.priorAdaptation.maxRejectionAudits,
+      });
 
       const clusters = clusterRejections(entries, this.config.noiseLearning.minRejectionsForScan, admissionConfig.rejectThreshold);
 
@@ -433,21 +491,19 @@ export class FeedbackLoop {
     if (this.disposed || !this.config.priorAdaptation.enabled || !this.admissionController) return;
 
     try {
+      const now = Date.now();
+      this.pruneAdmittedTimestamps(now);
+      const since = this.getObservationWindowStart(now);
       const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
-      const content = await readFile(filePath, "utf-8").catch(() => "");
-      const rejectedEntries: AdmissionRejectionAuditEntry[] = content
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          try { return JSON.parse(line); } catch { return null; }
-        })
-        .filter((e): e is AdmissionRejectionAuditEntry => e !== null && e.version === "amac-v1" && e.audit?.decision === "reject");
+      const rejectedEntries = await readRecentRejectionAudits(filePath, {
+        maxEntries: this.config.priorAdaptation.maxRejectionAudits,
+        since,
+      }).catch(() => []);
 
       const stats: Record<string, { admitted: number; rejected: number }> = {};
       for (const cat of MEMORY_CATEGORIES) {
         stats[cat] = {
-          admitted: this.admittedCounts[cat] ?? 0,
+          admitted: this.getAdmittedCount(cat, now),
           rejected: 0,
         };
       }
@@ -522,6 +578,40 @@ export class FeedbackLoop {
       this.runtimeContext.admissionConfig = context.admissionConfig;
     }
   }
+
+  private getObservationWindowStart(now: number): number | undefined {
+    const windowMs = this.config.priorAdaptation.observationWindowMs;
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return undefined;
+    return now - windowMs;
+  }
+
+  private pruneAdmittedTimestamps(now: number): void {
+    const since = this.getObservationWindowStart(now);
+    const maxPerCategory = Math.max(
+      this.config.priorAdaptation.minObservations,
+      this.config.priorAdaptation.maxRejectionAudits,
+    );
+
+    for (const category of Object.keys(this.admittedTimestampsByCategory)) {
+      const timestamps = this.admittedTimestampsByCategory[category];
+      const filtered = since === undefined
+        ? timestamps
+        : timestamps.filter((timestamp) => timestamp >= since);
+      if (filtered.length > maxPerCategory) {
+        filtered.splice(0, filtered.length - maxPerCategory);
+      }
+      if (filtered.length === 0) {
+        delete this.admittedTimestampsByCategory[category];
+      } else {
+        this.admittedTimestampsByCategory[category] = filtered;
+      }
+    }
+  }
+
+  private getAdmittedCount(category: string, now: number): number {
+    this.pruneAdmittedTimestamps(now);
+    return this.admittedTimestampsByCategory[category]?.length ?? 0;
+  }
 }
 
 // ============================================================================
@@ -567,6 +657,10 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
         ? (pa.learningRate as number) : DEFAULT_PRIOR_ADAPTATION_CONFIG.learningRate,
       maxAdjustment: typeof pa.maxAdjustment === "number" && pa.maxAdjustment >= 0.01 && pa.maxAdjustment <= 0.3
         ? (pa.maxAdjustment as number) : DEFAULT_PRIOR_ADAPTATION_CONFIG.maxAdjustment,
+      observationWindowMs: typeof pa.observationWindowMs === "number" && pa.observationWindowMs >= 60_000 && pa.observationWindowMs <= 30 * 86_400_000
+        ? Math.floor(pa.observationWindowMs) : DEFAULT_PRIOR_ADAPTATION_CONFIG.observationWindowMs,
+      maxRejectionAudits: typeof pa.maxRejectionAudits === "number" && pa.maxRejectionAudits >= 10 && pa.maxRejectionAudits <= 100_000
+        ? Math.floor(pa.maxRejectionAudits) : DEFAULT_PRIOR_ADAPTATION_CONFIG.maxRejectionAudits,
     },
   };
 }
