@@ -143,7 +143,7 @@ function clip(text: string, maxChars: number): string {
 export function normalizeGovernanceText(text: string): string {
   return text
     .toLowerCase()
-    .replace(/^[\-\d\.\)\s]+/, "")
+    .replace(/^[\d.)\s-]+/, "")
     .replace(/\b(?:user|assistant)\s*:\s*/g, "")
     .replace(/[“”"'`]/g, "")
     .replace(/[。.!?;；:：]+/g, " ")
@@ -169,7 +169,7 @@ function buildFallbackRule(
   const cleaned = clip(
     text
       .replace(/^(?:user|assistant)\s*:\s*/i, "")
-      .replace(/^[\-\d\.\)\s]+/, "")
+      .replace(/^[\d.)\s-]+/, "")
       .trim(),
     220,
   );

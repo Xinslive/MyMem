@@ -15,7 +15,7 @@ export async function fuseResults(
   vectorResults: Array<MemorySearchResult & { rank: number }>,
   bm25Results: Array<MemorySearchResult & { rank: number }>,
   config: { vectorWeight: number; bm25Weight: number },
-  store: { hasIds: (ids: string[]) => Promise<Set<string>> },
+  store: { hasIds?: (ids: string[]) => Promise<Set<string>> },
   logger: Pick<Logger, "debug" | "warn">,
   signal?: AbortSignal,
 ): Promise<RetrievalResult[]> {
@@ -38,7 +38,7 @@ export async function fuseResults(
   const ghostCheckIds = [...allIds].filter((id) => !vectorMap.has(id) && bm25Map.has(id));
   const missingBm25OnlyIds = new Set<string>();
 
-  if (ghostCheckIds.length > 0) {
+  if (ghostCheckIds.length > 0 && typeof store.hasIds === "function") {
     try {
       const existingIds = await resolveUnlessAborted(store.hasIds(ghostCheckIds), signal);
       throwIfAborted(signal);

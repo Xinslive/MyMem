@@ -104,7 +104,7 @@ export function formatEmbeddingProviderError(
     if (opts.baseURL) {
       hint += ` at ${opts.baseURL}`;
     }
-    hint += ` and that model \"${opts.model}\" is available.`;
+    hint += ` and that model "${opts.model}" is available.`;
     return `Embedding provider unreachable (${detailText}). ${hint}`;
   }
 

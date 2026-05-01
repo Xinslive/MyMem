@@ -872,7 +872,7 @@ export class MemoryRetriever {
             queryVector,
             rerankInput,
             this.config,
-            async (ids: string[]) => this.store.hasIds(ids),
+            async (ids: string[]) => this.store.hasIds?.(ids) ?? new Set<string>(),
             this.logger,
             signal,
           );

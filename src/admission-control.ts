@@ -620,7 +620,7 @@ async function scoreUtility(
   }
 
   // Slow path: LLM evaluation
-  let response: { utility?: number; reason?: string } | null = null;
+  let response: { utility?: number; reason?: string } | null;
   try {
     response = await llm.completeJson<{ utility?: number; reason?: string }>(
       buildUtilityPrompt(candidate, conversationText),
