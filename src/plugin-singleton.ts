@@ -150,7 +150,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     ...DEFAULT_TIER_CONFIG,
     ...(config.tier || {}),
   });
-  const hybridNoiseDetector = new HybridNoiseDetector(embedder, undefined, {
+  const sharedNoiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
+  sharedNoiseBank.init(embedder).catch((err) =>
+    api.logger.debug(`mymem: noise bank init: ${String(err)}`),
+  );
+  const hybridNoiseDetector = new HybridNoiseDetector(embedder, sharedNoiseBank, {
     learnFromRegex: true,
     debugLog: (msg: string) => api.logger.debug(msg),
   });
@@ -214,11 +218,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       });
       smartExtractionLlmClient = llmClient;
 
-      const noiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
-      noiseBank.init(embedder).catch((err) =>
-        api.logger.debug(`mymem: noise bank init: ${String(err)}`),
-      );
-
       const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(config, resolvedDbPath, api);
 
       const onAdmissionRejectedOriginal = admissionRejectionAuditWriter ?? undefined;
@@ -247,7 +246,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           : undefined,
         log: (msg: string) => api.logger.info(msg),
         debugLog: (msg: string) => api.logger.debug(msg),
-        noiseBank,
+        noiseBank: sharedNoiseBank,
       });
 
       (isCliMode() ? api.logger.debug : api.logger.info)(
@@ -260,7 +259,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
       if (feedbackLoopConfig.enabled) {
         feedbackLoop = new FeedbackLoop({
-          noiseBank,
+          noiseBank: sharedNoiseBank,
           embedder,
           admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
           config: feedbackLoopConfig,
@@ -274,13 +273,9 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       }
     } catch (err) {
       api.logger.warn(`mymem: smart extraction init failed, falling back to regex: ${String(err)}`);
-      const fallbackNoiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
-      fallbackNoiseBank.init(embedder).catch((initErr) =>
-        api.logger.debug(`mymem: fallback noise bank init: ${String(initErr)}`),
-      );
       if (feedbackLoopConfig.enabled) {
         feedbackLoop = new FeedbackLoop({
-          noiseBank: fallbackNoiseBank,
+          noiseBank: sharedNoiseBank,
           embedder,
           admissionController: null,
           config: feedbackLoopConfig,
@@ -295,7 +290,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     }
   } else if (feedbackLoopConfig.enabled) {
     feedbackLoop = new FeedbackLoop({
-      noiseBank: null,
+      noiseBank: sharedNoiseBank,
       embedder,
       admissionController: null,
       config: feedbackLoopConfig,

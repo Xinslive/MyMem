@@ -119,6 +119,61 @@ function makeExtractor(embedder, llm, store, config = {}) {
 // ============================================================================
 
 describe("SmartExtractor batch embedding paths", () => {
+  it("does not learn unrelated zero-extraction text as noise", async () => {
+    let learned = 0;
+    const embedder = {
+      async embed() {
+        return [1, 0, 0];
+      },
+      async embedBatch(texts) {
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const llm = makeLlm([]);
+    const store = makeStore();
+    const noiseBank = {
+      initialized: true,
+      maxSimilarity() { return 0.2; },
+      isNoise() { return false; },
+      learn() { learned++; },
+    };
+    const extractor = makeExtractor(embedder, llm, store, { noiseBank });
+
+    await extractor.extractAndPersist(
+      "User says the billing migration plan needs a dry run before production.",
+      "s-zero-clean",
+    );
+
+    assert.equal(learned, 0);
+  });
+
+  it("learns zero-extraction text when it matches known noise", async () => {
+    let learned = 0;
+    const embedder = {
+      async embed() {
+        return [1, 0, 0];
+      },
+      async embedBatch(texts) {
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const llm = makeLlm([]);
+    const store = makeStore();
+    const noiseBank = {
+      initialized: true,
+      maxSimilarity() { return 0.8; },
+      isNoise() { return false; },
+      learn() { learned++; },
+    };
+    const extractor = makeExtractor(embedder, llm, store, { noiseBank });
+
+    await extractor.extractAndPersist(
+      "Do you remember what I told you about my preferences?",
+      "s-zero-noise",
+    );
+
+    assert.equal(learned, 1);
+  });
 
   // --------------------------------------------------------------------------
   // Test 1: Step 1b batchDedup uses embedBatch (not N×embed)

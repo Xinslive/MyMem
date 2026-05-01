@@ -54,6 +54,7 @@ export class NoisePrototypeBank {
     private vectors: number[][] = [];
     private builtinCount = 0;
     private _initialized = false;
+    private _initPromise: Promise<void> | null = null;
     private debugLog: (msg: string) => void;
 
     constructor(debugLog?: (msg: string) => void) {
@@ -76,37 +77,49 @@ export class NoisePrototypeBank {
      */
     async init(embedder: Embedder): Promise<void> {
         if (this._initialized) return;
-
-        for (const text of BUILTIN_NOISE_TEXTS) {
-            try {
-                const v = await embedder.embed(text);
-                if (v && v.length > 0) this.vectors.push(v);
-            } catch {
-                // Skip failed embeddings — bank will work with whatever succeeds
-            }
-        }
-        this.builtinCount = this.vectors.length;
-        this._initialized = true;
-
-        // Degeneracy check: if all prototype vectors are nearly identical, the
-        // embedding model does not produce discriminative outputs (e.g. a
-        // deterministic mock that ignores text).  In that case the noise bank
-        // would flag every input as noise, so we disable ourselves.
-        if (this.vectors.length >= 2) {
-            const sim = cosine(this.vectors[0], this.vectors[1]);
-            if (sim > 0.98) {
-                this.debugLog(
-                    `noise-prototype-bank: degenerate embeddings detected (pairwise cosine=${sim.toFixed(4)}), disabling noise filter`,
-                );
-                this._initialized = false;
-                this.vectors = [];
-                return;
-            }
+        if (this._initPromise) {
+            await this._initPromise;
+            return;
         }
 
-        this.debugLog(
-            `noise-prototype-bank: initialized with ${this.builtinCount} built-in prototypes`,
-        );
+        this._initPromise = (async () => {
+            for (const text of BUILTIN_NOISE_TEXTS) {
+                try {
+                    const v = await embedder.embed(text);
+                    if (v && v.length > 0) this.vectors.push(v);
+                } catch {
+                    // Skip failed embeddings — bank will work with whatever succeeds
+                }
+            }
+            this.builtinCount = this.vectors.length;
+            this._initialized = true;
+
+            // Degeneracy check: if all prototype vectors are nearly identical, the
+            // embedding model does not produce discriminative outputs (e.g. a
+            // deterministic mock that ignores text).  In that case the noise bank
+            // would flag every input as noise, so we disable ourselves.
+            if (this.vectors.length >= 2) {
+                const sim = cosine(this.vectors[0], this.vectors[1]);
+                if (sim > 0.98) {
+                    this.debugLog(
+                        `noise-prototype-bank: degenerate embeddings detected (pairwise cosine=${sim.toFixed(4)}), disabling noise filter`,
+                    );
+                    this._initialized = false;
+                    this.vectors = [];
+                    return;
+                }
+            }
+
+            this.debugLog(
+                `noise-prototype-bank: initialized with ${this.builtinCount} built-in prototypes`,
+            );
+        })();
+
+        try {
+            await this._initPromise;
+        } finally {
+            this._initPromise = null;
+        }
     }
 
     /**

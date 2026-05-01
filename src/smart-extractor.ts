@@ -64,6 +64,8 @@ export {
 // ============================================================================
 
 const MAX_MEMORIES_PER_EXTRACTION = 5;
+const ZERO_EXTRACTION_LEARN_MIN_CHARS = 20;
+const ZERO_EXTRACTION_LEARN_MIN_SIMILARITY = 0.72;
 
 // ============================================================================
 // Smart Extractor
@@ -462,11 +464,26 @@ export class SmartExtractor {
     if (!noiseBank || !noiseBank.initialized) return;
 
     try {
-      const tail = conversationText.slice(-300);
+      const tail = conversationText.slice(-300).trim();
+      if (tail.length < ZERO_EXTRACTION_LEARN_MIN_CHARS) {
+        this.debugLog(
+          "mymem: smart-extractor: skipped zero-extraction noise learning (text too short)",
+        );
+        return;
+      }
       const vec = await this.embedder.embed(tail);
       if (vec && vec.length > 0) {
+        const maxSimilarity = noiseBank.maxSimilarity(vec);
+        if (!isNoise(tail) && maxSimilarity < ZERO_EXTRACTION_LEARN_MIN_SIMILARITY) {
+          this.debugLog(
+            `mymem: smart-extractor: skipped zero-extraction noise learning (maxSim=${maxSimilarity.toFixed(3)})`,
+          );
+          return;
+        }
         noiseBank.learn(vec);
-        this.debugLog("mymem: smart-extractor: learned noise from zero-extraction");
+        this.debugLog(
+          `mymem: smart-extractor: learned noise from zero-extraction (maxSim=${maxSimilarity.toFixed(3)})`,
+        );
       }
     } catch (err) {
       this.debugLog?.(`smart-extractor: failed to learn noise prototype: ${err}`);

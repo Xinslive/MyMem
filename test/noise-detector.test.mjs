@@ -11,6 +11,7 @@ import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const {
   HybridNoiseDetector,
+  NoisePrototypeBank,
 } = jiti("../src/noise-detector.ts");
 
 // Get the noise-filter's isNoise function for comparison tests
@@ -197,5 +198,28 @@ describe("HybridNoiseDetector - Instance", () => {
     const detector = new HybridNoiseDetector(null, undefined);
     // Should not throw even without embedder
     await detector.learnNoise("Test noise text");
+  });
+
+  it("NoisePrototypeBank init is shared across concurrent callers", async () => {
+    let embedCalls = 0;
+    const embedder = {
+      async embed(_text) {
+        embedCalls++;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        const vector = Array(32).fill(0);
+        vector[(embedCalls - 1) % vector.length] = 1;
+        return vector;
+      },
+    };
+    const bank = new NoisePrototypeBank();
+
+    await Promise.all([
+      bank.init(embedder),
+      bank.init(embedder),
+      bank.init(embedder),
+    ]);
+
+    assert.equal(bank.initialized, true);
+    assert.equal(embedCalls, bank.size);
   });
 });
