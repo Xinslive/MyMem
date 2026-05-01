@@ -277,7 +277,7 @@ export class MemoryRetriever {
   }
 
   /**
-   * Retrieve with full trace, used by the memory_debug tool.
+   * Retrieve with full trace, used by the mymem_debug tool.
    * Always collects a trace regardless of stats collector state.
    */
   async retrieveWithTrace(

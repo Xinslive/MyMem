@@ -1,6 +1,6 @@
 /**
  * Agent Tool Definitions — Memory Store
- * Registration function for memory_store tool.
+ * Registration function for mymem_store tool.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -35,7 +35,7 @@ export function registerMemoryStoreTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-      name: "memory_store",
+      name: "mymem_store",
       label: "Memory Store",
       description:
         "Save important information in long-term memory. Use for preferences, facts, decisions, and other notable information.",
@@ -88,7 +88,7 @@ export function registerMemoryStoreTool(
                 content: [
                   {
                     type: "text",
-                    text: "Reserved bypass agent IDs must provide an explicit scope for memory_store writes.",
+                    text: "Reserved bypass agent IDs must provide an explicit scope for mymem_store writes.",
                   },
                 ],
                 details: {
@@ -213,7 +213,7 @@ export function registerMemoryStoreTool(
               oldMeta.fact_key ?? deriveFactKey(oldMeta.memory_category, text);
 
             // Store new memory with supersedes link, preserving canonical fields
-            // from the old entry (aligns with memory_update supersede path).
+            // from the old entry (aligns with mymem_update supersede path).
             const newMeta = buildSmartMetadata(
               { text, category: category as any, importance: safeImportance },
               {
@@ -276,7 +276,7 @@ export function registerMemoryStoreTool(
               try {
                 await context.mdMirror(
                   { text, category: category as string, scope: targetScope, timestamp: newEntry.timestamp },
-                  { source: "memory_store", agentId },
+                  { source: "mymem_store", agentId },
                 );
               } catch (mirrorErr) {
                 (runtimeContext.logger ?? fallbackToolLogger).warn(
@@ -340,7 +340,7 @@ export function registerMemoryStoreTool(
             try {
               await context.mdMirror(
                 { text, category: category as string, scope: targetScope, timestamp: entry.timestamp },
-                { source: "memory_store", agentId },
+                { source: "mymem_store", agentId },
               );
             } catch (mirrorErr) {
               (runtimeContext.logger ?? fallbackToolLogger).warn(
@@ -378,6 +378,6 @@ export function registerMemoryStoreTool(
       },
     };
     },
-    { name: "memory_store" },
+    { name: "mymem_store" },
   );
 }

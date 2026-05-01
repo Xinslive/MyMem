@@ -1,6 +1,6 @@
 /**
  * Agent Tool Definitions — Memory Recall
- * Registration function for memory_recall tool.
+ * Registration function for mymem_recall tool.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -30,7 +30,7 @@ export function registerMemoryRecallTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-      name: "memory_recall",
+      name: "mymem_recall",
       label: "Memory Recall",
       description:
         "Search through long-term memories using hybrid retrieval (vector + keyword search). Use when you need context about user preferences, past decisions, or previously discussed topics. Pass type=\"knowledge\" for static/reference facts (profile, preferences, entities, patterns) or type=\"experience\" for past interactions and outcomes (events, cases).",
@@ -204,6 +204,6 @@ export function registerMemoryRecallTool(
       },
     };
     },
-    { name: "memory_recall" },
+    { name: "mymem_recall" },
   );
 }

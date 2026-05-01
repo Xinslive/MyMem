@@ -41,7 +41,7 @@ const TOOL_CALL_INDICATORS = [
   /\btool_use\b/i,
   /\btool_result\b/i,
   /\bfunction_call\b/i,
-  /\b(memory_store|memory_recall|memory_forget|memory_update)\b/i,
+  /\b(mymem_store|mymem_recall|mymem_forget|mymem_update)\b/i,
   // Removed over-broad patterns: fenced code blocks and "$ " matched normal pasted code
 ];
 

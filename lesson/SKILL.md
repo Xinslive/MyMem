@@ -19,7 +19,7 @@ When triggered, extract and store lessons from the **recent conversation context
    ```
    Decision principle ([tag]): [behavioral rule]. Trigger: [when]. Action: [what to do].
    ```
-4. **Verify** — `memory_recall` with anchor keywords to confirm both entries retrievable
+4. **Verify** — `mymem_recall` with anchor keywords to confirm both entries retrievable
 5. **Report** — tell Master what was stored (brief summary)
 
 ## Rules

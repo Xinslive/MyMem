@@ -1,6 +1,6 @@
 /**
  * Agent Tool Definitions — Memory Forget
- * Registration function for memory_forget tool.
+ * Registration function for mymem_forget tool.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -22,7 +22,7 @@ export function registerMemoryForgetTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_forget",
+        name: "mymem_forget",
       label: "Memory Forget",
       description:
         "Delete specific memories. Supports both search-based and direct ID-based deletion.",
@@ -166,6 +166,6 @@ export function registerMemoryForgetTool(
       },
     };
     },
-    { name: "memory_forget" },
+    { name: "mymem_forget" },
   );
 }

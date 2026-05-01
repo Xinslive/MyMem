@@ -107,7 +107,7 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
     (toolCtx) => {
       const staticAgentId = resolveRuntimeAgentId(context.agentId, toolCtx);
       return {
-        name: "memory_doctor",
+        name: "mymem_doctor",
         label: "Memory Doctor",
         description:
           "Run read-only diagnostics for storage, embedding, retrieval, scopes, and optional rerank configuration.",
@@ -207,7 +207,7 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
           if (!statsCollector) {
             addCheck("retrieval_quality", "warn", "retrieval telemetry collector is not enabled");
           } else if (!retrievalStats) {
-            addCheck("retrieval_quality", "warn", "no retrieval telemetry recorded yet; run memory_recall or auto-recall first");
+            addCheck("retrieval_quality", "warn", "no retrieval telemetry recorded yet; run mymem_recall or auto-recall first");
           } else {
             const zeroRate = retrievalStats.totalQueries > 0
               ? retrievalStats.zeroResultQueries / retrievalStats.totalQueries
@@ -285,7 +285,7 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
               suggestions.push("Verify embedding apiKey/baseURL/model and vector dimensions.");
             }
             if (check.name === "retrieval_probe" && check.status === "fail") {
-              suggestions.push("Run memory_debug with the same query to inspect stage drops and score thresholds.");
+              suggestions.push("Run mymem_debug with the same query to inspect stage drops and score thresholds.");
             }
             if (check.name === "retrieval_quality" && check.status === "warn") {
               suggestions.push("If zero-result queries are high, lower minScore/hardMinScore or inspect scope filters and memory categories.");
@@ -305,6 +305,6 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
         },
       };
     },
-    { name: "memory_doctor" },
+    { name: "mymem_doctor" },
   );
 }

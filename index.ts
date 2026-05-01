@@ -215,10 +215,10 @@ const myMemPlugin = {
     // Dual-memory model warning: help users understand the two-layer architecture
     // Runs synchronously and logs warnings; does NOT block gateway startup.
     logReg(
-      `[mymem] memory_recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
+      `[mymem] mymem_recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
       `  - Plugin memory (LanceDB) = primary recall source for semantic search\n` +
       `  - MEMORY.md / memory/YYYY-MM-DD.md = startup context / journal only\n` +
-      `  - Use memory_store or auto-capture for recallable memories.\n`
+      `  - Use mymem_store or auto-capture for recallable memories.\n`
     );
 
     // Health status for memory runtime stub (reflects actual plugin health)
@@ -530,7 +530,7 @@ const myMemPlugin = {
               embedError = embedTest.error;
             } catch (timeoutErr) {
               // Embedding provider may be slow on cold start — not a permanent failure.
-              // The plugin works fine once the provider warms up (confirmed by memory_doctor).
+              // The plugin works fine once the provider warms up (confirmed by mymem_doctor).
               embedError = String(timeoutErr);
               api.logger.debug?.(
                 `mymem: embedding probe skipped (provider not ready): ${embedError}`,

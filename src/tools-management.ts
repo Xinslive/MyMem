@@ -1,7 +1,7 @@
 /**
  * Agent Tool Definitions — Management Tools
- * Registration functions for memory_stats, memory_debug, memory_list,
- * memory_promote, memory_archive, memory_compact, and memory_explain_rank.
+ * Registration functions for mymem_stats, mymem_debug, mymem_list,
+ * mymem_promote, mymem_archive, mymem_compact, and mymem_explain_rank.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -32,7 +32,7 @@ export function registerMemoryStatsTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_stats",
+        name: "mymem_stats",
       label: "Memory Statistics",
       description: "Get statistics about memory usage, scopes, and categories.",
       parameters: Type.Object({
@@ -198,7 +198,7 @@ export function registerMemoryStatsTool(
       },
     };
     },
-    { name: "memory_stats" },
+    { name: "mymem_stats" },
   );
 }
 
@@ -210,7 +210,7 @@ export function registerMemoryDebugTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_debug",
+        name: "mymem_debug",
         label: "Memory Debug",
         description:
           "Debug memory retrieval: search with full pipeline trace showing per-stage drop info, score ranges, and timing.",
@@ -312,7 +312,7 @@ export function registerMemoryDebugTool(
         },
       };
     },
-    { name: "memory_debug" },
+    { name: "mymem_debug" },
   );
 }
 
@@ -324,7 +324,7 @@ export function registerMemoryListTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_list",
+        name: "mymem_list",
       label: "Memory List",
       description:
         "List recent memories with optional filtering by scope and category.",
@@ -452,7 +452,7 @@ export function registerMemoryListTool(
       },
     };
     },
-    { name: "memory_list" },
+    { name: "mymem_list" },
   );
 }
 
@@ -464,7 +464,7 @@ export function registerMemoryPromoteTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_promote",
+        name: "mymem_promote",
         label: "Memory Promote",
         description:
           "Promote a memory into confirmed/durable governance state so it can participate in conservative auto-recall.",
@@ -577,7 +577,7 @@ export function registerMemoryPromoteTool(
         },
       };
     },
-    { name: "memory_promote" },
+    { name: "mymem_promote" },
   );
 }
 
@@ -589,7 +589,7 @@ export function registerMemoryArchiveTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_archive",
+        name: "mymem_archive",
         label: "Memory Archive",
         description:
           "Archive a memory to remove it from default auto-recall while preserving history.",
@@ -658,7 +658,7 @@ export function registerMemoryArchiveTool(
         },
       };
     },
-    { name: "memory_archive" },
+    { name: "mymem_archive" },
   );
 }
 
@@ -670,7 +670,7 @@ export function registerMemoryCompactTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_compact",
+        name: "mymem_compact",
         label: "Memory Compact",
         description:
           "Compact duplicate low-value memories by archiving redundant entries and linking them to a canonical memory.",
@@ -756,7 +756,7 @@ export function registerMemoryCompactTool(
         },
       };
     },
-    { name: "memory_compact" },
+    { name: "mymem_compact" },
   );
 }
 
@@ -768,7 +768,7 @@ export function registerMemoryExplainRankTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_explain_rank",
+        name: "mymem_explain_rank",
         label: "Memory Explain Rank",
         description:
           "Run recall and explain why each memory was ranked, including governance metadata (state/layer/source/suppression).",
@@ -836,6 +836,6 @@ export function registerMemoryExplainRankTool(
         },
       };
     },
-    { name: "memory_explain_rank" },
+    { name: "mymem_explain_rank" },
   );
 }

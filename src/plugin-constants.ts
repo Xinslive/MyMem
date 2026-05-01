@@ -27,7 +27,7 @@ export const MEMORY_TRIGGERS = [
 
 export const CAPTURE_EXCLUDE_PATTERNS = [
   // Memory management / meta-ops: do not store as long-term memory
-  /\b(mymem|memory_store|memory_recall|memory_forget|memory_update)\b/i,
+  /\b(mymem|mymem_store|mymem_recall|mymem_forget|mymem_update)\b/i,
   /\bopenclaw\s+mymem\b/i,
   /\b(delete|remove|forget|purge|cleanup|clean up|clear)\b.*\b(memory|memories|entry|entries)\b/i,
   /\b(memory|memories)\b.*\b(delete|remove|forget|purge|cleanup|clean up|clear)\b/i,

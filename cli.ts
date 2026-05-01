@@ -1344,7 +1344,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         if (!context.embedder) {
           console.error("Import requires an embedder (not available in basic CLI mode).");
-          console.error("Use the plugin's memory_store tool or pass embedder to createMemoryCLI.");
+          console.error("Use the plugin's mymem_store tool or pass embedder to createMemoryCLI.");
           return;
         }
 

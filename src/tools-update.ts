@@ -1,6 +1,6 @@
 /**
  * Agent Tool Definitions — Memory Update
- * Registration function for memory_update tool.
+ * Registration function for mymem_update tool.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -36,7 +36,7 @@ export function registerMemoryUpdateTool(
     (toolCtx) => {
       const runtimeContext = resolveToolContext(context, toolCtx);
       return {
-        name: "memory_update",
+        name: "mymem_update",
       label: "Memory Update",
       description:
         "Update an existing memory. For preferences/entities, changing text creates a new version (supersede) to preserve history. Metadata-only changes (importance, category) update in-place.",
@@ -317,6 +317,6 @@ export function registerMemoryUpdateTool(
       },
     };
     },
-    { name: "memory_update" },
+    { name: "mymem_update" },
   );
 }

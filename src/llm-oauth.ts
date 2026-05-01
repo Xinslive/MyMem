@@ -155,26 +155,26 @@ export function isOauthModelSupported(providerId: string | undefined, value: str
 let _warnedDefaultClientId = false;
 
 function resolveOauthClientId(providerId?: string): string {
-  const envId = process.env.MEMORY_PRO_OAUTH_CLIENT_ID?.trim();
+  const envId = process.env.MYMEM_OAUTH_CLIENT_ID?.trim();
   if (envId) return envId;
   const provider = getOAuthProvider(providerId);
   if (!_warnedDefaultClientId) {
     _warnedDefaultClientId = true;
-    console.warn(`mymem: using default OAuth client ID for ${provider.label}. Set MEMORY_PRO_OAUTH_CLIENT_ID env var to override.`);
+    console.warn(`mymem: using default OAuth client ID for ${provider.label}. Set MYMEM_OAUTH_CLIENT_ID env var to override.`);
   }
   return provider.clientId;
 }
 
 function resolveOauthAuthorizeUrl(providerId?: string): string {
-  return process.env.MEMORY_PRO_OAUTH_AUTHORIZE_URL?.trim() || getOAuthProvider(providerId).authorizeUrl;
+  return process.env.MYMEM_OAUTH_AUTHORIZE_URL?.trim() || getOAuthProvider(providerId).authorizeUrl;
 }
 
 function resolveOauthTokenUrl(providerId?: string): string {
-  return process.env.MEMORY_PRO_OAUTH_TOKEN_URL?.trim() || getOAuthProvider(providerId).tokenUrl;
+  return process.env.MYMEM_OAUTH_TOKEN_URL?.trim() || getOAuthProvider(providerId).tokenUrl;
 }
 
 function resolveOauthRedirectUri(providerId?: string): string {
-  return process.env.MEMORY_PRO_OAUTH_REDIRECT_URI?.trim() || getOAuthProvider(providerId).redirectUri;
+  return process.env.MYMEM_OAUTH_REDIRECT_URI?.trim() || getOAuthProvider(providerId).redirectUri;
 }
 
 function buildAuthorizationUrl(state: string, verifier: string, providerId?: string): string {

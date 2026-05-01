@@ -87,7 +87,7 @@ MyMem-main/
 │                        OpenClaw Host                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
 │  │  Agent End    │  │ Agent Start  │  │  Tool Calls            │ │
-│  │  Hook         │  │ Hook         │  │  (memory_recall/store) │ │
+│  │  Hook         │  │ Hook         │  │  (mymem_recall/store) │ │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬─────────────┘ │
 │         │                 │                      │               │
 │  ┌──────▼─────────────────▼──────────────────────▼─────────────┐ │
@@ -921,23 +921,23 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 
 | 工具 | 文件 | 功能 |
 |------|------|------|
-| `memory_recall` | `tools-recall.ts` | 混合检索记忆 |
-| `memory_store` | `tools-store.ts` | 存储新记忆 |
-| `memory_forget` | `tools-forget.ts` | 删除/归档记忆 |
-| `memory_update` | `tools-update.ts` | 更新已有记忆 |
+| `mymem_recall` | `tools-recall.ts` | 混合检索记忆 |
+| `mymem_store` | `tools-store.ts` | 存储新记忆 |
+| `mymem_forget` | `tools-forget.ts` | 删除/归档记忆 |
+| `mymem_update` | `tools-update.ts` | 更新已有记忆 |
 
 ### 16.2 管理工具
 
 | 工具 | 文件 | 功能 |
 |------|------|------|
-| `memory_stats` | `tools-management.ts` | 记忆库统计 |
-| `memory_doctor` | `memory-doctor-tool.ts` | 诊断记忆健康状态（索引、配置、存储） |
-| `memory_debug` | `tools-management.ts` | 调试信息 |
-| `memory_list` | `tools-management.ts` | 列出记忆 |
-| `memory_promote` | `tools-management.ts` | 手动升级记忆 |
-| `memory_archive` | `tools-management.ts` | 手动归档记忆 |
-| `memory_compact` | `tools-management.ts` | 触发手动压缩 |
-| `memory_explain_rank` | `tools-management.ts` | 解释检索排名 |
+| `mymem_stats` | `tools-management.ts` | 记忆库统计 |
+| `mymem_doctor` | `memory-doctor-tool.ts` | 诊断记忆健康状态（索引、配置、存储） |
+| `mymem_debug` | `tools-management.ts` | 调试信息 |
+| `mymem_list` | `tools-management.ts` | 列出记忆 |
+| `mymem_promote` | `tools-management.ts` | 手动升级记忆 |
+| `mymem_archive` | `tools-management.ts` | 手动归档记忆 |
+| `mymem_compact` | `tools-management.ts` | 触发手动压缩 |
+| `mymem_explain_rank` | `tools-management.ts` | 解释检索排名 |
 
 ### 16.3 自我改进工具
 

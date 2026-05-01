@@ -126,7 +126,7 @@
       "enableManagementTools": {
         "type": "boolean",
         "default": true,
-        "description": "Enable management/debug tools such as memory_list, memory_stats, memory_doctor, and governance-oriented self-improvement review/extract actions"
+        "description": "Enable management/debug tools such as mymem_list, mymem_stats, mymem_doctor, and governance-oriented self-improvement review/extract actions"
       },
       "sessionStrategy": {
         "type": "string",
@@ -200,7 +200,7 @@
         "minimum": 4,
         "maximum": 30,
         "default": 12,
-        "description": "Candidate pool cap used only for auto-recall. Lower values reduce startup latency while manual memory_recall can keep a larger retrieval.candidatePoolSize."
+        "description": "Candidate pool cap used only for auto-recall. Lower values reduce startup latency while manual mymem_recall can keep a larger retrieval.candidatePoolSize."
       },
       "maxRecallPerTurn": {
         "type": "integer",
@@ -1744,7 +1744,7 @@
     },
     "enableManagementTools": {
       "label": "Management Tools",
-      "help": "Enable management/debug tools such as memory_list, memory_stats, memory_doctor, and governance-oriented self-improvement review/extract actions.",
+      "help": "Enable management/debug tools such as mymem_list, mymem_stats, mymem_doctor, and governance-oriented self-improvement review/extract actions.",
       "advanced": true
     },
     "mdMirror.enabled": {
@@ -1777,7 +1777,7 @@
     },
     "workspaceBoundary.userMdExclusive.filterRecall": {
       "label": "Filter USER.md Facts From Recall",
-      "help": "Hide USER.md-exclusive facts from plugin auto-recall and memory_recall output.",
+      "help": "Hide USER.md-exclusive facts from plugin auto-recall and mymem_recall output.",
       "advanced": true
     },
     "llm.auth": {
@@ -1803,7 +1803,7 @@
     },
     "memoryCompaction.enabled": {
       "label": "Auto Compaction",
-      "help": "Automatically consolidate similar old memories at gateway startup. Also available on-demand via the memory_compact tool (requires enableManagementTools)."
+      "help": "Automatically consolidate similar old memories at gateway startup. Also available on-demand via the mymem_compact tool (requires enableManagementTools)."
     },
     "memoryCompaction.minAgeDays": {
       "label": "Min Age (days)",
