@@ -26,7 +26,6 @@ import {
   isVectorIndexType,
   isScalarIndexType,
   recommendedVectorPartitions,
-  scoreLexicalHit,
   tokenizeForSearch,
   scoreLexicalHitPreTokenized,
   normalizeSearchText,
@@ -101,6 +100,7 @@ type StatsResult = {
 const TABLE_NAME = "memories";
 const serializedStoreContext = new AsyncLocalStorage<Set<object>>();
 const batchStoreContext = new AsyncLocalStorage<Map<object, MemoryEntry[]>>();
+const METADATA_BATCH_CHUNK_SIZE = 200;
 
 type BatchRunOptions = {
   onBeforeFlush?: () => void;
@@ -458,6 +458,39 @@ export class MemoryStore {
     }
     const rows = await query.toArray();
     return rows.map((row) => mapRowToMemoryEntry(row, false));
+  }
+
+  private async fetchFullRowsByIds(ids: string[]): Promise<MemoryEntry[]> {
+    const uniqueIds = [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+
+    const entries: MemoryEntry[] = [];
+    for (let i = 0; i < uniqueIds.length; i += METADATA_BATCH_CHUNK_SIZE) {
+      const chunk = uniqueIds.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
+      const idList = chunk.map((id) => `'${escapeSqlLiteral(id)}'`).join(",");
+      const rows = await this.table!
+        .query()
+        .select(FULL_ENTRY_COLUMNS as unknown as string[])
+        .where(`id IN (${idList})`)
+        .limit(chunk.length)
+        .toArray();
+      for (const row of rows) {
+        entries.push(mapRowToMemoryEntry(row));
+      }
+    }
+    return entries;
+  }
+
+  private async mergeInsertEntriesInChunks(entries: MemoryEntry[]): Promise<void> {
+    for (let i = 0; i < entries.length; i += METADATA_BATCH_CHUNK_SIZE) {
+      const chunk = entries.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
+      if (chunk.length === 0) continue;
+      await this.table!
+        .mergeInsert(["id"])
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(toLanceRows(chunk));
+    }
   }
 
   private async runWithFileLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -1316,30 +1349,24 @@ export class MemoryStore {
     await this.ensureInitialized();
     if (patches.length === 0) return 0;
 
+    const metadataById = new Map<string, string>();
+    for (const patch of patches) {
+      if (typeof patch.id !== "string" || patch.id.length === 0) continue;
+      metadataById.set(patch.id, patch.metadata);
+    }
+    if (metadataById.size === 0) return 0;
+
     // Read-modify-write all inside the lock to prevent TOCTOU races
     const updatedCount = await this.runWithFileLock(async () => {
-      const updatedRows: MemoryEntry[] = [];
-      for (const patch of patches) {
-        const safeId = escapeSqlLiteral(patch.id);
-        const rows = await this.table!
-          .query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(`id = '${safeId}'`)
-          .limit(1)
-          .toArray();
-
-        if (rows.length === 0) continue;
-        const original = mapRowToMemoryEntry(rows[0]);
-        updatedRows.push({ ...original, metadata: patch.metadata });
-      }
+      const existingRows = await this.fetchFullRowsByIds([...metadataById.keys()]);
+      const updatedRows = existingRows.map((original) => ({
+        ...original,
+        metadata: metadataById.get(original.id) ?? original.metadata,
+      }));
 
       if (updatedRows.length === 0) return 0;
 
-      await this.table!
-        .mergeInsert(["id"])
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute(toLanceRows(updatedRows));
+      await this.mergeInsertEntriesInChunks(updatedRows);
 
       return updatedRows.length;
     });
@@ -1413,15 +1440,18 @@ export class MemoryStore {
 
     if (isExplicitDenyAllScopeFilter(scopeFilter)) return 0;
 
+    const patchById = new Map<string, MetadataPatch>();
+    for (const { id, patch } of patches) {
+      if (typeof id !== "string" || id.length === 0) continue;
+      patchById.set(id, { ...(patchById.get(id) ?? {}), ...patch });
+    }
+    if (patchById.size === 0) return 0;
+
     const updatedCount = await this.runWithFileLock(async () => {
+      const existingRows = await this.fetchFullRowsByIds([...patchById.keys()]);
       const updatedRows: MemoryEntry[] = [];
 
-      for (const { id, patch } of patches) {
-        const rows = await this.findRowsByIdOrPrefix(id, FULL_ENTRY_COLUMNS);
-        if (rows.length === 0) continue;
-
-        const existing = mapRowToMemoryEntry(rows[0]);
-
+      for (const existing of existingRows) {
         if (
           scopeFilter &&
           scopeFilter.length > 0 &&
@@ -1430,6 +1460,8 @@ export class MemoryStore {
           continue;
         }
 
+        const patch = patchById.get(existing.id);
+        if (!patch) continue;
         const metadata = buildSmartMetadata(existing, patch);
         updatedRows.push({
           ...existing,
@@ -1440,11 +1472,7 @@ export class MemoryStore {
       if (updatedRows.length === 0) return 0;
 
       try {
-        await this.table!
-          .mergeInsert(["id"])
-          .whenMatchedUpdateAll()
-          .whenNotMatchedInsertAll()
-          .execute(toLanceRows(updatedRows));
+        await this.mergeInsertEntriesInChunks(updatedRows);
       } catch (mergeError) {
         throw new Error(
           `Failed to batch-patch metadata: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,

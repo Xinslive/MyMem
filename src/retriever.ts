@@ -153,7 +153,7 @@ export class MemoryRetriever {
   }
 
   async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
-    const { query, limit, scopeFilter, category, source, signal, candidatePoolSize, overFetchMultiplier } = context;
+    const { query, limit, scopeFilter, category, source, signal, candidatePoolSize, overFetchMultiplier, degradeAfterMs, deadlineAt } = context;
     const safeLimit = clampInt(limit, 1, 20);
     this.lastDiagnostics = null;
     const diagnostics: RetrievalDiagnostics = {
@@ -227,6 +227,8 @@ export class MemoryRetriever {
           signal,
           candidatePoolSize,
           overFetchMultiplier,
+          degradeAfterMs,
+          deadlineAt,
         );
       }
 
@@ -588,8 +590,16 @@ export class MemoryRetriever {
     signal?: AbortSignal,
     candidatePoolSizeOverride?: number,
     overFetchMultiplier?: number,
+    degradeAfterMs?: number,
+    deadlineAt?: number,
   ): Promise<RetrievalResult[]> {
     let failureStage: RetrievalDiagnostics["failureStage"] = "hybrid.embedQuery";
+    const retrievalStartedAt = Date.now();
+    const softDegradeAfterMs = source === "auto-recall" && typeof degradeAfterMs === "number" && degradeAfterMs > 0
+      ? degradeAfterMs
+      : undefined;
+    const softDegradeAt = softDegradeAfterMs ? retrievalStartedAt + softDegradeAfterMs : undefined;
+    void deadlineAt; // reserved for future deadline-aware diagnostics; hard timeout still comes from AbortSignal
     const markStage = (stage: NonNullable<RetrievalDiagnostics["failureStage"]>) => {
       failureStage = stage;
       if (diagnostics) {
@@ -597,6 +607,17 @@ export class MemoryRetriever {
         diagnostics.currentStageStartedAt = Date.now();
       }
     };
+    const markDegraded = (reason: NonNullable<RetrievalDiagnostics["degradedReason"]>) => {
+      if (!diagnostics) return;
+      diagnostics.degraded = true;
+      if (!diagnostics.degradedReason || diagnostics.degradedReason === "degrade_after_ms") {
+        diagnostics.degradedReason = reason;
+      }
+    };
+    const hasSoftDegraded = () => softDegradeAt !== undefined && Date.now() >= softDegradeAt;
+    const softDegradeDelay = <T>(value: T, remainingMs: number): Promise<T> =>
+      new Promise((resolve) => setTimeout(() => resolve(value), Math.max(0, remainingMs)));
+
     try {
       const candidatePoolSize = candidatePoolSizeOverride
         ? clampInt(candidatePoolSizeOverride, limit, 100)
@@ -613,6 +634,13 @@ export class MemoryRetriever {
       trace?.startStage("parallel_search", []);
       markStage("hybrid.parallelSearch");
       const t1 = Date.now();
+      type BackendResult = Array<MemorySearchResult & { rank: number }>;
+      type TrackedBackendResult = {
+        settled: PromiseSettledResult<BackendResult> | null;
+      };
+      const vectorTracker: TrackedBackendResult = { settled: null };
+      const bm25Tracker: TrackedBackendResult = { settled: null };
+
       const bm25SearchPromise = (async () => {
         const startedAt = Date.now();
         try {
@@ -626,7 +654,16 @@ export class MemoryRetriever {
         } finally {
           if (diagnostics?.latencyMs) diagnostics.latencyMs.bm25Search = Date.now() - startedAt;
         }
-      })();
+      })().then(
+        (value) => {
+          bm25Tracker.settled = { status: "fulfilled", value };
+          return value;
+        },
+        (reason) => {
+          bm25Tracker.settled = { status: "rejected", reason };
+          throw reason;
+        },
+      );
 
       let queryVector: number[] | undefined;
 
@@ -646,25 +683,84 @@ export class MemoryRetriever {
         } finally {
           if (diagnostics?.latencyMs) diagnostics.latencyMs.vectorSearch = Date.now() - startedAt;
         }
-      })();
-
-      const settledResults = await resolveUnlessAborted(
-        Promise.allSettled([
-          vectorSearchPromise,
-          bm25SearchPromise,
-        ]),
-        cancelSearchOnAbort ? signal : undefined,
+      })().then(
+        (value) => {
+          vectorTracker.settled = { status: "fulfilled", value };
+          return value;
+        },
+        (reason) => {
+          vectorTracker.settled = { status: "rejected", reason };
+          throw reason;
+        },
       );
+
+      const allSearchSettledPromise = Promise.allSettled([
+        vectorSearchPromise,
+        bm25SearchPromise,
+      ]);
+      const hasUsableSettledResult = () =>
+        (vectorTracker.settled?.status === "fulfilled" && vectorTracker.settled.value.length > 0) ||
+        (bm25Tracker.settled?.status === "fulfilled" && bm25Tracker.settled.value.length > 0);
+
+      if (softDegradeAt) {
+        const remainingMs = softDegradeAt - Date.now();
+        const searchPhase = remainingMs <= 0
+          ? "degrade"
+          : await resolveUnlessAborted(
+              Promise.race([
+                allSearchSettledPromise.then(() => "all" as const),
+                softDegradeDelay("degrade" as const, remainingMs),
+              ]),
+              cancelSearchOnAbort ? signal : undefined,
+            );
+
+        if (searchPhase === "all") {
+          await allSearchSettledPromise;
+        } else {
+          markDegraded("degrade_after_ms");
+          if (!hasUsableSettledResult()) {
+            await resolveUnlessAborted(
+              new Promise<"usable" | "all">((resolve) => {
+                const maybeResolve = () => {
+                  if (hasUsableSettledResult()) {
+                    resolve("usable");
+                    return;
+                  }
+                  if (vectorTracker.settled && bm25Tracker.settled) {
+                    resolve("all");
+                  }
+                };
+                vectorSearchPromise.then(maybeResolve, maybeResolve);
+                bm25SearchPromise.then(maybeResolve, maybeResolve);
+                maybeResolve();
+              }),
+              cancelSearchOnAbort ? signal : undefined,
+            );
+          }
+          if ((!vectorTracker.settled || !bm25Tracker.settled) && hasUsableSettledResult()) {
+            markDegraded("partial_backend_result");
+          } else {
+            await allSearchSettledPromise;
+          }
+        }
+      } else {
+        await resolveUnlessAborted(
+          allSearchSettledPromise,
+          cancelSearchOnAbort ? signal : undefined,
+        );
+      }
       throwIfAborted(cancelSearchOnAbort ? signal : undefined);
       if (diagnostics?.latencyMs) diagnostics.latencyMs.parallelSearch = Date.now() - t1;
 
-      const vectorResult_ = settledResults[0];
-      const bm25Result_ = settledResults[1];
+      const vectorResult_ = vectorTracker.settled;
+      const bm25Result_ = bm25Tracker.settled;
 
       let vectorResults: Array<MemorySearchResult & { rank: number }>;
       let bm25Results: Array<MemorySearchResult & { rank: number }>;
 
-      if (vectorResult_.status === "rejected") {
+      if (!vectorResult_) {
+        vectorResults = [];
+      } else if (vectorResult_.status === "rejected") {
         const error = attachFailureStage(vectorResult_.reason, "hybrid.vectorSearch");
         this.logger.warn(`[Retriever] vector search failed: ${error.message}`);
         vectorResults = [];
@@ -672,7 +768,9 @@ export class MemoryRetriever {
         vectorResults = vectorResult_.value;
       }
 
-      if (bm25Result_.status === "rejected") {
+      if (!bm25Result_) {
+        bm25Results = [];
+      } else if (bm25Result_.status === "rejected") {
         const error = attachFailureStage(bm25Result_.reason, "hybrid.bm25Search");
         this.logger.warn(`[Retriever] bm25 search failed: ${error.message}`);
         bm25Results = [];
@@ -683,13 +781,15 @@ export class MemoryRetriever {
       // Check if BOTH backends failed (rejected), not just empty results
       // Empty result sets are valid; only throw when both promises reject
       const bothFailed =
-        vectorResult_.status === "rejected" && bm25Result_.status === "rejected";
+        vectorResult_?.status === "rejected" && bm25Result_?.status === "rejected";
       const degraded =
-        vectorResult_.status === "rejected" || bm25Result_.status === "rejected";
+        diagnostics?.degraded === true ||
+        vectorResult_?.status === "rejected" ||
+        bm25Result_?.status === "rejected";
 
       if (bothFailed) {
-        const vectorError = vectorResult_.reason?.message || "unknown";
-        const bm25Error = bm25Result_.reason?.message || "unknown";
+        const vectorError = vectorResult_?.reason?.message || "unknown";
+        const bm25Error = bm25Result_?.reason?.message || "unknown";
         throw attachFailureStage(
           new Error(`both vector and BM25 search failed: ${vectorError}, ${bm25Error}`),
           "hybrid.parallelSearch",
@@ -753,25 +853,55 @@ export class MemoryRetriever {
       let reranked: RetrievalResult[];
       markStage("hybrid.rerank");
       if (this.config.rerank !== "none") {
-        if (!queryVector) {
+        if (hasSoftDegraded() || diagnostics?.degraded === true) {
+          markDegraded("skip_rerank_after_degrade");
+          trace?.startStage("rerank", filtered.map((r) => r.entry.id));
+          reranked = filtered;
+          if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = 0;
+          trace?.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
+        } else if (!queryVector) {
           throw attachFailureStage(
             new Error("query embedding unavailable for rerank"),
             "hybrid.embedQuery",
           );
+        } else {
+          trace?.startStage("rerank", filtered.map((r) => r.entry.id));
+          const t3 = Date.now();
+          const rerankPromise = rerankResults(
+            query,
+            queryVector,
+            rerankInput,
+            this.config,
+            async (ids: string[]) => this.store.hasIds(ids),
+            this.logger,
+            signal,
+          );
+          if (softDegradeAt) {
+            const remainingMs = softDegradeAt - Date.now();
+            if (remainingMs <= 0) {
+              markDegraded("skip_rerank_after_degrade");
+              reranked = filtered;
+            } else {
+              const rerankOutcome = await resolveUnlessAborted(
+                Promise.race([
+                  rerankPromise.then((value) => ({ kind: "reranked" as const, value })),
+                  softDegradeDelay({ kind: "degrade" as const }, remainingMs),
+                ]),
+                signal,
+              );
+              if (rerankOutcome.kind === "degrade") {
+                markDegraded("skip_rerank_after_degrade");
+                reranked = filtered;
+              } else {
+                reranked = rerankOutcome.value;
+              }
+            }
+          } else {
+            reranked = await rerankPromise;
+          }
+          if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = Date.now() - t3;
+          trace?.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
         }
-        trace?.startStage("rerank", filtered.map((r) => r.entry.id));
-        const t3 = Date.now();
-        reranked = await rerankResults(
-          query,
-          queryVector,
-          rerankInput,
-          this.config,
-          async (ids: string[]) => this.store.hasIds(ids),
-          this.logger,
-          signal,
-        );
-        if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = Date.now() - t3;
-        trace?.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
       } else {
         reranked = filtered;
       }
@@ -791,6 +921,10 @@ export class MemoryRetriever {
     } catch (error) {
       if (diagnostics) {
         diagnostics.failureStage = extractFailureStage(error) ?? failureStage;
+        if (signal?.aborted) {
+          diagnostics.degraded = true;
+          diagnostics.degradedReason = "hard_timeout";
+        }
       }
       throw error;
     }

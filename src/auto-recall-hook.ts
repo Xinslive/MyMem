@@ -178,7 +178,7 @@ export function registerAutoRecallHook(params: {
   const recallMode = config.recallMode || "full";
   if (recallMode === "off") return;
 
-  async function retrieveWithRetry(retrieveParams: Pick<RetrievalContext, "query" | "limit" | "scopeFilter" | "category" | "source" | "signal" | "candidatePoolSize" | "overFetchMultiplier">): Promise<RetrievalResult[]> {
+  async function retrieveWithRetry(retrieveParams: Pick<RetrievalContext, "query" | "limit" | "scopeFilter" | "category" | "source" | "signal" | "candidatePoolSize" | "overFetchMultiplier" | "degradeAfterMs" | "deadlineAt">): Promise<RetrievalResult[]> {
     try {
       return await retriever.retrieve(retrieveParams);
     } catch (error) {
@@ -188,6 +188,7 @@ export function registerAutoRecallHook(params: {
   }
 
   const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 20_000;
+  const AUTO_RECALL_DEGRADE_AFTER_MS = parsePositiveInt(config.autoRecallDegradeAfterMs) ?? 5_000;
 
   function formatTimeoutDiagnostics(): string {
     const getLastDiagnostics = (retriever as unknown as {
@@ -345,6 +346,8 @@ export function registerAutoRecallHook(params: {
         signal,
         candidatePoolSize: autoRecallCandidatePoolSize,
         overFetchMultiplier: 4,
+        degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
+        deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
       }), config.workspaceBoundary);
       throwIfAborted();
 

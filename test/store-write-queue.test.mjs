@@ -115,4 +115,48 @@ describe("MemoryStore write queue", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("batch metadata updates dedupe IDs and preserve latest patch", async () => {
+    const { store, dir } = makeStore();
+    try {
+      const a = await store.store({ ...makeEntry(1), metadata: "{\"version\":1}" });
+      const b = await store.store({ ...makeEntry(2), metadata: "{\"version\":1}" });
+
+      const count = await store.updateBatchMetadata([
+        { id: a.id, metadata: "{\"version\":2}" },
+        { id: b.id, metadata: "{\"version\":3}" },
+        { id: a.id, metadata: "{\"version\":4}" },
+        { id: "missing", metadata: "{\"version\":999}" },
+      ]);
+
+      assert.equal(count, 2);
+      assert.equal((await store.getById(a.id))?.metadata, "{\"version\":4}");
+      assert.equal((await store.getById(b.id))?.metadata, "{\"version\":3}");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("batch metadata patches dedupe IDs and skip scope-denied rows", async () => {
+    const { store, dir } = makeStore();
+    try {
+      const a = await store.store({ ...makeEntry(1), scope: "global", metadata: "{\"state\":\"confirmed\"}" });
+      const b = await store.store({ ...makeEntry(2), scope: "agent:other", metadata: "{\"state\":\"confirmed\"}" });
+
+      const count = await store.patchMetadataBatch([
+        { id: a.id, patch: { injected_count: 1 } },
+        { id: a.id, patch: { last_accessed_at: 123 } },
+        { id: b.id, patch: { injected_count: 99 } },
+      ], ["global"]);
+
+      assert.equal(count, 1);
+      const updatedA = await store.getById(a.id);
+      const updatedB = await store.getById(b.id);
+      assert.match(updatedA?.metadata || "", /"injected_count":1/);
+      assert.match(updatedA?.metadata || "", /"last_accessed_at":123/);
+      assert.doesNotMatch(updatedB?.metadata || "", /"injected_count":99/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

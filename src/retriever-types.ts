@@ -101,6 +101,10 @@ export interface RetrievalContext {
   candidatePoolSize?: number;
   /** Optional per-call inactive-record over-fetch multiplier. */
   overFetchMultiplier?: number;
+  /** Soft degradation threshold for auto-recall. Manual / CLI retrieval ignores it. */
+  degradeAfterMs?: number;
+  /** Hard caller deadline timestamp (epoch ms), used for diagnostics and deadline-aware fallbacks. */
+  deadlineAt?: number;
 }
 
 export interface RetrievalResult extends MemorySearchResult {
@@ -183,6 +187,12 @@ export interface RetrievalDiagnostics {
     | "hybrid.fuseResults"
     | "hybrid.rerank"
     | "hybrid.postProcess";
+  degraded?: boolean;
+  degradedReason?:
+    | "degrade_after_ms"
+    | "partial_backend_result"
+    | "skip_rerank_after_degrade"
+    | "hard_timeout";
   errorMessage?: string;
 }
 

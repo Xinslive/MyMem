@@ -65,6 +65,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.autoRecall, true);
     assert.equal(parsed.autoRecallMinLength, 6);
     assert.equal(parsed.autoRecallMaxItems, 6);
+    assert.equal(parsed.autoRecallDegradeAfterMs, 5000);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
     assert.equal(parsed.extractMinMessages, 5);
     assert.equal(parsed.llm?.model, undefined);
@@ -197,7 +198,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
   it("normalizes telemetry config with safe defaults", () => {
     const parsed = parsePluginConfig(baseConfig());
     assert.deepEqual(parsed.telemetry, {
-      persist: false,
+      persist: true,
       dir: undefined,
       maxRecords: 1000,
       sampleRate: 1,

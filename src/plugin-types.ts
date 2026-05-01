@@ -29,6 +29,8 @@ export interface PluginConfig {
   autoRecallMinLength?: number;
   autoRecallMinRepeated?: number;
   autoRecallTimeoutMs?: number;
+  /** Soft auto-recall degradation threshold. Default: 5000ms; hard timeout is autoRecallTimeoutMs. */
+  autoRecallDegradeAfterMs?: number;
   autoRecallMaxItems?: number;
   autoRecallMaxChars?: number;
   autoRecallPerItemMaxChars?: number;

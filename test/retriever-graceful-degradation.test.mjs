@@ -45,6 +45,9 @@ function createRetrieverHarness(
       async hasId() {
         return true;
       },
+      async hasIds(ids) {
+        return new Set(ids);
+      },
       async get() {
         return null;
       },
@@ -402,5 +405,81 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
     assert.equal(hasIdsCalls, 1);
     assert.equal(hasIdCalls, 0);
     assert.deepEqual(results.map((result) => result.entry.id), ["existing"]);
+  });
+
+  it("auto-recall returns BM25 partial results after degrade threshold when vector is slow", async () => {
+    const events = [];
+    let releaseVector;
+    const vectorGate = new Promise((resolve) => {
+      releaseVector = resolve;
+    });
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      {
+        async vectorSearch() {
+          events.push("vectorSearch");
+          await vectorGate;
+          return [buildResult("vector-late")];
+        },
+        async bm25Search() {
+          events.push("bm25Search");
+          return [buildResult("bm25-fast")];
+        },
+      },
+    );
+
+    try {
+      const started = Date.now();
+      const results = await retriever.retrieve({
+        query: "test",
+        limit: 1,
+        source: "auto-recall",
+        degradeAfterMs: 20,
+      });
+      const elapsed = Date.now() - started;
+
+      assert.ok(elapsed < 500, `partial degrade should return quickly, got ${elapsed}ms`);
+      assert.deepEqual(results.map((r) => r.entry.id), ["bm25-fast"]);
+      assert.ok(events.includes("vectorSearch"));
+      const diagnostics = retriever.getLastDiagnostics();
+      assert.equal(diagnostics?.degraded, true);
+      assert.equal(diagnostics?.degradedReason, "partial_backend_result");
+      assert.equal(diagnostics?.vectorResultCount, 0);
+      assert.equal(diagnostics?.bm25ResultCount, 1);
+    } finally {
+      releaseVector();
+    }
+  });
+
+  it("manual retrieval does not use auto-recall degrade threshold", async () => {
+    let releaseVector;
+    const vectorGate = new Promise((resolve) => {
+      releaseVector = resolve;
+    });
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      {
+        async vectorSearch() {
+          await vectorGate;
+          return [buildResult("vector-complete")];
+        },
+        async bm25Search() {
+          return [buildResult("bm25-fast")];
+        },
+      },
+    );
+
+    const retrieval = retriever.retrieve({
+      query: "test",
+      limit: 2,
+      source: "manual",
+      degradeAfterMs: 10,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseVector();
+    const results = await retrieval;
+
+    assert.equal(results.length, 2);
+    assert.equal(retriever.getLastDiagnostics()?.degraded, undefined);
   });
 });

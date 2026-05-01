@@ -36,7 +36,9 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src/ index.ts cli.ts",
     "lint:fix": "eslint src/ index.ts cli.ts --fix",
-    "test:coverage": "c8 --reporter=text --reporter=lcov node scripts/run-ci-tests.mjs --all"
+    "test:coverage": "c8 --reporter=text --reporter=lcov node scripts/run-ci-tests.mjs --all",
+    "benchmark": "node --import jiti/register benchmark/run.ts --scenario all",
+    "benchmark:ci": "node --import jiti/register benchmark/run.ts --scenario all --rows 80 --iterations 5"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",

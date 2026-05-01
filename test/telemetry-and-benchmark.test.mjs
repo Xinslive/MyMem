@@ -11,6 +11,7 @@ const {
   normalizeTelemetryConfig,
 } = jiti("../src/telemetry.ts");
 const { runBenchmarkSummary } = jiti("../benchmark/run.ts");
+const { runBenchmarkScenarios, compareBenchmarkBaseline } = jiti("../benchmark/run.ts");
 
 function makeTrace(query, totalMs, finalCount, stages = []) {
   return {
@@ -119,6 +120,68 @@ describe("benchmark runner", () => {
       assert.equal(summary.retrieval?.zeroResultQueries, 1);
       assert.equal(summary.extraction?.totalRuns, 1);
       assert.equal(summary.extraction?.totalCreated, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs deterministic benchmark scenarios without network providers", async () => {
+    const summary = await runBenchmarkScenarios({
+      scenario: "retrieval",
+      rows: 12,
+      iterations: 2,
+    });
+
+    assert.equal(summary.rows, 12);
+    assert.equal(summary.iterations, 2);
+    assert.equal(summary.retrieval?.hybrid.iterations, 2);
+    assert.equal(typeof summary.retrieval?.hybrid.p95Ms, "number");
+    assert.equal(typeof summary.retrieval?.autoRecall.zeroResultRate, "number");
+  });
+
+  it("reports benchmark p95 regressions against a baseline", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-benchmark-baseline-"));
+    try {
+      const baselinePath = join(dir, "baseline.json");
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(
+        baselinePath,
+        JSON.stringify({
+          rows: 1,
+          iterations: 1,
+          retrieval: {
+            hybrid: {
+              iterations: 1,
+              avgMs: 10,
+              p50Ms: 10,
+              p95Ms: 10,
+              minMs: 10,
+              maxMs: 10,
+            },
+          },
+        }),
+      );
+
+      const regressions = await compareBenchmarkBaseline(
+        {
+          rows: 1,
+          iterations: 1,
+          retrieval: {
+            hybrid: {
+              iterations: 1,
+              avgMs: 30,
+              p50Ms: 30,
+              p95Ms: 30,
+              minMs: 30,
+              maxMs: 30,
+            },
+          },
+        },
+        baselinePath,
+      );
+
+      assert.equal(regressions.length, 1);
+      assert.match(regressions[0], /retrieval\.hybrid\.p95Ms/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
