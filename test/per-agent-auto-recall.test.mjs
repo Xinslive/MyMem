@@ -206,6 +206,8 @@ describe("autoRecallIncludeAgents", () => {
 
 describe("mixed-agent scenarios", () => {
   // Simulate the runtime logic for agent inclusion/exclusion
+  const builtInExcludeAgents = ["cron"];
+
   function shouldInjectMemory({ agentId, autoRecallIncludeAgents, autoRecallExcludeAgents }) {
     if (agentId === undefined) return true; // no agent context, allow
 
@@ -214,12 +216,16 @@ describe("mixed-agent scenarios", () => {
       return autoRecallIncludeAgents.includes(agentId);
     }
 
-    // Fall back to exclude list (blacklist mode)
-    if (Array.isArray(autoRecallExcludeAgents) && autoRecallExcludeAgents.length > 0) {
-      return !autoRecallExcludeAgents.includes(agentId);
+    // Fall back to built-in + user exclude list (blacklist mode)
+    const effectiveExcludeAgents = [
+      ...builtInExcludeAgents,
+      ...(Array.isArray(autoRecallExcludeAgents) ? autoRecallExcludeAgents : []),
+    ];
+    if (effectiveExcludeAgents.includes(agentId)) {
+      return false;
     }
 
-    return true; // no include/exclude configured, allow all
+    return true; // not excluded, allow
   }
 
   it("whitelist mode: only included agents receive auto-recall", () => {
@@ -263,10 +269,96 @@ describe("mixed-agent scenarios", () => {
     assert.equal(shouldInjectMemory({ agentId: "saffron", ...cfg }), false);
     assert.equal(shouldInjectMemory({ agentId: "maple", ...cfg }), true);
   });
+
+  it("built-in blacklist: 'cron' agent is excluded by default", () => {
+    // No include/exclude configured — cron should still be blocked
+    assert.equal(shouldInjectMemory({ agentId: "cron" }), false);
+    assert.equal(shouldInjectMemory({ agentId: "saffron" }), true);
+  });
+
+  it("built-in blacklist: 'cron' excluded even with user exclude list", () => {
+    const cfg = { autoRecallExcludeAgents: ["matcha"] };
+    assert.equal(shouldInjectMemory({ agentId: "cron", ...cfg }), false);
+    assert.equal(shouldInjectMemory({ agentId: "matcha", ...cfg }), false);
+    assert.equal(shouldInjectMemory({ agentId: "saffron", ...cfg }), true);
+  });
+
+  it("built-in blacklist: 'cron' can be overridden by whitelist", () => {
+    // If whitelist explicitly includes 'cron', it should be allowed
+    const cfg = { autoRecallIncludeAgents: ["cron", "saffron"] };
+    assert.equal(shouldInjectMemory({ agentId: "cron", ...cfg }), true);
+    assert.equal(shouldInjectMemory({ agentId: "saffron", ...cfg }), true);
+    assert.equal(shouldInjectMemory({ agentId: "maple", ...cfg }), false);
+  });
 });
 
 
 describe("real before_prompt_build hook", () => {
+  it("skips auto-recall for built-in excluded agent 'cron'", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "per-agent-auto-recall-cron-"));
+    const debugLogs = [];
+
+    const retriever = {
+      async retrieve() {
+        throw new Error("retrieve should not run when built-in blacklist blocks agent");
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      debugLogs,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {},
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      assert.ok(hooks.length >= 1, "expected at least one before_prompt_build hook");
+
+      const [{ handler: autoRecallHook }] = hooks;
+      const output = await autoRecallHook(
+        { prompt: "Check the scheduled task status.", sessionKey: "agent:cron:session:test-cron" },
+        { sessionId: "test-cron", sessionKey: "agent:cron:session:test-cron" },
+      );
+
+      assert.equal(output, undefined);
+      assert.ok(
+        debugLogs.some((line) => line.includes("auto-recall skipped for excluded agent 'cron'")),
+        "expected built-in blacklist skip debug log for 'cron'",
+      );
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("skips auto-recall for fallback 'main' when whitelist excludes it", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "per-agent-auto-recall-"));
     const debugLogs = [];

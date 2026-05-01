@@ -232,15 +232,18 @@ export function registerAutoRecallHook(params: {
         );
         return;
       }
-    } else if (
-      Array.isArray(config.autoRecallExcludeAgents) &&
-      config.autoRecallExcludeAgents.length > 0 &&
-      config.autoRecallExcludeAgents.includes(agentId)
-    ) {
-      api.logger.debug?.(
-        "mymem: auto-recall skipped for excluded agent '" + agentId + "'",
-      );
-      return;
+    } else {
+      const builtInExcludeAgents = ["cron"];
+      const effectiveExcludeAgents = [
+        ...builtInExcludeAgents,
+        ...(Array.isArray(config.autoRecallExcludeAgents) ? config.autoRecallExcludeAgents : []),
+      ];
+      if (effectiveExcludeAgents.includes(agentId)) {
+        api.logger.debug?.(
+          "mymem: auto-recall skipped for excluded agent '" + agentId + "'",
+        );
+        return;
+      }
     }
 
     const sessionId = ctx?.sessionId || "default";
