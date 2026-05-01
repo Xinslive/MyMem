@@ -225,41 +225,13 @@ export class SmartExtractor {
       `mymem: smart-extractor: extracted ${candidates.length} candidate(s)`,
     );
 
-    // Step 1b: Batch-internal dedup — embed candidate abstracts and remove near-duplicates
-    //          before expensive per-candidate LLM dedup calls (see src/batch-dedup.ts)
+    // Step 1b: Apply storage-boundary filters before any embedding work.
+    // USER.md-exclusive memories should not consume batch-dedup slots or cause
+    // non-boundary candidates to be dropped as near-duplicates.
     const capped = candidates.slice(0, MAX_MEMORIES_PER_EXTRACTION);
     cappedCandidateCount = capped.length;
-    let survivingCandidates = capped;
-    const batchDedupStartedAt = Date.now();
-    try {
-      const abstracts = capped.map((c) => c.abstract);
-      const vectors = await this.embedder.embedBatch(abstracts);
-      const safeVectors = vectors.map((v) => v || []);
-      const dedupResult = batchDedup(abstracts, safeVectors);
-      if (dedupResult.duplicateIndices.length > 0) {
-        survivingCandidates = dedupResult.survivingIndices.map((i) => capped[i]);
-        duplicateSkipped = dedupResult.duplicateIndices.length;
-        stats.skipped += dedupResult.duplicateIndices.length;
-        this.log(
-          `mymem: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`,
-        );
-      }
-    } catch (err) {
-      this.log(
-        `mymem: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`,
-      );
-    } finally {
-      batchDedupMs = Date.now() - batchDedupStartedAt;
-    }
-
-    // Step 2: Process each surviving candidate through dedup pipeline.
-    //
-    // Optimization: filter boundary-excluded candidates BEFORE batch embedding
-    // to avoid wasting embed API calls on candidates that will be skipped.
-    // See MR1 from code review.
-    const processableCandidates: { index: number; candidate: CandidateMemory }[] = [];
-    for (let i = 0; i < survivingCandidates.length; i++) {
-      const c = survivingCandidates[i];
+    const boundaryEligibleCandidates: CandidateMemory[] = [];
+    for (const c of capped) {
       if (
         isUserMdExclusiveMemory(
           {
@@ -277,8 +249,38 @@ export class SmartExtractor {
         );
         continue;
       }
-      processableCandidates.push({ index: i, candidate: c });
+      boundaryEligibleCandidates.push(c);
     }
+
+    // Step 1c: Batch-internal dedup — embed candidate abstracts and remove
+    // near-duplicates before expensive per-candidate LLM dedup calls.
+    let survivingCandidates = boundaryEligibleCandidates;
+    const batchDedupStartedAt = Date.now();
+    if (boundaryEligibleCandidates.length > 1) {
+      try {
+        const abstracts = boundaryEligibleCandidates.map((c) => c.abstract);
+        const vectors = await this.embedder.embedBatch(abstracts);
+        const safeVectors = vectors.map((v) => v || []);
+        const dedupResult = batchDedup(abstracts, safeVectors);
+        if (dedupResult.duplicateIndices.length > 0) {
+          survivingCandidates = dedupResult.survivingIndices.map((i) => boundaryEligibleCandidates[i]);
+          duplicateSkipped = dedupResult.duplicateIndices.length;
+          stats.skipped += dedupResult.duplicateIndices.length;
+          this.log(
+            `mymem: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`,
+          );
+        }
+      } catch (err) {
+        this.log(
+          `mymem: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`,
+        );
+      } finally {
+        batchDedupMs = Date.now() - batchDedupStartedAt;
+      }
+    }
+
+    // Step 2: Process each surviving candidate through dedup pipeline.
+    const processableCandidates = survivingCandidates.map((candidate, index) => ({ index, candidate }));
     processableCandidateCount = processableCandidates.length;
 
     // Pre-compute vectors for processable non-profile candidates in a single batch API call

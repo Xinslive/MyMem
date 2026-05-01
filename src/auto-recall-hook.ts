@@ -115,6 +115,31 @@ function getCachedRawUserMessage(
   return "";
 }
 
+export function resolveAutoRecallSessionStateKey(params: {
+  channelId?: unknown;
+  conversationId?: unknown;
+  sessionId?: unknown;
+  sessionKey?: unknown;
+}): string {
+  const normalize = (value: unknown): string => {
+    return typeof value === "string" ? value.trim() : "";
+  };
+
+  const sessionId = normalize(params.sessionId);
+  if (sessionId) return `session:${sessionId}`;
+
+  const sessionKey = normalize(params.sessionKey);
+  if (sessionKey) return `sessionKey:${sessionKey}`;
+
+  const ingressKey = buildAutoCaptureConversationKeyFromIngress(
+    normalize(params.channelId) || undefined,
+    normalize(params.conversationId) || undefined,
+  );
+  if (ingressKey) return `conversation:${ingressKey}`;
+
+  return "default";
+}
+
 export function truncateAutoRecallQuery(query: string, maxLength: number): string {
   if (query.length <= maxLength) return query;
   const safeMaxLength = clampInt(maxLength, 100, 10_000);
@@ -220,7 +245,11 @@ export function registerAutoRecallHook(params: {
 
   api.on("before_prompt_build", async (event: any, ctx: any) => {
     // Skip auto-recall for sub-agent sessions
-    const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
+    const sessionKey = typeof ctx?.sessionKey === "string"
+      ? ctx.sessionKey
+      : typeof event?.sessionKey === "string"
+        ? event.sessionKey
+        : "";
     if (sessionKey.includes(":subagent:")) return;
 
     // Per-agent inclusion/exclusion: autoRecallIncludeAgents takes precedence
@@ -246,11 +275,16 @@ export function registerAutoRecallHook(params: {
       }
     }
 
-    const sessionId = ctx?.sessionId || "default";
+    const sessionStateKey = resolveAutoRecallSessionStateKey({
+      channelId: ctx?.channelId,
+      conversationId: ctx?.conversationId,
+      sessionId: ctx?.sessionId,
+      sessionKey,
+    });
     const cacheParams = {
       channelId: ctx?.channelId,
       conversationId: ctx?.conversationId,
-      sessionId,
+      sessionId: ctx?.sessionId,
       sessionKey,
     };
     const cachedRawUserMessage = getCachedRawUserMessage(params.lastRawUserMessage, cacheParams);
@@ -262,8 +296,8 @@ export function registerAutoRecallHook(params: {
       return;
     }
 
-    const currentTurn = (params.turnCounter.get(sessionId) || 0) + 1;
-    params.turnCounter.set(sessionId, currentTurn);
+    const currentTurn = (params.turnCounter.get(sessionStateKey) || 0) + 1;
+    params.turnCounter.set(sessionStateKey, currentTurn);
 
     const abortController = new AbortController();
     const recallWork = async (signal: AbortSignal): Promise<RecallHookResult | undefined> => {
@@ -329,7 +363,7 @@ export function registerAutoRecallHook(params: {
       let finalResults = rankedResults;
 
       if (minRepeated > 0) {
-        const sessionHistory = params.recallHistory.get(sessionId) || new Map<string, number>();
+        const sessionHistory = params.recallHistory.get(sessionStateKey) || new Map<string, number>();
         const filteredResults = rankedResults.filter((r: RecallResult) => {
           const lastTurn = sessionHistory.get(r.entry.id) ?? -999;
           const diff = currentTurn - lastTurn;
@@ -494,11 +528,11 @@ export function registerAutoRecallHook(params: {
       throwIfAborted();
 
       if (minRepeated > 0) {
-        const sessionHistory = params.recallHistory.get(sessionId) || new Map<string, number>();
+        const sessionHistory = params.recallHistory.get(sessionStateKey) || new Map<string, number>();
         for (const item of selected) {
           sessionHistory.set(item.id, currentTurn);
         }
-        params.recallHistory.set(sessionId, sessionHistory);
+        params.recallHistory.set(sessionStateKey, sessionHistory);
       }
 
       const injectedAt = Date.now();
@@ -606,15 +640,18 @@ export function registerAutoRecallHook(params: {
 
   // Clean up auto-recall session state on session end
   api.on("session_end", (_event: any, ctx: any) => {
-    const sessionId = ctx?.sessionId || "";
-    if (sessionId) {
-      params.recallHistory.delete(sessionId);
-      params.turnCounter.delete(sessionId);
-    }
+    const sessionStateKey = resolveAutoRecallSessionStateKey({
+      channelId: ctx?.channelId,
+      conversationId: ctx?.conversationId,
+      sessionId: ctx?.sessionId,
+      sessionKey: ctx?.sessionKey,
+    });
+    params.recallHistory.delete(sessionStateKey);
+    params.turnCounter.delete(sessionStateKey);
     for (const cacheKey of collectRecallMessageCacheKeys({
       channelId: ctx?.channelId,
       conversationId: ctx?.conversationId,
-      sessionId,
+      sessionId: ctx?.sessionId,
       sessionKey: ctx?.sessionKey,
     })) {
       params.lastRawUserMessage.delete(cacheKey);

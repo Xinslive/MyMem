@@ -370,15 +370,18 @@ describe("SmartExtractor batch embedding paths", () => {
         overview: "",
         content: "这是用户的基本画像信息汇总数据。",
       },
+      {
+        category: "cases",
+        abstract: "团队采用批量嵌入路径验证候选预计算机制",
+        overview: "",
+        content: "团队采用批量嵌入路径验证候选预计算机制是否稳定。",
+      },
     ]);
     const store = makeStore();
     const extractor = makeExtractor(embedder, llm, store);
 
     await extractor.extractAndPersist("画像提取测试对话内容", "s1");
 
-    // There should be at least 2 embedBatch calls:
-    //   Call 1: Step 1b batchDedup (abstracts) — may include profile
-    //   Call 2 (or later): Step 2 pre-computation — must NOT include profile
     assert.ok(allBatchCalls.length >= 1,
       `Expected at least 1 embedBatch call, got ${allBatchCalls.length}`);
 
@@ -388,13 +391,79 @@ describe("SmartExtractor batch embedding paths", () => {
       call.some((t) => t.includes("用户基本画像") || t.includes("画像信息")),
     );
 
-    // Step 1b dedup MAY include profile abstract (that's expected).
-    // But Step 2 pre-compute MUST exclude it.
-    // With a single profile candidate, we expect at most 1 call that includes
-    // profile text (the Step 1b dedup call). If there are more, that's a bug.
+    // Step 1b dedup may include profile abstract. Step 2 pre-compute must not.
     assert.ok(
       profileTexts.length <= 1,
       `Only Step 1b dedup may include profile text, but got ${profileTexts.length} calls with profile text`,
     );
+  });
+
+  it("filters USER.md-exclusive candidates before embedding", async () => {
+    const { embedder, calls } = makeCountingEmbedder();
+    const llm = makeLlm([
+      {
+        category: "profile",
+        abstract: "User profile: timezone Asia/Shanghai",
+        overview: "## Background\n- Timezone: Asia/Shanghai",
+        content: "User timezone is Asia/Shanghai.",
+      },
+    ]);
+    const store = makeStore();
+    const extractor = makeExtractor(embedder, llm, store, {
+      workspaceBoundary: { userMdExclusive: { enabled: true } },
+    });
+
+    const stats = await extractor.extractAndPersist("我的时区是 Asia/Shanghai。", "s1");
+
+    assert.equal(stats.boundarySkipped, 1);
+    assert.equal(calls.embedBatch, 0);
+    assert.equal(calls.embed, 0);
+    assert.equal(store.entries.length, 0);
+  });
+
+  it("does not let USER.md-exclusive candidates suppress non-boundary candidates during batch dedup", async () => {
+    const embedder = {
+      async embed() {
+        return Array(256).fill(0.25);
+      },
+      async embedBatch(texts) {
+        return texts.map(() => Array(256).fill(0.25));
+      },
+    };
+    const llm = makeLlm([
+      {
+        category: "profile",
+        abstract: "User profile: timezone Asia/Shanghai",
+        overview: "## Background\n- Timezone: Asia/Shanghai",
+        content: "User timezone is Asia/Shanghai.",
+      },
+      {
+        category: "cases",
+        abstract: "团队决定以后用 AWS ECS with Fargate 部署应用",
+        overview: "Deployment decision",
+        content: "团队决定以后用 AWS ECS with Fargate 部署应用。",
+      },
+    ]);
+    const store = makeStore();
+    const extractor = makeExtractor(embedder, llm, store, {
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+          routeProfile: true,
+          routeCanonicalName: true,
+          routeCanonicalAddressing: true,
+        },
+      },
+    });
+
+    const stats = await extractor.extractAndPersist(
+      "我的时区是 Asia/Shanghai。团队决定以后用 AWS ECS with Fargate 部署应用。",
+      "s1",
+    );
+
+    assert.equal(stats.boundarySkipped, 1);
+    assert.equal(stats.created, 1);
+    assert.equal(store.entries.length, 1);
+    assert.match(store.entries[0].entry.metadata, /AWS ECS with Fargate/);
   });
 });

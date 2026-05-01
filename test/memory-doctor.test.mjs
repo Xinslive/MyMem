@@ -81,7 +81,7 @@ test("memory_doctor reports ok diagnostics without embedding probe", async () =>
   const api = createApi();
   registerMemoryDoctorTool(api, createContext());
 
-  const tool = api.tools.get("memory_doctor");
+  const tool = api.tools.get("mymem_doctor");
   assert.ok(tool);
 
   const result = await tool.execute("call-1", {}, undefined, undefined, { agentId: "main" });
@@ -96,7 +96,7 @@ test("memory_doctor can call embedding probe", async () => {
   const api = createApi();
   registerMemoryDoctorTool(api, createContext());
 
-  const tool = api.tools.get("memory_doctor");
+  const tool = api.tools.get("mymem_doctor");
   const result = await tool.execute("call-1", { testEmbedding: true }, undefined, undefined, { agentId: "main" });
 
   assert.equal(result.details.status, "ok");
@@ -112,7 +112,7 @@ test("memory_doctor reports failing retrieval probe", async () => {
     },
   }));
 
-  const tool = api.tools.get("memory_doctor");
+  const tool = api.tools.get("mymem_doctor");
   const result = await tool.execute("call-1", {}, undefined, undefined, { agentId: "main" });
 
   assert.equal(result.details.status, "fail");
@@ -157,7 +157,7 @@ test("memory_doctor reports retrieval telemetry and suggestions", async () => {
     },
   }));
 
-  const tool = api.tools.get("memory_doctor");
+  const tool = api.tools.get("mymem_doctor");
   const result = await tool.execute("call-1", {}, undefined, undefined, { agentId: "main" });
 
   assert.equal(result.details.status, "warn");
@@ -196,7 +196,7 @@ test("memory_doctor reports persisted telemetry when enabled", async () => {
     },
   }));
 
-  const tool = api.tools.get("memory_doctor");
+  const tool = api.tools.get("mymem_doctor");
   const result = await tool.execute("call-1", {}, undefined, undefined, { agentId: "main" });
 
   assert.equal(result.details.checks.some((check) => check.name === "telemetry_persistence" && check.status === "ok"), true);

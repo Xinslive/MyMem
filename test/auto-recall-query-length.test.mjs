@@ -13,7 +13,10 @@ const jiti = jitiFactory(import.meta.url, {
   },
 });
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
-const { truncateAutoRecallQuery } = jiti("../src/auto-recall-hook.ts");
+const {
+  resolveAutoRecallSessionStateKey,
+  truncateAutoRecallQuery,
+} = jiti("../src/auto-recall-hook.ts");
 
 function baseConfig() {
   return {
@@ -151,5 +154,40 @@ describe("autoRecallMaxQueryLength truncation behavior", () => {
     const input = "b".repeat(2000);
     const truncated = truncateAutoRecallQuery(input, maxQueryLen);
     assert.equal(truncated.length, 2000);
+  });
+});
+
+describe("auto-recall session state key", () => {
+  it("prefers sessionId when available", () => {
+    assert.equal(
+      resolveAutoRecallSessionStateKey({
+        sessionId: "sid-1",
+        sessionKey: "agent:main:discord:channel:1",
+        channelId: "discord",
+        conversationId: "channel:1",
+      }),
+      "session:sid-1",
+    );
+  });
+
+  it("falls back to sessionKey before conversation identifiers", () => {
+    assert.equal(
+      resolveAutoRecallSessionStateKey({
+        sessionKey: "agent:main:discord:channel:1",
+        channelId: "discord",
+        conversationId: "channel:1",
+      }),
+      "sessionKey:agent:main:discord:channel:1",
+    );
+  });
+
+  it("uses conversation key when session identifiers are absent", () => {
+    assert.equal(
+      resolveAutoRecallSessionStateKey({
+        channelId: "discord",
+        conversationId: "channel:1",
+      }),
+      "conversation:discord:channel:1",
+    );
   });
 });

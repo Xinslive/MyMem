@@ -80,8 +80,8 @@ describe("memory governance tools", () => {
     };
 
     const tools = createToolSet(context);
-    const promote = tools.get("memory_promote");
-    const archive = tools.get("memory_archive");
+    const promote = tools.get("mymem_promote");
+    const archive = tools.get("mymem_archive");
 
     const promoteRes = await promote.execute(null, { query: "coffee" });
     assert.match(promoteRes.content[0].text, /Promoted memory/);
@@ -154,8 +154,8 @@ describe("memory governance tools", () => {
     };
 
     const tools = createToolSet(context);
-    const compact = tools.get("memory_compact");
-    const explain = tools.get("memory_explain_rank");
+    const compact = tools.get("mymem_compact");
+    const explain = tools.get("mymem_explain_rank");
 
     const compactRes = await compact.execute(null, { dryRun: true });
     assert.match(compactRes.content[0].text, /Compaction preview/);

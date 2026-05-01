@@ -761,4 +761,111 @@ describe("real before_prompt_build hook", () => {
       rmSync(workspaceDir, { recursive: true, force: true });
     }
   });
+
+  it("keeps redundancy history isolated by sessionKey when sessionId is missing", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-sessionkey-isolation-"));
+    let retrieveCalls = 0;
+
+    const memoryResult = {
+      entry: {
+        id: "shared-memory-1",
+        text: "shared memory should be available in each session key",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          l0_abstract: "shared memory should be available in each session key",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          injected_count: 0,
+          bad_recall_count: 0,
+          suppressed_until_turn: 0,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+
+    const store = {
+      patches: [],
+      async patchMetadata(id, patch) {
+        this.patches.push({ id, patch });
+        return null;
+      },
+    };
+
+    const retriever = {
+      async retrieve() {
+        retrieveCalls += 1;
+        return [memoryResult];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const turnCounter = new Map();
+    const recallHistory = new Map();
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMinRepeated: 8,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store,
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter,
+        recallHistory,
+        lastRawUserMessage: new Map(),
+      });
+
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: autoRecallHook }] = hooks;
+
+      const first = await autoRecallHook(
+        { prompt: "Please recall the shared memory.", sessionKey: "agent:main:session:one" },
+        { sessionKey: "agent:main:session:one", agentId: "main" },
+      );
+      const second = await autoRecallHook(
+        { prompt: "Please recall the shared memory.", sessionKey: "agent:main:session:two" },
+        { sessionKey: "agent:main:session:two", agentId: "main" },
+      );
+
+      assert.ok(first?.prependContext?.includes("shared memory should be available"));
+      assert.ok(second?.prependContext?.includes("shared memory should be available"));
+      assert.equal(retrieveCalls, 2);
+      assert.equal(turnCounter.get("sessionKey:agent:main:session:one"), 1);
+      assert.equal(turnCounter.get("sessionKey:agent:main:session:two"), 1);
+      assert.ok(recallHistory.get("sessionKey:agent:main:session:one")?.has("shared-memory-1"));
+      assert.ok(recallHistory.get("sessionKey:agent:main:session:two")?.has("shared-memory-1"));
+    } finally {
+      retrieverModuleForMock.createRetriever = origCreateRetriever;
+      embedderModuleForMock.createEmbedder = origCreateEmbedder;
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
 });
