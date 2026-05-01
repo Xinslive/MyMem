@@ -27,6 +27,9 @@ import {
   isScalarIndexType,
   recommendedVectorPartitions,
   scoreLexicalHit,
+  tokenizeForSearch,
+  scoreLexicalHitPreTokenized,
+  normalizeSearchText,
   resolveMemoryId,
 } from "./store-sql-utils.js";
 import { toLanceRows, mapRowToMemoryEntry } from "./store-row-mappers.js";
@@ -122,6 +125,10 @@ export class MemoryStore {
   // Stats result cache (invalidated on writes)
   private _statsCache: { key: string; result: StatsResult; ts: number } | null = null;
   private static STATS_CACHE_TTL_MS = 30_000;
+
+  // Lock staleness check cooldown — skip stat() if lock was verified fresh recently.
+  private _lastFreshLockCheckAt = 0;
+  private static readonly LOCK_CHECK_COOLDOWN_MS = 30_000;
 
   /** Logger instance for structured logging. */
   private log: Logger;
@@ -472,25 +479,34 @@ export class MemoryStore {
     }
 
     // Proactive cleanup of stale lock artifacts (fixes stale-lock ECOMPROMISED).
-    // Uses async I/O and handles ENOENT from concurrent cleanup by another process.
-    try {
-      const stat = await statAsync(lockPath);
-      if (stat) {
-        const ageMs = Date.now() - Number(stat.mtimeMs);
-        const staleThresholdMs = 5 * 60 * 1000;
-        if (ageMs > staleThresholdMs) {
-          try {
-            await unlink(lockPath);
-            this.log.warn(`cleared stale lock: ${lockPath} ageMs=${ageMs}`);
-          } catch (err) {
-            if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-              this.log.warn(`failed to remove stale lock: ${lockPath}: ${err}`);
+    // Skip stat() if lock was verified fresh within cooldown window.
+    // lockfile.lock()'s own stale: 10000 option serves as a safety net.
+    const now = Date.now();
+    if (now - this._lastFreshLockCheckAt >= MemoryStore.LOCK_CHECK_COOLDOWN_MS) {
+      try {
+        const stat = await statAsync(lockPath);
+        if (stat) {
+          const ageMs = now - Number(stat.mtimeMs);
+          const staleThresholdMs = 5 * 60 * 1000;
+          if (ageMs > staleThresholdMs) {
+            this._lastFreshLockCheckAt = 0; // Reset after stale cleanup
+            try {
+              await unlink(lockPath);
+              this.log.warn(`cleared stale lock: ${lockPath} ageMs=${ageMs}`);
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+                this.log.warn(`failed to remove stale lock: ${lockPath}: ${err}`);
+              }
             }
+          } else {
+            this._lastFreshLockCheckAt = now; // Lock was fresh
           }
+        } else {
+          this._lastFreshLockCheckAt = now; // No lock file = nothing stale
         }
+      } catch {
+        this._lastFreshLockCheckAt = now; // Can't read = proceed, mark checked
       }
-    } catch {
-      // Lock file doesn't exist or can't be read — proceed normally
     }
 
     const release = await lockfile.lock(lockPath, {
@@ -1010,6 +1026,10 @@ export class MemoryStore {
     const rows = await searchQuery.limit(limit + 500).toArray();
     const matches: MemorySearchResult[] = [];
 
+    // Pre-tokenize query once (shared across all candidates)
+    const normalizedQuery = normalizeSearchText(trimmedQuery);
+    const queryTokens = new Set(tokenizeForSearch(normalizedQuery));
+
     for (const row of rows) {
       const entry = mapRowToMemoryEntry(row, false);
       const meta = entry._parsedMeta!;
@@ -1019,12 +1039,19 @@ export class MemoryStore {
         continue;
       }
 
-      const score = scoreLexicalHit(trimmedQuery, [
+      const candidateFields = [
         { text: entry.text, weight: 1 },
         { text: meta.l0_abstract, weight: 0.98 },
         { text: meta.l1_overview, weight: 0.92 },
         { text: meta.l2_content, weight: 0.96 },
-      ]);
+      ];
+      const preTokenized = candidateFields
+        .filter(c => c.text)
+        .map(c => {
+          const normalized = normalizeSearchText(c.text);
+          return { tokens: new Set(tokenizeForSearch(normalized)), weight: c.weight, normalized };
+        });
+      const score = scoreLexicalHitPreTokenized(queryTokens, preTokenized, normalizedQuery);
 
       if (score <= 0) continue;
       matches.push({ entry, score });

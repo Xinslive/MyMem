@@ -70,16 +70,11 @@ export class EmbeddingCache {
     if (this.cache.has(k)) {
       this.cache.delete(k);
     }
-    // When cache is full, evict oldest 25% by insertion order (O(n) but infrequent).
-    // Map iteration order is insertion order, so oldest entries come first.
+    // Evict single oldest entry (O(1)). get() already does delete+reinsert for
+    // LRU ordering, so the first key in Map iteration is always least-recently-used.
     if (this.cache.size >= this.maxSize) {
-      const evictCount = Math.max(1, Math.ceil(this.maxSize / 4));
-      const keys = this.cache.keys();
-      for (let i = 0; i < evictCount; i++) {
-        const key = keys.next().value;
-        if (key !== undefined) this.cache.delete(key);
-        else break;
-      }
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
     }
     this.cache.set(k, { vector, createdAt: Date.now() });
   }

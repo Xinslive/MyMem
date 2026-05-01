@@ -4,7 +4,6 @@
 
 import type { MemorySearchResult } from "./store.js";
 import type { RetrievalResult } from "./retriever-types.js";
-import type { BatchIdStore } from "./retriever-types.js";
 import type { Logger } from "./logger.js";
 import { clamp01, throwIfAborted, resolveUnlessAborted } from "./retriever-utils.js";
 
@@ -16,7 +15,7 @@ export async function fuseResults(
   vectorResults: Array<MemorySearchResult & { rank: number }>,
   bm25Results: Array<MemorySearchResult & { rank: number }>,
   config: { vectorWeight: number; bm25Weight: number },
-  store: { hasId: (id: string) => Promise<boolean> } & Partial<BatchIdStore>,
+  store: { hasIds: (ids: string[]) => Promise<Set<string>> },
   logger: Pick<Logger, "debug" | "warn">,
   signal?: AbortSignal,
 ): Promise<RetrievalResult[]> {
@@ -40,40 +39,15 @@ export async function fuseResults(
   const missingBm25OnlyIds = new Set<string>();
 
   if (ghostCheckIds.length > 0) {
-    const hasIds = store.hasIds;
-    if (typeof hasIds === "function") {
-      try {
-        const existingIds = await resolveUnlessAborted(hasIds.call(store, ghostCheckIds), signal);
-        throwIfAborted(signal);
-        for (const id of ghostCheckIds) {
-          if (!existingIds.has(id)) missingBm25OnlyIds.add(id);
-        }
-      } catch (err) {
-        if (signal?.aborted) throw err;
-        logger.debug(`[Retriever] batch hasIds check failed: ${err}`);
-      }
-    } else {
-      const existenceResults = await resolveUnlessAborted(
-        Promise.allSettled(
-          ghostCheckIds.map(async (id) => {
-            throwIfAborted(signal);
-            return { id, exists: await store.hasId(id) };
-          }),
-        ),
-        signal,
-      );
+    try {
+      const existingIds = await resolveUnlessAborted(store.hasIds(ghostCheckIds), signal);
       throwIfAborted(signal);
-
-      for (let index = 0; index < existenceResults.length; index++) {
-        const result = existenceResults[index];
-        const id = ghostCheckIds[index];
-        if (result.status === "fulfilled") {
-          if (!result.value.exists) missingBm25OnlyIds.add(result.value.id);
-        } else {
-          // If hasId fails, keep the result (fail-open)
-          logger.debug(`[Retriever] hasId check failed for ${id}: ${result.reason}`);
-        }
+      for (const id of ghostCheckIds) {
+        if (!existingIds.has(id)) missingBm25OnlyIds.add(id);
       }
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      logger.debug(`[Retriever] batch hasIds check failed: ${err}`);
     }
   }
 

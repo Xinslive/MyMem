@@ -84,7 +84,7 @@ export function recommendedVectorPartitions(totalRows: number): number {
 const CJK_RE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯]/;
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
 
-function tokenizeForSearch(text: string): string[] {
+export function tokenizeForSearch(text: string): string[] {
   const lower = text.toLowerCase();
   const tokens: string[] = [];
   let current = "";
@@ -169,6 +169,35 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
     bestScore = Math.max(bestScore, Math.min(0.95, score) * candidate.weight);
   }
 
+  return bestScore;
+}
+
+/**
+ * Pre-tokenized variant of scoreLexicalHit. Accepts already-tokenized query
+ * and candidate tokens to avoid redundant tokenizeForSearch() calls when the
+ * same query is scored against many candidates.
+ */
+export function scoreLexicalHitPreTokenized(
+  queryTokens: Set<string>,
+  candidates: Array<{ tokens: Set<string>; weight: number; normalized: string }>,
+  normalizedQuery: string,
+): number {
+  if (queryTokens.size === 0) return 0;
+  const querySize = queryTokens.size;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    if (candidate.tokens.size === 0) continue;
+    let matchedTokens = 0;
+    for (const qt of queryTokens) {
+      if (candidate.tokens.has(qt)) matchedTokens++;
+    }
+    if (matchedTokens === 0) continue;
+    const coverage = matchedTokens / querySize;
+    let score = 0.5 + 0.42 * coverage;
+    if (candidate.normalized.includes(normalizedQuery)) score = Math.max(score, 0.88);
+    if (coverage === 1) score = Math.max(score, 0.92);
+    bestScore = Math.max(bestScore, Math.min(0.95, score) * candidate.weight);
+  }
   return bestScore;
 }
 

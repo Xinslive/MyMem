@@ -72,7 +72,7 @@ test("auto-recall aborts embedding when signal fires mid-retrieval", async () =>
     hasFtsSupport: true,
     async vectorSearch() { return []; },
     async bm25Search() { return []; },
-    async hasId() { return false; },
+    async hasIds(ids) { return new Set(); },
   };
 
   const retriever = new MemoryRetriever(fakeStore, fakeEmbedder, { mode: "hybrid", rerank: "none" }, null);
@@ -141,7 +141,7 @@ test("pre-aborted signal: Embedder.withTimeout rejects before embedSingle runs",
 test("auto-recall aborts while fusion validates BM25-only hits", async () => {
   const { MemoryRetriever } = jiti("../src/retriever.ts");
 
-  let hasIdCallCount = 0;
+  let hasIdsCallCount = 0;
   const fakeEmbedder = {
     embedQuery: async () => [0.1, 0.2, 0.3],
     embedPassage: async () => [0.1, 0.2, 0.3],
@@ -154,10 +154,10 @@ test("auto-recall aborts while fusion validates BM25-only hits", async () => {
     async bm25Search() {
       return Array.from({ length: 20 }, (_, index) => buildResult(`bm25-only-${index}`));
     },
-    async hasId() {
-      hasIdCallCount++;
+    async hasIds(ids) {
+      hasIdsCallCount++;
       await new Promise((resolve) => setTimeout(resolve, 5_000));
-      return true;
+      return new Set(ids);
     },
   };
 
@@ -195,7 +195,7 @@ test("auto-recall aborts while fusion validates BM25-only hits", async () => {
   }
   const elapsed = Date.now() - start;
 
-  assert.equal(hasIdCallCount, 20, "BM25-only validation should start in parallel");
+  assert.ok(hasIdsCallCount >= 1, "BM25-only batch validation should have started");
   assert.ok(errorCaught !== undefined, "retrieve should throw on abort during fusion");
   assert.ok(
     elapsed < 2_000,

@@ -4,6 +4,24 @@
 
 import type { RetrievalResult } from "./retriever-types.js";
 
+// Module-level WeakMap cache for Arrow Vector → plain array + norm conversions.
+// Keyed by the original vector object reference, so repeated queries on the
+// same LanceDB row (same Arrow Vector object) skip Array.from() + sqrt().
+const vectorConversionCache = new WeakMap<object, { arr: number[]; norm: number }>();
+
+function getOrConvertVector(vec: unknown): { arr: number[]; norm: number } | null {
+  if (!vec) return null;
+  const ref = vec as object;
+  const cached = vectorConversionCache.get(ref);
+  if (cached) return cached;
+  const arr = Array.from(vec as Iterable<number>);
+  let normSq = 0;
+  for (let i = 0; i < arr.length; i++) normSq += arr[i] * arr[i];
+  const result = { arr, norm: Math.sqrt(normSq) };
+  vectorConversionCache.set(ref, result);
+  return result;
+}
+
 /**
  * MMR-inspired diversity filter: greedily select results that are both
  * relevant (high score) and diverse (low similarity to already-selected).
@@ -27,13 +45,10 @@ export function applyMMRDiversity(
   const vectorCache = new Map<string, number[]>();
   const normCache = new Map<string, number>();
   for (const r of results) {
-    const vec = r.entry.vector;
-    if (vec?.length) {
-      const arr = Array.from(vec as Iterable<number>);
-      let norm = 0;
-      for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
-      vectorCache.set(r.entry.id, arr);
-      normCache.set(r.entry.id, Math.sqrt(norm));
+    const converted = getOrConvertVector(r.entry.vector);
+    if (converted) {
+      vectorCache.set(r.entry.id, converted.arr);
+      normCache.set(r.entry.id, converted.norm);
     }
   }
 

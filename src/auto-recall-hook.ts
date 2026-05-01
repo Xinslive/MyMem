@@ -8,7 +8,7 @@ import { resolveHookAgentId, parsePositiveInt } from "./config-utils.js";
 import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
 import { shouldSkipRetrieval } from "./adaptive-retrieval.js";
-import { parseSmartMetadata, toLifecycleMemory } from "./smart-metadata.js";
+import { parseSmartMetadata, toLifecycleMemory, type SmartMemoryMetadata } from "./smart-metadata.js";
 import {
   buildAutoCaptureConversationKeyFromIngress,
   buildAutoCaptureConversationKeyFromSessionKey,
@@ -36,6 +36,7 @@ interface RecallResult {
     importance: number;
     timestamp: number;
     metadata?: string;
+    _parsedMeta?: SmartMemoryMetadata;
   };
   score?: number;
 }
@@ -354,7 +355,7 @@ export function registerAutoRecallHook(params: {
         ? applyMemoryTypeBoost(
             categoryBoosted,
             intent,
-            (entry: RecallResult["entry"]) => parseSmartMetadata(entry.metadata, toSmartMetadataEntry(entry)).memory_type,
+            (entry: RecallResult["entry"]) => (entry._parsedMeta ?? parseSmartMetadata(entry.metadata, toSmartMetadataEntry(entry))).memory_type,
           )
         : categoryBoosted;
 
@@ -392,7 +393,7 @@ export function registerAutoRecallHook(params: {
       let stateFilteredCount = 0;
       let suppressedFilteredCount = 0;
       const governanceEligible = finalResults.filter((r: RecallResult) => {
-        const meta = parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
+        const meta = r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
         if (meta.state !== "confirmed") {
           stateFilteredCount++;
           api.logger.debug("mymem: governance: filtered id=" + r.entry.id + " reason=state(" + meta.state + ") score=" + (r.score ? r.score.toFixed(3) : "?") + " text=" + r.entry.text.slice(0, 50));
@@ -428,7 +429,7 @@ export function registerAutoRecallHook(params: {
       })();
 
       const preBudgetCandidates = governanceEligible.map((r: RecallResult) => {
-        const metaObj = parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
+        const metaObj = r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
         const displayCategory = metaObj.memory_category || r.entry.category;
         const displayTier = metaObj.tier || "";
         const tierPrefix = displayTier ? "[" + displayTier.charAt(0).toUpperCase() + "]" : "";

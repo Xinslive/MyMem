@@ -766,15 +766,7 @@ export class MemoryRetriever {
           queryVector,
           rerankInput,
           this.config,
-          async (ids: string[]) => {
-            const hasIds = (this.store as { hasIds?: (ids: string[]) => Promise<Set<string>> }).hasIds;
-            if (typeof hasIds === "function") return hasIds(ids);
-            const results = new Set<string>();
-            for (const id of ids) {
-              if (await this.store.hasId(id)) results.add(id);
-            }
-            return results;
-          },
+          async (ids: string[]) => this.store.hasIds(ids),
           this.logger,
           signal,
         );
