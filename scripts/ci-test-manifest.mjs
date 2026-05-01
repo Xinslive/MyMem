@@ -32,6 +32,7 @@ export const CI_TEST_MANIFEST = [
   { group: "storage-and-schema", runner: "node", file: "test/file-lock-timeout.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/flush-batch.test.mjs", args: ["--test"] },
   { group: "cli-smoke", runner: "node", file: "test/functional-e2e.mjs" },
+  { group: "core-regression", runner: "node", file: "test/gateway-maintenance.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/governance-metadata.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/hook-enhancements.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/hook-dedup-phase1.test.mjs", args: ["--test"] },

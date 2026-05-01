@@ -169,6 +169,98 @@ describe("HybridNoiseDetector - Instance", () => {
     assert.deepEqual(results[1].detectionMethods, ["embedding"]);
   });
 
+  it("checkBatch() learns duplicate regex hits once through batch embeddings", async () => {
+    const embedBatchCalls = [];
+    const learned = [];
+    const embedder = {
+      embed: async () => {
+        throw new Error("single embed should not be used for batch regex learning");
+      },
+      embedBatch: async (texts) => {
+        embedBatchCalls.push(texts);
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const noiseBank = {
+      initialized: true,
+      size: 5,
+      isNoise: () => false,
+      maxSimilarity: () => 0.1,
+      learn: (vector) => {
+        learned.push(vector);
+      },
+    };
+    const detector = new HybridNoiseDetector(embedder, noiseBank, {
+      regexLearningTtlMs: 600_000,
+    });
+
+    const results = await detector.checkBatch([
+      "I don't remember anything",
+      "I don't remember anything",
+    ]);
+
+    assert.equal(results[0].isNoise, true);
+    assert.equal(results[1].isNoise, true);
+    assert.deepEqual(embedBatchCalls, [["I don't remember anything"]]);
+    assert.equal(learned.length, 1);
+  });
+
+  it("checkBatch() gates low-similarity regex learning when the bank is established", async () => {
+    const learned = [];
+    const embedder = {
+      embed: async () => [0, 1, 0],
+      embedBatch: async (texts) => texts.map(() => [0, 1, 0]),
+    };
+    const noiseBank = {
+      initialized: true,
+      size: 25,
+      isNoise: () => false,
+      maxSimilarity: () => 0.2,
+      learn: (vector) => {
+        learned.push(vector);
+      },
+    };
+    const detector = new HybridNoiseDetector(embedder, noiseBank);
+
+    const results = await detector.checkBatch(["Do you remember what I told you?"]);
+
+    assert.equal(results[0].isNoise, true);
+    assert.deepEqual(results[0].detectionMethods, ["regex"]);
+    assert.equal(learned.length, 0);
+  });
+
+  it("checkBatch() still returns regex detections when regex learning embeddings fail", async () => {
+    const debugLogs = [];
+    const embedder = {
+      embed: async () => {
+        throw new Error("single embed should not be used");
+      },
+      embedBatch: async () => {
+        throw new Error("embedding outage");
+      },
+    };
+    const noiseBank = {
+      initialized: true,
+      size: 5,
+      isNoise: () => false,
+      maxSimilarity: () => 1,
+      learn: () => {
+        throw new Error("learn should not be called after embed failure");
+      },
+    };
+    const detector = new HybridNoiseDetector(embedder, noiseBank, {
+      debugLog: (message) => debugLogs.push(message),
+    });
+
+    const results = await detector.checkBatch([
+      "I don't have any information about that",
+      "Do you remember my preference?",
+    ]);
+
+    assert.deepEqual(results.map((result) => result.isNoise), [true, true]);
+    assert.ok(debugLogs.some((line) => line.includes("failed to learn regex noise batch")));
+  });
+
   it("filter() removes noise items from array", async () => {
     const detector = new HybridNoiseDetector(null, undefined, {
       learnFromRegex: false,

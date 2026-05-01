@@ -17,6 +17,7 @@ import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { analyzeIntent, applyCategoryBoost, applyMemoryTypeBoost } from "./intent-analyzer.js";
 import { sanitizeForContext } from "./capture-detection.js";
 import { extractTextContent } from "./session-utils.js";
+import { AutoRecallMetadataAccumulator } from "./auto-recall-metadata-accumulator.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import type { DecayEngine } from "./decay-engine.js";
 import type { TierManager } from "./tier-manager.js";
@@ -177,6 +178,11 @@ export function registerAutoRecallHook(params: {
 
   const recallMode = config.recallMode || "full";
   if (recallMode === "off") return;
+
+  const metadataAccumulator = new AutoRecallMetadataAccumulator({
+    store: params.store,
+    logger: api.logger,
+  });
 
   async function retrieveWithRetry(retrieveParams: Pick<RetrievalContext, "query" | "limit" | "scopeFilter" | "category" | "source" | "signal" | "candidatePoolSize" | "overFetchMultiplier" | "degradeAfterMs" | "deadlineAt">): Promise<RetrievalResult[]> {
     try {
@@ -540,39 +546,14 @@ export function registerAutoRecallHook(params: {
       }
 
       const injectedAt = Date.now();
-      // Fire-and-forget: batch-update injection metadata in a single lock acquisition.
-      // These writes are best-effort and should not add latency to the auto-recall path.
-      void params.store.patchMetadataBatch(
-        selected.map((item) => {
-          const meta = item.meta;
-          const staleInjected =
-            typeof meta.last_injected_at === "number" &&
-            meta.last_injected_at > 0 &&
-            (
-              typeof meta.last_confirmed_use_at !== "number" ||
-              meta.last_confirmed_use_at < meta.last_injected_at
-            );
-          const nextBadRecallCount = staleInjected
-            ? (meta.bad_recall_count as number) + 1
-            : (meta.bad_recall_count as number);
-          const shouldSuppress = nextBadRecallCount >= 3 && minRepeated > 0;
-          return {
-            id: item.id,
-            patch: {
-              injected_count: (meta.injected_count as number) + 1,
-              last_injected_at: injectedAt,
-              bad_recall_count: nextBadRecallCount,
-              suppressed_until_turn: shouldSuppress
-                ? Math.max(meta.suppressed_until_turn as number, currentTurn + minRepeated)
-                : meta.suppressed_until_turn,
-              access_count: ((meta.access_count as number) ?? 0) + 1,
-              last_accessed_at: injectedAt,
-            },
-          };
-        }),
-        accessibleScopes,
-      ).catch((err) =>
-        api.logger.warn("mymem: injection metadata batch update failed: " + String(err)),
+      metadataAccumulator.enqueue(
+        selected.map((item) => ({ id: item.id, meta: item.meta })),
+        {
+          injectedAt,
+          currentTurn,
+          minRepeated,
+          scopeFilter: accessibleScopes,
+        },
       );
 
       // Run tier maintenance asynchronously after injection
@@ -643,7 +624,7 @@ export function registerAutoRecallHook(params: {
   }, { priority: 10 });
 
   // Clean up auto-recall session state on session end
-  api.on("session_end", (_event: any, ctx: any) => {
+  api.on("session_end", async (_event: any, ctx: any) => {
     const sessionStateKey = resolveAutoRecallSessionStateKey({
       channelId: ctx?.channelId,
       conversationId: ctx?.conversationId,
@@ -660,6 +641,7 @@ export function registerAutoRecallHook(params: {
     })) {
       params.lastRawUserMessage.delete(cacheKey);
     }
+    await metadataAccumulator.flushNow();
   }, { priority: 10 });
 
   /**

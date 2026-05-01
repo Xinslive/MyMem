@@ -19,6 +19,10 @@ import type { Embedder } from "./embedder.js";
 import { isNoise as isNoiseRegex, filterNoise, ENVELOPE_NOISE_PATTERNS } from "./noise-filter.js";
 import { NoisePrototypeBank } from "./noise-prototypes.js";
 
+export const REGEX_NOISE_LEARNING_TTL_MS = 10 * 60 * 1_000;
+const REGEX_LEARNING_SIMILARITY_THRESHOLD = 0.82;
+const SMALL_NOISE_BANK_SIZE = 20;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -52,6 +56,8 @@ export class HybridNoiseDetector {
   private readonly noiseBank: NoisePrototypeBank;
   private readonly embedder: Embedder | null;
   private readonly learnFromRegex: boolean;
+  private readonly regexLearningTtlMs: number;
+  private readonly recentRegexLearnCandidates = new Map<string, number>();
   private debugLog: (msg: string) => void;
 
   /**
@@ -66,6 +72,8 @@ export class HybridNoiseDetector {
     options: {
       /** Learn from regex-detected noise by adding to prototype bank (default: true) */
       learnFromRegex?: boolean;
+      /** Short-term deduplication TTL for regex learning candidates (default: 10 minutes) */
+      regexLearningTtlMs?: number;
       /** Log debug messages (default: no-op) */
       debugLog?: (msg: string) => void;
     } = {},
@@ -73,6 +81,7 @@ export class HybridNoiseDetector {
     this.embedder = embedder ?? null;
     this.noiseBank = noiseBank ?? new NoisePrototypeBank();
     this.learnFromRegex = options.learnFromRegex ?? true;
+    this.regexLearningTtlMs = Math.max(0, Math.floor(options.regexLearningTtlMs ?? REGEX_NOISE_LEARNING_TTL_MS));
     this.debugLog = options.debugLog ?? (() => {});
     this.regexOnly = !this.embedder;
   }
@@ -154,8 +163,7 @@ export class HybridNoiseDetector {
           const vec = await this.embedder.embed(trimmed);
           if (vec && vec.length > 0) {
             const maxSim = this.noiseBank.maxSimilarity(vec);
-            // Learn if similar to existing prototypes OR bank is still small
-            if (maxSim >= 0.5 || this.noiseBank.size < 20) {
+            if (this.shouldLearnRegexCandidate(maxSim)) {
               this.noiseBank.learn(vec);
               this.debugLog(`HybridNoiseDetector: learned noise from regex match (maxSim=${maxSim.toFixed(3)}): "${trimmed.slice(0, 50)}..."`);
             }
@@ -188,13 +196,12 @@ export class HybridNoiseDetector {
 
     const results: NoiseCheckResult[] = new Array(texts.length);
     const textsToEmbed: { index: number; text: string }[] = [];
-    const regexFlags: boolean[] = new Array(texts.length);
+    const regexLearnCandidates: string[] = [];
 
     // Step 1: Fast regex pass on all texts
     for (let i = 0; i < texts.length; i++) {
       const trimmed = texts[i].trim();
       const regexResult = this.checkRegex(trimmed);
-      regexFlags[i] = regexResult.isNoise;
 
       if (regexResult.isNoise) {
         results[i] = {
@@ -203,9 +210,8 @@ export class HybridNoiseDetector {
           shouldLearn: true,
         };
 
-        // Learn from regex match if configured
-        if (learnOnRegexMatch && this.learnFromRegex) {
-          this.learnFromRegexMatch(trimmed).catch(() => {}); // Fire and forget
+        if (learnOnRegexMatch && this.learnFromRegex && this.shouldQueueRegexLearning(trimmed)) {
+          regexLearnCandidates.push(trimmed);
         }
       } else {
         // Defer to embedding check or mark clean for now
@@ -270,6 +276,8 @@ export class HybridNoiseDetector {
       }
     }
 
+    await this.learnRegexCandidatesBatch(regexLearnCandidates);
+
     return results;
   }
 
@@ -300,8 +308,11 @@ export class HybridNoiseDetector {
     try {
       const vec = await this.embedder.embed(text);
       if (vec && vec.length > 0) {
-        this.noiseBank.learn(vec);
-        this.debugLog(`HybridNoiseDetector: learned noise from regex match: "${text.slice(0, 50)}..."`);
+        const maxSim = this.noiseBank.maxSimilarity(vec);
+        if (this.shouldLearnRegexCandidate(maxSim)) {
+          this.noiseBank.learn(vec);
+          this.debugLog(`HybridNoiseDetector: learned noise from regex match (maxSim=${maxSim.toFixed(3)}): "${text.slice(0, 50)}..."`);
+        }
       }
     } catch (err) {
       this.debugLog(`HybridNoiseDetector: failed to learn from regex match - ${err}`);
@@ -374,6 +385,59 @@ export class HybridNoiseDetector {
     }
 
     return { isNoise: false };
+  }
+
+  private shouldLearnRegexCandidate(maxSimilarity: number): boolean {
+    return this.noiseBank.size < SMALL_NOISE_BANK_SIZE ||
+      maxSimilarity >= REGEX_LEARNING_SIMILARITY_THRESHOLD;
+  }
+
+  private shouldQueueRegexLearning(text: string, now = Date.now()): boolean {
+    if (!this.embedder || !this.noiseBank.initialized) return false;
+    const key = text.trim().toLowerCase();
+    if (!key) return false;
+
+    this.pruneRegexLearningTtl(now);
+
+    const lastSeen = this.recentRegexLearnCandidates.get(key);
+    if (lastSeen !== undefined && now - lastSeen < this.regexLearningTtlMs) {
+      return false;
+    }
+
+    this.recentRegexLearnCandidates.set(key, now);
+    return true;
+  }
+
+  private pruneRegexLearningTtl(now: number): void {
+    if (this.regexLearningTtlMs <= 0 || this.recentRegexLearnCandidates.size === 0) return;
+    for (const [key, seenAt] of this.recentRegexLearnCandidates.entries()) {
+      if (now - seenAt >= this.regexLearningTtlMs) {
+        this.recentRegexLearnCandidates.delete(key);
+      }
+    }
+  }
+
+  private async learnRegexCandidatesBatch(candidates: string[]): Promise<void> {
+    if (candidates.length === 0 || !this.embedder || !this.noiseBank.initialized) return;
+
+    try {
+      const vectors = await this.embedder.embedBatch(candidates);
+      for (let i = 0; i < candidates.length; i++) {
+        const vec = vectors[i];
+        if (!vec || vec.length === 0) continue;
+
+        const maxSim = this.noiseBank.maxSimilarity(vec);
+        if (!this.shouldLearnRegexCandidate(maxSim)) {
+          this.debugLog(`HybridNoiseDetector.checkBatch: skipped regex noise learning (maxSim=${maxSim.toFixed(3)}): "${candidates[i].slice(0, 50)}..."`);
+          continue;
+        }
+
+        this.noiseBank.learn(vec);
+        this.debugLog(`HybridNoiseDetector.checkBatch: learned regex noise (maxSim=${maxSim.toFixed(3)}): "${candidates[i].slice(0, 50)}..."`);
+      }
+    } catch (err) {
+      this.debugLog(`HybridNoiseDetector.checkBatch: failed to learn regex noise batch - ${err}`);
+    }
   }
 
   private async checkEmbedding(text: string): Promise<{ isNoise: boolean; similarity?: number }> {

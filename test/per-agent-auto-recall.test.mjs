@@ -18,6 +18,7 @@ const pluginModule = jiti("../index.ts");
 const myMemPlugin = pluginModule.default || pluginModule;
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
 const { registerAutoRecallHook } = jiti("../src/auto-recall-hook.ts");
+const { AutoRecallMetadataAccumulator } = jiti("../src/auto-recall-metadata-accumulator.ts");
 const retrieverModuleForMock = jiti("../src/retriever.js");
 const embedderModuleForMock = jiti("../src/embedder.js");
 const origCreateRetriever = retrieverModuleForMock.createRetriever;
@@ -141,6 +142,201 @@ describe("autoRecallExcludeAgents", () => {
       autoRecallExcludeAgents: ["cron-worker"],
     });
     assert.deepEqual(parsed.autoRecallExcludeAgents, ["cron-worker"]);
+  });
+});
+
+describe("auto-recall metadata write-behind", () => {
+  it("coalesces repeated injections for the same memory and flushes on session_end", async () => {
+    const patches = [];
+    const store = {
+      async patchMetadataBatch(batch, scopeFilter) {
+        patches.push({ batch, scopeFilter });
+        return batch.length;
+      },
+    };
+    const warns = [];
+    const accumulator = new AutoRecallMetadataAccumulator({
+      store,
+      logger: { warn(message) { warns.push(message); } },
+      debounceMs: 60_000,
+    });
+
+    accumulator.enqueue(
+      [{
+        id: "memory-1",
+        meta: {
+          injected_count: 2,
+          access_count: 5,
+          bad_recall_count: 1,
+          suppressed_until_turn: 0,
+          last_injected_at: 100,
+          last_confirmed_use_at: 50,
+        },
+      }],
+      { injectedAt: 1_000, currentTurn: 10, minRepeated: 8, scopeFilter: ["global"] },
+    );
+    accumulator.enqueue(
+      [{
+        id: "memory-1",
+        meta: {
+          injected_count: 2,
+          access_count: 5,
+          bad_recall_count: 1,
+          suppressed_until_turn: 0,
+          last_injected_at: 100,
+          last_confirmed_use_at: 50,
+        },
+      }],
+      { injectedAt: 1_500, currentTurn: 11, minRepeated: 8, scopeFilter: ["global"] },
+    );
+
+    assert.equal(patches.length, 0);
+    await accumulator.flushNow();
+
+    assert.equal(warns.length, 0);
+    assert.equal(patches.length, 1);
+    assert.deepEqual(patches[0].scopeFilter, ["global"]);
+    assert.deepEqual(patches[0].batch, [{
+      id: "memory-1",
+      patch: {
+        injected_count: 4,
+        last_injected_at: 1_500,
+        bad_recall_count: 3,
+        suppressed_until_turn: 19,
+        access_count: 7,
+        last_accessed_at: 1_500,
+      },
+    }]);
+  });
+
+  it("treats a pending unconfirmed injection as stale within the debounce window", async () => {
+    const patches = [];
+    const accumulator = new AutoRecallMetadataAccumulator({
+      store: {
+        async patchMetadataBatch(batch) {
+          patches.push(batch);
+          return batch.length;
+        },
+      },
+      logger: { warn() {} },
+      debounceMs: 60_000,
+    });
+    const meta = {
+      injected_count: 0,
+      access_count: 0,
+      bad_recall_count: 0,
+      suppressed_until_turn: 0,
+    };
+
+    accumulator.enqueue([{ id: "memory-1", meta }], {
+      injectedAt: 1_000,
+      currentTurn: 1,
+      minRepeated: 8,
+      scopeFilter: ["global"],
+    });
+    accumulator.enqueue([{ id: "memory-1", meta }], {
+      injectedAt: 1_500,
+      currentTurn: 2,
+      minRepeated: 8,
+      scopeFilter: ["global"],
+    });
+    await accumulator.flushNow();
+
+    assert.equal(patches[0][0].patch.injected_count, 2);
+    assert.equal(patches[0][0].patch.bad_recall_count, 1);
+  });
+
+  it("session_end flushes pending auto-recall metadata", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-session-end-flush-"));
+    const patches = [];
+    const memoryResult = {
+      entry: {
+        id: "session-end-memory",
+        text: "session end should flush metadata",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          l0_abstract: "session end should flush metadata",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          injected_count: 0,
+          bad_recall_count: 0,
+          suppressed_until_turn: 0,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+
+    const store = {
+      async patchMetadataBatch(batch, scopeFilter) {
+        patches.push({ batch, scopeFilter });
+        return batch.length;
+      },
+    };
+    const retriever = {
+      async retrieve() {
+        return [memoryResult];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMinRepeated: 8,
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store,
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+
+      const [{ handler: autoRecallHook }] = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: sessionEndHook }] = harness.eventHandlers.get("session_end") || [];
+      await autoRecallHook(
+        { prompt: "Please recall the session end metadata.", sessionKey: "agent:main:session:flush" },
+        { sessionKey: "agent:main:session:flush", agentId: "main" },
+      );
+
+      assert.equal(patches.length, 0);
+      await sessionEndHook({}, { sessionKey: "agent:main:session:flush", agentId: "main" });
+
+      assert.equal(patches.length, 1);
+      assert.equal(patches[0].batch[0].id, "session-end-memory");
+      assert.equal(patches[0].batch[0].patch.injected_count, 1);
+      assert.equal(patches[0].batch[0].patch.access_count, 1);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
   });
 });
 

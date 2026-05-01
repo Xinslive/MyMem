@@ -4,7 +4,7 @@
  * Contains the `runGatewayMaintenance()` function that runs on `gateway_start`:
  * - Preference distillation
  * - Experience compilation
- * - Lifecycle maintenance (prune + tier)
+ * - Lifecycle maintenance
  * - Memory compaction
  */
 
@@ -51,12 +51,164 @@ export interface PluginRegistrationContext {
   resolvedDbPath: string;
 }
 
+type GatewayMaintenanceDeps = {
+  runPreferenceDistiller: typeof runPreferenceDistiller;
+  shouldRunPreferenceDistiller: typeof shouldRunPreferenceDistiller;
+  recordPreferenceDistillerRun: typeof recordPreferenceDistillerRun;
+  runExperienceCompiler: typeof runExperienceCompiler;
+  shouldRunExperienceCompiler: typeof shouldRunExperienceCompiler;
+  recordExperienceCompilerRun: typeof recordExperienceCompilerRun;
+  runLifecycleMaintenance: typeof runLifecycleMaintenance;
+  shouldRunLifecycleMaintenance: typeof shouldRunLifecycleMaintenance;
+  recordLifecycleMaintenanceRun: typeof recordLifecycleMaintenanceRun;
+  runCompaction: typeof runCompaction;
+  shouldRunCompaction: typeof shouldRunCompaction;
+  recordCompactionRun: typeof recordCompactionRun;
+};
+
+const defaultGatewayMaintenanceDeps: GatewayMaintenanceDeps = {
+  runPreferenceDistiller,
+  shouldRunPreferenceDistiller,
+  recordPreferenceDistillerRun,
+  runExperienceCompiler,
+  shouldRunExperienceCompiler,
+  recordExperienceCompilerRun,
+  runLifecycleMaintenance,
+  shouldRunLifecycleMaintenance,
+  recordLifecycleMaintenanceRun,
+  runCompaction,
+  shouldRunCompaction,
+  recordCompactionRun,
+};
+
+async function runGatewayMaintenanceOnce(
+  ctx: PluginRegistrationContext,
+  deps: GatewayMaintenanceDeps = defaultGatewayMaintenanceDeps,
+): Promise<void> {
+  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, resolvedDbPath } = ctx;
+  const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
+  const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
+  const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
+  const compilerStateFile = join(dirname(resolvedDbPath), ".experience-compiler-state.json");
+
+  const compactionCfg: CompactionConfig | null = config.memoryCompaction?.enabled ? {
+    enabled: true,
+    minAgeDays: config.memoryCompaction!.minAgeDays ?? 7,
+    similarityThreshold: config.memoryCompaction!.similarityThreshold ?? 0.88,
+    minClusterSize: config.memoryCompaction!.minClusterSize ?? 2,
+    maxMemoriesToScan: config.memoryCompaction!.maxMemoriesToScan ?? 200,
+    dryRun: config.memoryCompaction!.dryRun === true,
+    cooldownHours: config.memoryCompaction!.cooldownHours ?? 4,
+    mergeMode: config.memoryCompaction!.mergeMode ?? "llm",
+    deleteSourceMemories: config.memoryCompaction!.deleteSourceMemories !== false,
+    maxLlmClustersPerRun: config.memoryCompaction!.maxLlmClustersPerRun ?? 10,
+  } : null;
+
+  const lifecycleCfg = {
+    enabled: config.lifecycleMaintenance?.enabled === true,
+    cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 4,
+    maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 500,
+    archiveThreshold: config.lifecycleMaintenance?.archiveThreshold ?? 0.15,
+    dryRun: config.lifecycleMaintenance?.dryRun === true,
+    deleteMode: config.lifecycleMaintenance?.deleteMode ?? "archive",
+    deleteReasons: config.lifecycleMaintenance?.deleteReasons ?? ["expired", "superseded", "bad_recall", "stale_unaccessed"],
+    hardDeleteReasons: config.lifecycleMaintenance?.hardDeleteReasons ?? ["duplicate_cluster_source", "noise", "superseded_fragment"],
+  };
+
+  const compactionLifecycle: CompactorLifecycle = {
+    store: {
+      getById: store.getById.bind(store),
+      update: async (entry) => {
+        await store.update(entry.id, {
+          text: entry.text,
+          vector: entry.vector,
+          importance: entry.importance,
+          category: entry.category,
+          metadata: entry.metadata,
+        });
+      },
+    },
+  };
+
+  const [runDistiller, runCompiler, runLifecycle, runCompact] = await Promise.all([
+    config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
+      ? deps.shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
+      : Promise.resolve(false),
+    config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill
+      ? deps.shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 4)
+      : Promise.resolve(false),
+    lifecycleCfg.enabled ? deps.shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
+    compactionCfg ? deps.shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),
+  ]);
+
+  let distillResult: Awaited<ReturnType<typeof runPreferenceDistiller>> | null = null;
+  let compilerResult: Awaited<ReturnType<typeof runExperienceCompiler>> | null = null;
+  let lifecycleResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
+  let compactionResult: Awaited<ReturnType<typeof runCompaction>> | null = null;
+
+  if (runDistiller) {
+    distillResult = await deps.runPreferenceDistiller(
+      { store, embedder, logger: api.logger },
+      config.preferenceDistiller,
+    );
+    await deps.recordPreferenceDistillerRun(distillerStateFile);
+  }
+
+  if (runCompiler) {
+    compilerResult = await deps.runExperienceCompiler(
+      { store, embedder, logger: api.logger },
+      config.experienceCompiler,
+    );
+    await deps.recordExperienceCompilerRun(compilerStateFile);
+  }
+
+  if (runLifecycle) {
+    lifecycleResult = await deps.runLifecycleMaintenance(
+      { store, decayEngine, tierManager, logger: api.logger },
+      { ...lifecycleCfg, phase: "all" },
+    );
+    await deps.recordLifecycleMaintenanceRun(lifecycleStateFile);
+  }
+
+  if (runCompact && compactionCfg) {
+    compactionResult = await deps.runCompaction(
+      store as never,
+      embedder,
+      compactionCfg,
+      undefined,
+      api.logger,
+      compactionLifecycle,
+      smartExtractionLlmClient ?? undefined,
+    );
+    await deps.recordCompactionRun(compactionStateFile);
+  }
+
+  if (distillResult || compilerResult || lifecycleResult || compactionResult) {
+    api.logger.info(
+      `memory-maintenance [auto]: ` +
+      `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
+      `compiled=${compilerResult?.created ?? 0}/${compilerResult?.updated ?? 0} ` +
+      `lifecycleScanned=${lifecycleResult?.scanned ?? 0} ` +
+      `compactionScanned=${compactionResult?.scanned ?? 0} ` +
+      `clusters=${compactionResult?.clustersFound ?? 0} ` +
+      `created=${compactionResult?.memoriesCreated ?? 0} ` +
+      `deleted=${(lifecycleResult?.deleted ?? 0) + (compactionResult?.memoriesDeleted ?? 0)} ` +
+      `deleteReasons=${JSON.stringify(lifecycleResult?.deleteReasons ?? {})} ` +
+      `llmRefined=${compactionResult?.llmRefined ?? 0} ` +
+      `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
+      `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
+      `archived=${lifecycleResult?.archived ?? 0} ` +
+      `promoted=${lifecycleResult?.promoted ?? 0} demoted=${lifecycleResult?.demoted ?? 0}`,
+    );
+  }
+}
+
 /**
  * Register the `gateway_start` hook that runs periodic maintenance tasks:
  * preference distillation, experience compilation, lifecycle maintenance, and compaction.
  */
 export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void {
-  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, resolvedDbPath } = ctx;
+  const { api, config } = ctx;
 
   if (
     !config.memoryCompaction?.enabled &&
@@ -68,132 +220,13 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
   }
 
   api.on("gateway_start", () => {
-    const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
-    const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
-    const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
-    const compilerStateFile = join(dirname(resolvedDbPath), ".experience-compiler-state.json");
-
-    const compactionCfg: CompactionConfig | null = config.memoryCompaction?.enabled ? {
-      enabled: true,
-      minAgeDays: config.memoryCompaction!.minAgeDays ?? 7,
-      similarityThreshold: config.memoryCompaction!.similarityThreshold ?? 0.88,
-      minClusterSize: config.memoryCompaction!.minClusterSize ?? 2,
-      maxMemoriesToScan: config.memoryCompaction!.maxMemoriesToScan ?? 200,
-      dryRun: config.memoryCompaction!.dryRun === true,
-      cooldownHours: config.memoryCompaction!.cooldownHours ?? 4,
-      mergeMode: config.memoryCompaction!.mergeMode ?? "llm",
-      deleteSourceMemories: config.memoryCompaction!.deleteSourceMemories !== false,
-      maxLlmClustersPerRun: config.memoryCompaction!.maxLlmClustersPerRun ?? 10,
-    } : null;
-
-    const lifecycleCfg = {
-      enabled: config.lifecycleMaintenance?.enabled === true,
-      cooldownHours: config.lifecycleMaintenance?.cooldownHours ?? 4,
-      maxMemoriesToScan: config.lifecycleMaintenance?.maxMemoriesToScan ?? 500,
-      archiveThreshold: config.lifecycleMaintenance?.archiveThreshold ?? 0.15,
-      dryRun: config.lifecycleMaintenance?.dryRun === true,
-      deleteMode: config.lifecycleMaintenance?.deleteMode ?? "archive",
-      deleteReasons: config.lifecycleMaintenance?.deleteReasons ?? ["expired", "superseded", "bad_recall", "stale_unaccessed"],
-      hardDeleteReasons: config.lifecycleMaintenance?.hardDeleteReasons ?? ["duplicate_cluster_source", "noise", "superseded_fragment"],
-    };
-
-    const compactionLifecycle: CompactorLifecycle = {
-      store: {
-        getById: store.getById.bind(store),
-        update: async (entry) => {
-          await store.update(entry.id, {
-            text: entry.text,
-            vector: entry.vector,
-            importance: entry.importance,
-            category: entry.category,
-            metadata: entry.metadata,
-          });
-        },
-      },
-    };
-
-    Promise.all([
-      config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
-        ? shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
-        : Promise.resolve(false),
-      config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill
-        ? shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 4)
-        : Promise.resolve(false),
-      lifecycleCfg.enabled ? shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
-      compactionCfg ? shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),
-    ])
-      .then(async ([runDistiller, runCompiler, runLifecycle, runCompact]) => {
-        let distillResult: Awaited<ReturnType<typeof runPreferenceDistiller>> | null = null;
-        let compilerResult: Awaited<ReturnType<typeof runExperienceCompiler>> | null = null;
-        let pruneResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
-        let tierResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
-        let compactionResult: Awaited<ReturnType<typeof runCompaction>> | null = null;
-
-        if (runDistiller) {
-          distillResult = await runPreferenceDistiller(
-            { store, embedder, logger: api.logger },
-            config.preferenceDistiller,
-          );
-          await recordPreferenceDistillerRun(distillerStateFile);
-        }
-
-        if (runCompiler) {
-          compilerResult = await runExperienceCompiler(
-            { store, embedder, logger: api.logger },
-            config.experienceCompiler,
-          );
-          await recordExperienceCompilerRun(compilerStateFile);
-        }
-
-        if (runLifecycle) {
-          pruneResult = await runLifecycleMaintenance(
-            { store, decayEngine, tierManager, logger: api.logger },
-            { ...lifecycleCfg, phase: "prune" },
-          );
-        }
-
-        if (runCompact && compactionCfg) {
-          compactionResult = await runCompaction(
-            store as never,
-            embedder,
-            compactionCfg,
-            undefined,
-            api.logger,
-            compactionLifecycle,
-            smartExtractionLlmClient ?? undefined,
-          );
-          await recordCompactionRun(compactionStateFile);
-        }
-
-        if (runLifecycle) {
-          tierResult = await runLifecycleMaintenance(
-            { store, decayEngine, tierManager, logger: api.logger },
-            { ...lifecycleCfg, phase: "tier" },
-          );
-          await recordLifecycleMaintenanceRun(lifecycleStateFile);
-        }
-
-        if (distillResult || compilerResult || pruneResult || compactionResult || tierResult) {
-          api.logger.info(
-            `memory-maintenance [auto]: ` +
-            `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
-            `compiled=${compilerResult?.created ?? 0}/${compilerResult?.updated ?? 0} ` +
-            `lifecycleScanned=${(pruneResult?.scanned ?? 0) + (tierResult?.scanned ?? 0)} ` +
-            `compactionScanned=${compactionResult?.scanned ?? 0} ` +
-            `clusters=${compactionResult?.clustersFound ?? 0} ` +
-            `created=${compactionResult?.memoriesCreated ?? 0} ` +
-            `deleted=${(pruneResult?.deleted ?? 0) + (compactionResult?.memoriesDeleted ?? 0)} ` +
-            `deleteReasons=${JSON.stringify(pruneResult?.deleteReasons ?? {})} ` +
-            `llmRefined=${compactionResult?.llmRefined ?? 0} ` +
-            `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
-            `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
-            `archived=${pruneResult?.archived ?? 0} ` +
-            `promoted=${tierResult?.promoted ?? 0} demoted=${tierResult?.demoted ?? 0}`,
-          );
-        }
-      })
+    runGatewayMaintenanceOnce(ctx)
       .catch((err) => {
         api.logger.warn(`memory-maintenance [auto]: failed: ${String(err)}`);
       });
   });
 }
+
+export const __test__ = {
+  runGatewayMaintenanceOnce,
+};
