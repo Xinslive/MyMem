@@ -64,7 +64,12 @@ function createRetrieverHarness(
       },
       ...embedderOverrides,
     },
-    config,
+    {
+      minScore: 0,
+      hardMinScore: 0,
+      filterNoise: false,
+      ...config,
+    },
   );
 
   return { retriever };

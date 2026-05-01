@@ -4,6 +4,7 @@
 
 import type * as LanceDB from "@lancedb/lancedb";
 import { Index as LanceDbIndex } from "@lancedb/lancedb";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -95,6 +96,12 @@ type StatsResult = {
 };
 
 const TABLE_NAME = "memories";
+const serializedStoreContext = new AsyncLocalStorage<Set<object>>();
+const batchStoreContext = new AsyncLocalStorage<Map<object, MemoryEntry[]>>();
+
+type BatchRunOptions = {
+  onBeforeFlush?: () => void;
+};
 
 export class MemoryStore {
   private db: LanceDB.Connection | null = null;
@@ -108,6 +115,10 @@ export class MemoryStore {
   private _batchBuffer: MemoryEntry[] = [];
   private _batchActive = false;
 
+  // In-process write serialization. Tail is reset when the queue drains so a
+  // long-running process does not retain an ever-growing promise chain.
+  private _serialChain: Promise<void> = Promise.resolve();
+
   // Stats result cache (invalidated on writes)
   private _statsCache: { key: string; result: StatsResult; ts: number } | null = null;
   private static STATS_CACHE_TTL_MS = 30_000;
@@ -120,15 +131,82 @@ export class MemoryStore {
     this._batchActive = true;
   }
 
+  /** Exit batch mode and discard buffered entries. Used when a batch owner aborts before flushing. */
+  cancelBatch(): MemoryEntry[] {
+    const contextBuffer = batchStoreContext.getStore()?.get(this);
+    if (contextBuffer) {
+      const discarded = contextBuffer.splice(0, contextBuffer.length);
+      batchStoreContext.getStore()?.delete(this);
+      return discarded;
+    }
+
+    this._batchActive = false;
+    const discarded = this._batchBuffer;
+    this._batchBuffer = [];
+    return discarded;
+  }
+
+  /**
+   * Run a function with async-context-local batch buffering for this store.
+   * This avoids exposing unrelated concurrent store() calls to a process-wide
+   * batch flag while still flushing the owned writes in one lock acquisition.
+   */
+  async runBatch<T>(
+    fn: () => Promise<T> | T,
+    options: BatchRunOptions = {},
+  ): Promise<{ result: T; written: MemoryEntry[] }> {
+    const activeBatches = batchStoreContext.getStore();
+    if (activeBatches?.has(this)) {
+      return { result: await fn(), written: [] };
+    }
+
+    const batchBuffer: MemoryEntry[] = [];
+    const nextBatches = new Map(activeBatches ?? []);
+    nextBatches.set(this, batchBuffer);
+
+    return batchStoreContext.run(nextBatches, async () => {
+      try {
+        const result = await fn();
+        options.onBeforeFlush?.();
+        const written = await this.flushBatch();
+        return { result, written };
+      } catch (err) {
+        batchBuffer.length = 0;
+        throw err;
+      } finally {
+        nextBatches.delete(this);
+      }
+    });
+  }
+
   /**
    * Flush all buffered entries in a single lock acquisition.
    * Returns the written entries. Exits batch mode afterwards.
    * If no entries buffered, exits batch mode and returns empty array (no lock acquired).
    */
   async flushBatch(): Promise<MemoryEntry[]> {
+    const contextBuffer = batchStoreContext.getStore()?.get(this);
+    if (contextBuffer) {
+      const entries = contextBuffer.splice(0, contextBuffer.length);
+      try {
+        return await this.writeBatchEntries(entries);
+      } catch (err) {
+        contextBuffer.unshift(...entries);
+        throw err;
+      }
+    }
+
     this._batchActive = false;
-    const entries = this._batchBuffer;
-    this._batchBuffer = [];
+    const entries = this._batchBuffer.splice(0, this._batchBuffer.length);
+    try {
+      return await this.writeBatchEntries(entries);
+    } catch (err) {
+      this._batchBuffer.unshift(...entries);
+      throw err;
+    }
+  }
+
+  private async writeBatchEntries(entries: MemoryEntry[]): Promise<MemoryEntry[]> {
     if (entries.length === 0) return [];
 
     await this.ensureInitialized();
@@ -151,6 +229,34 @@ export class MemoryStore {
 
   constructor(private readonly config: StoreConfig) {
     this.log = config.logger ?? createLogger();
+  }
+
+  async runSerializedUpdate<T>(fn: () => Promise<T> | T): Promise<T> {
+    const activeStores = serializedStoreContext.getStore();
+    if (activeStores?.has(this)) {
+      return fn();
+    }
+
+    const runInContext = () => {
+      const nextStores = new Set(serializedStoreContext.getStore() ?? []);
+      nextStores.add(this);
+      return serializedStoreContext.run(nextStores, fn);
+    };
+
+    const run = this._serialChain.then(runInContext, runInContext);
+    const next = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this._serialChain = next;
+
+    try {
+      return await run;
+    } finally {
+      if (this._serialChain === next) {
+        this._serialChain = Promise.resolve();
+      }
+    }
   }
 
   private async countRowsWithFilter(whereClause?: string): Promise<number> {
@@ -348,6 +454,10 @@ export class MemoryStore {
   }
 
   private async runWithFileLock<T>(fn: () => Promise<T>): Promise<T> {
+    return this.runSerializedUpdate(() => this.runWithFileLockUnlocked(fn));
+  }
+
+  private async runWithFileLockUnlocked<T>(fn: () => Promise<T>): Promise<T> {
     const lockfile = await loadLockfile();
     const lockPath = join(this.config.dbPath, ".memory-write.lock");
 
@@ -591,7 +701,14 @@ export class MemoryStore {
       metadata: entry.metadata || "{}",
     };
 
-    // Batch mode: buffer for later flush instead of acquiring lock per entry
+    // Async-context batch mode: only the owning flow buffers its own writes.
+    const contextBuffer = batchStoreContext.getStore()?.get(this);
+    if (contextBuffer) {
+      contextBuffer.push(fullEntry);
+      return fullEntry;
+    }
+
+    // Legacy process-wide batch mode: retained for existing direct callers.
     if (this._batchActive) {
       this._batchBuffer.push(fullEntry);
       return fullEntry;
@@ -625,8 +742,6 @@ export class MemoryStore {
     if (!entry.id || typeof entry.id !== "string") {
       throw new Error("importEntry requires a stable id");
     }
-    resolveMemoryId(entry.id);
-
     const vector = entry.vector || [];
     if (!Array.isArray(vector) || vector.length !== this.config.vectorDim) {
       throw new Error(
@@ -707,6 +822,40 @@ export class MemoryStore {
     }
 
     return entry;
+  }
+
+  private async findRowsByIdOrPrefix(
+    id: string,
+    columns: readonly string[],
+  ): Promise<LanceRow[]> {
+    const safeId = escapeSqlLiteral(id);
+    const exactRows = await this.table!.query()
+      .select(columns as unknown as string[])
+      .where(`id = '${safeId}'`)
+      .limit(1)
+      .toArray() as unknown as LanceRow[];
+    if (exactRows.length > 0) return exactRows;
+
+    let resolved: ReturnType<typeof resolveMemoryId>;
+    try {
+      resolved = resolveMemoryId(id);
+    } catch {
+      return [];
+    }
+
+    if (resolved.isFullId) return [];
+
+    const prefixRows = await this.table!.query()
+      .select(columns as unknown as string[])
+      .where(prefixWhereClause("id", id))
+      .limit(2)
+      .toArray() as unknown as LanceRow[];
+    if (prefixRows.length > 1) {
+      throw new Error(
+        `Ambiguous prefix "${id}" matches ${prefixRows.length} memories. Use a longer prefix or full ID.`,
+      );
+    }
+    return prefixRows;
   }
 
   /**
@@ -893,28 +1042,7 @@ export class MemoryStore {
       throw new Error(`Memory ${id} is outside accessible scopes`);
     }
 
-    const resolved = resolveMemoryId(id);
-
-    let candidates: LanceRow[];
-    if (resolved.isFullId) {
-      const safeId = escapeSqlLiteral(id);
-      candidates = await this.table!.query()
-        .select(["id", "scope"])
-        .where(`id = '${safeId}'`)
-        .limit(1)
-        .toArray() as unknown as LanceRow[];
-    } else {
-      candidates = await this.table!.query()
-        .select(["id", "scope"])
-        .where(prefixWhereClause("id", id))
-        .limit(2)
-        .toArray();
-      if (candidates.length > 1) {
-        throw new Error(
-          `Ambiguous prefix "${id}" matches ${candidates.length} memories. Use a longer prefix or full ID.`,
-        );
-      }
-    }
+    const candidates = await this.findRowsByIdOrPrefix(id, ["id", "scope"]);
     if (candidates.length === 0) {
       return false;
     }
@@ -1102,56 +1230,33 @@ export class MemoryStore {
       throw new Error(`Memory ${id} is outside accessible scopes`);
     }
 
-    // --- Read-only operations outside lock ---
-    const resolved = resolveMemoryId(id);
-
-    let rows: LanceRow[];
-    if (resolved.isFullId) {
-      const safeId = escapeSqlLiteral(id);
-      rows = await this.table!.query()
-        .select(FULL_ENTRY_COLUMNS as unknown as string[])
-        .where(`id = '${safeId}'`)
-        .limit(1)
-        .toArray() as unknown as LanceRow[];
-    } else {
-      rows = await this.table!.query()
-        .select(FULL_ENTRY_COLUMNS as unknown as string[])
-        .where(prefixWhereClause("id", id))
-        .limit(2)
-        .toArray();
-      if (rows.length > 1) {
-        throw new Error(
-          `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
-        );
-      }
-    }
-
-    if (rows.length === 0) return null;
-
-    const original = mapRowToMemoryEntry(rows[0]);
-
-    // Check scope permissions
-    if (
-      scopeFilter &&
-      scopeFilter.length > 0 &&
-      !scopeFilter.includes(original.scope)
-    ) {
-      throw new Error(`Memory ${id} is outside accessible scopes`);
-    }
-
-    // Build updated entry, preserving original timestamp
-    const updated: MemoryEntry = {
-      ...original,
-      text: updates.text ?? original.text,
-      vector: updates.vector ?? original.vector,
-      category: updates.category ?? original.category,
-      importance: updates.importance ?? original.importance,
-      timestamp: original.timestamp, // preserve original
-      metadata: updates.metadata ?? original.metadata,
-    };
-
-    // --- Write operation inside lock ---
     const result = await this.runWithFileLock(async () => {
+      const rows = await this.findRowsByIdOrPrefix(id, FULL_ENTRY_COLUMNS);
+
+      if (rows.length === 0) return null;
+
+      const original = mapRowToMemoryEntry(rows[0]);
+
+      // Check scope permissions
+      if (
+        scopeFilter &&
+        scopeFilter.length > 0 &&
+        !scopeFilter.includes(original.scope)
+      ) {
+        throw new Error(`Memory ${id} is outside accessible scopes`);
+      }
+
+      // Build updated entry from the latest row while the write lock is held.
+      const updated: MemoryEntry = {
+        ...original,
+        text: updates.text ?? original.text,
+        vector: updates.vector ?? original.vector,
+        category: updates.category ?? original.category,
+        importance: updates.importance ?? original.importance,
+        timestamp: original.timestamp, // preserve original
+        metadata: updates.metadata ?? original.metadata,
+      };
+
       // Use LanceDB mergeInsert for atomic upsert — eliminates the
       // delete+add race condition where a failed add could lose data.
       try {
@@ -1228,30 +1333,9 @@ export class MemoryStore {
       throw new Error(`Memory ${id} is outside accessible scopes`);
     }
 
-    const resolved = resolveMemoryId(id);
-
     // Read-modify-write all inside the lock to prevent TOCTOU races
     return this.runWithFileLock(async () => {
-      let rows: LanceRow[];
-      if (resolved.isFullId) {
-        const safeId = escapeSqlLiteral(id);
-        rows = await this.table!.query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(`id = '${safeId}'`)
-          .limit(1)
-          .toArray() as unknown as LanceRow[];
-      } else {
-        rows = await this.table!.query()
-          .select(FULL_ENTRY_COLUMNS as unknown as string[])
-          .where(prefixWhereClause("id", id))
-          .limit(2)
-          .toArray();
-        if (rows.length > 1) {
-          throw new Error(
-            `Ambiguous prefix "${id}" matches ${rows.length} memories. Use a longer prefix or full ID.`,
-          );
-        }
-      }
+      const rows = await this.findRowsByIdOrPrefix(id, FULL_ENTRY_COLUMNS);
 
       if (rows.length === 0) return null;
 

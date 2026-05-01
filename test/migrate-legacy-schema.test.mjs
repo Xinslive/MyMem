@@ -113,4 +113,28 @@ describe("legacy LanceDB migration", () => {
     assert.equal(memories[0].id, "legacy-keep-id");
     assert.equal(memories[0].text, "already migrated");
   });
+
+  it("supports exact update, patch, and delete for imported legacy ids", async () => {
+    const store = await createTargetStore();
+    await store.importEntry({
+      id: "legacy-custom-id",
+      text: "legacy id management",
+      vector: [1, 0, 0, 0],
+      category: "fact",
+      scope: "global",
+      importance: 0.6,
+      timestamp: 3333333333,
+      metadata: "{}",
+    });
+
+    const updated = await store.update("legacy-custom-id", { text: "updated legacy id" });
+    assert.equal(updated?.text, "updated legacy id");
+
+    const patched = await store.patchMetadata("legacy-custom-id", { access_count: 2 });
+    const metadata = JSON.parse(patched?.metadata || "{}");
+    assert.equal(metadata.access_count, 2);
+
+    assert.equal(await store.delete("legacy-custom-id"), true);
+    assert.equal(await store.hasId("legacy-custom-id"), false);
+  });
 });

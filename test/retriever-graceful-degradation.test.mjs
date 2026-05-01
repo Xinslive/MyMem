@@ -218,7 +218,12 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
     });
 
     const { retriever } = createRetrieverHarness(
-      {},
+      {
+        minScore: 0,
+        hardMinScore: 0,
+        filterNoise: false,
+        rerank: "none",
+      },
       {
         async vectorSearch() {
           events.push("vectorSearch");

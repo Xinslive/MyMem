@@ -171,21 +171,21 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 20,
-        "default": 5,
+        "default": 6,
         "description": "Maximum number of memories auto-injected per turn."
       },
       "autoRecallMaxChars": {
         "type": "integer",
         "minimum": 64,
         "maximum": 8000,
-        "default": 600,
+        "default": 800,
         "description": "Maximum total character budget for auto-injected memory summaries."
       },
       "autoRecallPerItemMaxChars": {
         "type": "integer",
         "minimum": 32,
         "maximum": 1000,
-        "default": 180,
+        "default": 200,
         "description": "Maximum character budget per auto-injected memory summary."
       },
       "autoRecallMaxQueryLength": {
@@ -198,8 +198,8 @@
       "autoRecallCandidatePoolSize": {
         "type": "integer",
         "minimum": 4,
-        "maximum": 20,
-        "default": 8,
+        "maximum": 30,
+        "default": 12,
         "description": "Candidate pool cap used only for auto-recall. Lower values reduce startup latency while manual memory_recall can keep a larger retrieval.candidatePoolSize."
       },
       "maxRecallPerTurn": {
@@ -1490,7 +1490,7 @@
     },
     "autoRecallCandidatePoolSize": {
       "label": "Auto-Recall Candidate Pool Size",
-      "help": "Candidate pool cap used only for auto-recall. Default: 8 for lower startup latency.",
+      "help": "Candidate pool cap used only for auto-recall. Default: 12 for balanced retrieval.",
       "advanced": true
     },
     "recallMode": {

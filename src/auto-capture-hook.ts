@@ -168,12 +168,14 @@ export function registerAutoCaptureHook(params: {
           return;
         }
 
+        let fallbackTexts = texts;
         if (smartExtractor) {
           const cleanTexts = await smartExtractor.filterNoiseByEmbedding(texts);
           if (cleanTexts.length === 0) {
             api.logger.debug(`mymem: all texts filtered as embedding noise for agent ${agentId}`);
             return;
           }
+          fallbackTexts = cleanTexts;
           if (cleanTexts.length >= minMessages) {
             api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${cleanTexts.length} clean texts >= ${minMessages})`);
             const conversationText = cleanTexts.join("\n");
@@ -195,7 +197,7 @@ export function registerAutoCaptureHook(params: {
 
         api.logger.debug(`mymem: auto-capture running regex fallback for agent ${agentId}`);
 
-        const toCapture = texts.filter((text) => text && shouldCapture(text) && !isNoise(text));
+        const toCapture = fallbackTexts.filter((text) => text && shouldCapture(text) && !isNoise(text));
         if (toCapture.length === 0) {
           api.logger.debug(`mymem: regex fallback found 0 capturable texts for agent ${agentId}`);
           return;

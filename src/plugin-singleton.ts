@@ -118,7 +118,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   );
   const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim });
   const embedder = createEmbedder({
-    provider: "openai-compatible",
+    provider: config.embedding.provider,
+    apiVersion: config.embedding.apiVersion,
     apiKey: config.embedding.apiKey,
     model: config.embedding.model || "text-embedding-3-small",
     baseURL: config.embedding.baseURL,

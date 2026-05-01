@@ -27,6 +27,7 @@ import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } from "./smart-metadata.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import { cosineSimilarity } from "./utils.js";
+export { cosineSimilarity } from "./utils.js";
 
 // ============================================================================
 // Types

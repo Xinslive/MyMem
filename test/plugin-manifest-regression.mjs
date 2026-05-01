@@ -114,8 +114,23 @@ assert.equal(
 );
 assert.equal(
   manifest.configSchema.properties.autoRecallMaxItems.default,
-  5,
+  6,
   "autoRecallMaxItems schema default should match runtime default",
+);
+assert.equal(
+  manifest.configSchema.properties.autoRecallMaxChars.default,
+  800,
+  "autoRecallMaxChars schema default should match runtime default",
+);
+assert.equal(
+  manifest.configSchema.properties.autoRecallPerItemMaxChars.default,
+  200,
+  "autoRecallPerItemMaxChars schema default should match runtime default",
+);
+assert.equal(
+  manifest.configSchema.properties.autoRecallCandidatePoolSize.default,
+  12,
+  "autoRecallCandidatePoolSize schema default should match runtime default",
 );
 assert.equal(
   manifest.configSchema.properties.memoryReflection.properties.agentId.default,

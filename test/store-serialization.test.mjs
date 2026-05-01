@@ -195,6 +195,39 @@ async function testQueueDoesNotGrow() {
   return true;
 }
 
+async function testNestedSerializedUpdate() {
+  console.log("Testing nested serialized update...");
+
+  const { store, dir } = makeStore();
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("nested serialized update timed out")), 1000);
+  });
+
+  try {
+    const result = await Promise.race([
+      store.runSerializedUpdate(async () => {
+        return store.runSerializedUpdate(async () => "nested ok");
+      }),
+      timeout,
+    ]);
+
+    if (result !== "nested ok") {
+      console.error("FAIL: unexpected nested result: " + result);
+      rmSync(dir, { recursive: true, force: true });
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error("FAIL: nested serialized update failed - " + err.message);
+    rmSync(dir, { recursive: true, force: true });
+    process.exit(1);
+  }
+
+  console.log("PASS  nested serialized update does not deadlock");
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
 async function main() {
   console.log("Running store-serialization regression tests...\n");
   
@@ -203,12 +236,14 @@ async function main() {
     await testInFlightConcurrency();
     await testExceptionRelease();
     await testQueueDoesNotGrow();
+    await testNestedSerializedUpdate();
     
     console.log("\n=== ALL TESTS PASSED ===");
     console.log("serialization order: OK");
     console.log("in-flight concurrency: OK");
     console.log("exception release: OK");
     console.log("queue bounded: OK");
+    console.log("nested serialization: OK");
     process.exit(0);
   } catch (err) {
     console.error("\n=== TEST FAILED ===");

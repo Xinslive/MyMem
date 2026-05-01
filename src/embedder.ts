@@ -33,6 +33,8 @@ import type { Logger } from "./logger.js";
 // Re-export for backward compat
 export { formatEmbeddingProviderError };
 
+const CONTEXT_LIMIT_ERROR_RE = /context[_.\s-]*(?:length|window|limit|size|tokens?)|context_length|token[_.\s-]*limit|too\s+(?:long|many\s+tokens)|max(?:imum)?[_.\s-]*(?:context|tokens?|input)|input\s+length\s+exceeds/i;
+
 /** Payload shape for OpenAI-compatible embedding requests. */
 interface EmbedPayload {
   model: string;
@@ -736,7 +738,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context.length|token.limit|too (long|many tokens)|max.?context|context.window/i.test(errorMsg);
+      const isContextError = CONTEXT_LIMIT_ERROR_RE.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {
@@ -894,7 +896,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking each text
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context.length|token.limit|too (long|many tokens)|max.?context|context.window/i.test(errorMsg);
+      const isContextError = CONTEXT_LIMIT_ERROR_RE.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {

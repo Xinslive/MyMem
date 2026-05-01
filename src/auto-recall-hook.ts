@@ -282,6 +282,9 @@ export function registerAutoRecallHook(params: {
       const autoRecallMaxChars = clampInt(config.autoRecallMaxChars ?? 800, 64, 8000);
       const autoRecallPerItemMaxChars = clampInt(config.autoRecallPerItemMaxChars ?? 200, 32, 1000);
       const autoRecallCandidatePoolSize = clampInt(config.autoRecallCandidatePoolSize ?? 12, 4, 30);
+      const throwIfAborted = () => {
+        if (signal.aborted) throw signal.reason ?? new Error("auto-recall aborted");
+      };
       const retrieveLimit = clampInt(
         Math.min(Math.max(autoRecallMaxItems * 2, autoRecallMaxItems), autoRecallCandidatePoolSize),
         autoRecallMaxItems,
@@ -295,6 +298,7 @@ export function registerAutoRecallHook(params: {
         );
       }
 
+      throwIfAborted();
       const results = filterUserMdExclusiveRecallResults(await retrieveWithRetry({
         query: recallQuery,
         limit: retrieveLimit,
@@ -304,6 +308,7 @@ export function registerAutoRecallHook(params: {
         candidatePoolSize: autoRecallCandidatePoolSize,
         overFetchMultiplier: 4,
       }), config.workspaceBoundary);
+      throwIfAborted();
 
       if (results.length === 0) return;
 
@@ -390,40 +395,44 @@ export function registerAutoRecallHook(params: {
         const displayCategory = metaObj.memory_category || r.entry.category;
         const displayTier = metaObj.tier || "";
         const tierPrefix = displayTier ? "[" + displayTier.charAt(0).toUpperCase() + "]" : "";
+        const buildPrefix = () => {
+          const categoryFieldName = config.recallPrefix?.categoryField;
+          let effectiveCategory: MemoryCategory | string = displayCategory;
+          if (categoryFieldName) {
+            try {
+              const rawMeta: Record<string, unknown> = r.entry.metadata
+                ? (JSON.parse(r.entry.metadata) as Record<string, unknown>)
+                : {};
+              const fieldValue = rawMeta[categoryFieldName];
+              if (typeof fieldValue === "string" && fieldValue) {
+                effectiveCategory = fieldValue;
+              }
+            } catch {
+              // malformed metadata
+            }
+          }
+          const base = tierPrefix + "[" + effectiveCategory + ":" + r.entry.scope + "]";
+          const parts: string[] = [base];
+          if (r.entry.timestamp)
+            parts.push(new Date(r.entry.timestamp).toISOString().slice(0, 10));
+          if (metaObj.source) parts.push("(" + metaObj.source + ")");
+          return parts.join(" ");
+        };
         const contentText = recallMode === "summary"
           ? (metaObj.l0_abstract || r.entry.text)
           : intent?.depth === "full"
             ? (r.entry.text)
             : (metaObj.l0_abstract || r.entry.text);
         const summary = sanitizeForContext(contentText).slice(0, effectivePerItemMaxChars);
+        const linePrefix = "- " + buildPrefix() + " ";
+        const line = linePrefix + summary;
         return {
           id: r.entry.id,
           entry: r.entry,
-          prefix: (() => {
-            const categoryFieldName = config.recallPrefix?.categoryField;
-            let effectiveCategory: MemoryCategory | string = displayCategory;
-            if (categoryFieldName) {
-              try {
-                const rawMeta: Record<string, unknown> = r.entry.metadata
-                  ? (JSON.parse(r.entry.metadata) as Record<string, unknown>)
-                  : {};
-                const fieldValue = rawMeta[categoryFieldName];
-                if (typeof fieldValue === "string" && fieldValue) {
-                  effectiveCategory = fieldValue;
-                }
-              } catch {
-                // malformed metadata
-              }
-            }
-            const base = tierPrefix + "[" + effectiveCategory + ":" + r.entry.scope + "]";
-            const parts: string[] = [base];
-            if (r.entry.timestamp)
-              parts.push(new Date(r.entry.timestamp).toISOString().slice(0, 10));
-            if (metaObj.source) parts.push("(" + metaObj.source + ")");
-            return parts.join(" ");
-          })(),
           summary,
-          chars: summary.length,
+          linePrefix,
+          line,
+          chars: line.length,
           meta: metaObj,
         };
       });
@@ -441,32 +450,35 @@ export function registerAutoRecallHook(params: {
 
       for (const candidate of preBudgetCandidates) {
         if (selected.length >= autoRecallMaxItems) break;
-        const remaining = autoRecallMaxChars - usedChars;
+        const separatorChars = selected.length > 0 ? 1 : 0;
+        const remaining = autoRecallMaxChars - usedChars - separatorChars;
         if (remaining <= 0) break;
 
         if (candidate.chars <= remaining) {
           selected.push({
             id: candidate.id,
-            line: "- " + candidate.prefix + " " + candidate.summary,
+            line: candidate.line,
             chars: candidate.chars,
             meta: candidate.meta,
             entry: candidate.entry,
           });
-          usedChars += candidate.chars;
+          usedChars += separatorChars + candidate.chars;
           continue;
         }
 
-        const shortened = candidate.summary.slice(0, remaining).trim();
+        const summaryBudget = remaining - candidate.linePrefix.length;
+        if (summaryBudget <= 0) continue;
+        const shortened = candidate.summary.slice(0, summaryBudget).trim();
         if (!shortened) continue;
-        const line = "- " + candidate.prefix + " " + shortened;
+        const line = candidate.linePrefix + shortened;
         selected.push({
           id: candidate.id,
           line,
-          chars: shortened.length,
+          chars: line.length,
           meta: candidate.meta,
           entry: candidate.entry,
         });
-        usedChars += shortened.length;
+        usedChars += separatorChars + line.length;
         break;
       }
 
@@ -476,6 +488,7 @@ export function registerAutoRecallHook(params: {
         );
         return;
       }
+      throwIfAborted();
 
       if (minRepeated > 0) {
         const sessionHistory = params.recallHistory.get(sessionId) || new Map<string, number>();

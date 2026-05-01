@@ -310,12 +310,9 @@ export class SmartExtractor {
       }
     }
 
-    // Flush-batch: buffer all store() calls within the candidate loop
-    // so they are written in a single lock acquisition at the end.
-    this.store.startBatch();
-
     const processStartedAt = Date.now();
-    try {
+    let flushStartedAt = 0;
+    const processCandidates = async () => {
       for (const { index, candidate } of processableCandidates) {
         try {
           await this.processCandidate(
@@ -333,13 +330,36 @@ export class SmartExtractor {
           );
         }
       }
-    } finally {
+    };
+
+    const runBatch = (this.store as unknown as {
+      runBatch?: <T>(fn: () => Promise<T> | T, options?: { onBeforeFlush?: () => void }) => Promise<{ result: T; written: unknown[] }>;
+    }).runBatch;
+
+    if (typeof runBatch === "function") {
+      await runBatch.call(this.store, processCandidates, {
+        onBeforeFlush: () => {
+          processMs = Date.now() - processStartedAt;
+          flushStartedAt = Date.now();
+        },
+      });
+    } else {
+      this.store.startBatch();
+      try {
+        await processCandidates();
+        processMs = Date.now() - processStartedAt;
+        flushStartedAt = Date.now();
+        await this.store.flushBatch();
+      } catch (err) {
+        const cancelBatch = (this.store as unknown as { cancelBatch?: () => unknown }).cancelBatch;
+        if (typeof cancelBatch === "function") cancelBatch.call(this.store);
+        throw err;
+      }
+    }
+    if (processMs === 0) {
       processMs = Date.now() - processStartedAt;
     }
-
-    const flushStartedAt = Date.now();
-    await this.store.flushBatch();
-    flushMs = Date.now() - flushStartedAt;
+    flushMs = flushStartedAt > 0 ? Date.now() - flushStartedAt : 0;
 
     attachTelemetry();
     const telemetry = stats.telemetry!;

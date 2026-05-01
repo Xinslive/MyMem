@@ -170,13 +170,12 @@ export function registerSelfImprovementHook(params: {
           "Recent conversation excerpt:",
           conversation,
         ].join("\n"));
-        let writtenCount = 0;
+        const writes: Array<Promise<unknown>> = [];
 
         if (hasLearning) {
           const key = createBeforeResetReviewKey({ type: "learning", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
-            // Fire-and-forget: filesystem append should not block session reset.
-            appendSelfImprovementEntry({
+            writes.push(appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "learning",
               summary: `Review possible learning before /${reason}: ${firstSignalLine(conversation, "learning")}`,
@@ -187,10 +186,10 @@ export function registerSelfImprovementHook(params: {
               priority: hasError ? "high" : "medium",
               status: "pending",
               source,
-            }).then(
-              () => { writtenCount++; },
-              (err) => { api.logger.warn("self-improvement: learning append failed: " + String(err)); },
-            );
+            }).catch((err) => {
+              api.logger.warn("self-improvement: learning append failed: " + String(err));
+              return null;
+            }));
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate learning review skipped for session ${sessionId}`);
           }
@@ -199,8 +198,7 @@ export function registerSelfImprovementHook(params: {
         if (hasError) {
           const key = createBeforeResetReviewKey({ type: "error", sessionKey, sessionId, reason, conversation });
           if (shouldWriteBeforeResetReview(key)) {
-            // Fire-and-forget: filesystem append should not block session reset.
-            appendSelfImprovementEntry({
+            writes.push(appendSelfImprovementEntry({
               baseDir: workspaceDir,
               type: "error",
               summary: `Review failure before /${reason}: ${firstSignalLine(conversation, "error")}`,
@@ -210,15 +208,17 @@ export function registerSelfImprovementHook(params: {
               priority: "high",
               status: "pending",
               source,
-            }).then(
-              () => { writtenCount++; },
-              (err) => { api.logger.warn("self-improvement: error append failed: " + String(err)); },
-            );
+            }).catch((err) => {
+              api.logger.warn("self-improvement: error append failed: " + String(err));
+              return null;
+            }));
           } else {
             api.logger.debug(`self-improvement: before_reset:${reason} duplicate error review skipped for session ${sessionId}`);
           }
         }
 
+        const settledWrites = await Promise.all(writes);
+        const writtenCount = settledWrites.filter(Boolean).length;
         if (writtenCount > 0) {
           api.logger.info(`self-improvement: before_reset:${reason} captured ${writtenCount} review entr${writtenCount === 1 ? "y" : "ies"} for session ${sessionId}`);
         }

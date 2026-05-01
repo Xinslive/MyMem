@@ -250,6 +250,28 @@ async function run() {
     },
   );
 
+  await withJsonServer(
+    401,
+    { error: { message: "expired token", code: "invalid_token" } },
+    async ({ baseURL }) => {
+      const embedder = new Embedder({
+        provider: "openai-compatible",
+        apiKey: "expired-token",
+        model: "custom-embed-model",
+        baseURL,
+        dimensions: 384,
+      });
+
+      const msg = await expectReject(
+        () => embedder.embedPassage("hello"),
+        /authentication failed/i,
+      );
+      assert.match(msg, /expired token/i, msg);
+      assert.doesNotMatch(msg, /chunk/i, msg);
+      assert.doesNotMatch(msg, /context limit/i, msg);
+    },
+  );
+
   // Constructor warning: normalized set on OpenAI profile → debug warning fires
   {
     const msgs = captureDebug(() => new Embedder({

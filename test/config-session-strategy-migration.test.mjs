@@ -64,7 +64,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.embedding.chunking, true);
     assert.equal(parsed.autoRecall, true);
     assert.equal(parsed.autoRecallMinLength, 6);
-    assert.equal(parsed.autoRecallMaxItems, 5);
+    assert.equal(parsed.autoRecallMaxItems, 6);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
     assert.equal(parsed.extractMinMessages, 5);
     assert.equal(parsed.llm?.model, undefined);
@@ -159,6 +159,19 @@ describe("sessionStrategy legacy compatibility mapping", () => {
       },
     });
     assert.equal(parsed.embedding.chunking, false);
+  });
+
+  it("preserves Azure OpenAI embedding provider settings", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      embedding: {
+        ...baseConfig().embedding,
+        provider: "azure-openai",
+        apiVersion: "2024-02-01",
+      },
+    });
+    assert.equal(parsed.embedding.provider, "azure-openai");
+    assert.equal(parsed.embedding.apiVersion, "2024-02-01");
   });
 
   it("applies tuning presets before explicit overrides", () => {

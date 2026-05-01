@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
-// Guard extraction — mirrors the exact guard from index.ts
+// Guard extraction — mirrors the exact guard used by the hook modules
 // ---------------------------------------------------------------------------
 
 function extractSubagentGuard(sessionKey) {
@@ -114,39 +114,60 @@ async function runTests() {
   const { fileURLToPath } = await import("node:url");
 
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const indexPath = resolve(__dirname, "..", "index.ts");
-  const content = readFileSync(indexPath, "utf-8");
+  const hookPaths = [
+    resolve(__dirname, "..", "src", "auto-recall-hook.ts"),
+    resolve(__dirname, "..", "src", "reflection-hook.ts"),
+    resolve(__dirname, "..", "src", "hook-enhancements.ts"),
+  ];
+  const files = hookPaths.map((path) => ({
+    path,
+    content: readFileSync(path, "utf-8"),
+  }));
 
   const hookPattern = /api\.on\("before_prompt_build"/g;
   const expensiveOps = [
     { name: "store.get",               pattern: /store\.get\s*\(/          },
+    { name: "store.getById",           pattern: /store\.getById\s*\(/      },
+    { name: "store.list",              pattern: /store\.list\s*\(/         },
     { name: "store.update",            pattern: /store\.update\s*\(/       },
     { name: "loadAgentReflectionSlices", pattern: /loadAgentReflectionSlices\s*\(/ },
+    { name: "searchMemories",          pattern: /searchMemories\s*\(/      },
     { name: "recallWork()",            pattern: /\brecallWork\s*\(\s*\)/  },
   ];
 
   let hookIndex = 0;
-  let match;
-  while ((match = hookPattern.exec(content)) !== null) {
-    hookIndex++;
-    const hookStart = match.index;
-    const hookBody = content.slice(hookStart, hookStart + 3000);
+  for (const file of files) {
+    const helperHasSubagentGuard =
+      /function shouldSkipSession[\s\S]{0,300}:subagent:/.test(file.content);
+    let match;
+    while ((match = hookPattern.exec(file.content)) !== null) {
+      hookIndex++;
+      const hookStart = match.index;
+      const hookBody = file.content.slice(hookStart, hookStart + 3000);
 
-    const guardMatch = /:subagent:/.exec(hookBody);
-    if (!guardMatch) {
-      console.error(`  FAIL  Hook ${hookIndex}: no :subagent: guard found`);
-      process.exit(1);
-    }
-    const guardPos = guardMatch.index;
-
-    for (const op of expensiveOps) {
-      const opMatch = op.pattern.exec(hookBody);
-      if (opMatch && opMatch.index < guardPos) {
-        console.error(`  FAIL  Hook ${hookIndex}: ${op.name} at pos ${opMatch.index} appears BEFORE :subagent: guard at pos ${guardPos}`);
+      const directGuardMatch = /:subagent:/.exec(hookBody);
+      const sharedGuardMatch = helperHasSubagentGuard
+        ? /shouldSkipSession\s*\(\s*sessionKey\s*\)/.exec(hookBody)
+        : null;
+      const guardMatches = [directGuardMatch, sharedGuardMatch]
+        .filter(Boolean)
+        .sort((a, b) => a.index - b.index);
+      const guardMatch = guardMatches[0];
+      if (!guardMatch) {
+        console.error(`  FAIL  Hook ${hookIndex} (${file.path}): no subagent guard found`);
         process.exit(1);
       }
+      const guardPos = guardMatch.index;
+
+      for (const op of expensiveOps) {
+        const opMatch = op.pattern.exec(hookBody);
+        if (opMatch && opMatch.index < guardPos) {
+          console.error(`  FAIL  Hook ${hookIndex} (${file.path}): ${op.name} at pos ${opMatch.index} appears BEFORE subagent guard at pos ${guardPos}`);
+          process.exit(1);
+        }
+      }
+      console.log(`  PASS  Hook ${hookIndex}: guard (pos ${guardPos}) precedes all expensive ops in ${file.path}`);
     }
-    console.log(`  PASS  Hook ${hookIndex}: guard (pos ${guardPos}) precedes all expensive ops`);
   }
 
   if (hookIndex === 0) {

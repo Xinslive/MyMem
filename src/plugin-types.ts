@@ -11,7 +11,8 @@ import type { TuningPreset } from "./tuning-presets.js";
 export interface PluginConfig {
   tuningPreset?: TuningPreset;
   embedding: {
-    provider: "openai-compatible";
+    provider: "openai-compatible" | "azure-openai";
+    apiVersion?: string;
     apiKey: string | string[];
     model?: string;
     baseURL?: string;

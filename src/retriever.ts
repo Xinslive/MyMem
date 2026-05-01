@@ -53,6 +53,10 @@ import {
 } from "./temporal-scoring.js";
 import { applyMMRDiversity } from "./mmr-diversity.js";
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Re-export all types for backward compatibility
 export type {
   RetrievalConfig,
@@ -323,8 +327,13 @@ export class MemoryRetriever {
 
   private extractTagTokens(query: string): string[] {
     if (!this.config.tagPrefixes?.length) return [];
-    
-    const pattern = this.config.tagPrefixes.join("|");
+
+    const pattern = this.config.tagPrefixes
+      .map((prefix) => prefix.trim())
+      .filter((prefix) => prefix.length > 0)
+      .map(escapeRegExp)
+      .join("|");
+    if (!pattern) return [];
     const regex = new RegExp(`(?:${pattern}):[\\w-]+`, "gi");
     const matches = query.match(regex);
     return matches || [];
@@ -342,9 +351,15 @@ export class MemoryRetriever {
       skipTimeDecay?: boolean;
       trace?: TraceCollector;
       diagnostics?: RetrievalDiagnostics;
+      preserveWhenHardFiltered?: boolean;
     } = {},
   ): Promise<RetrievalResult[]> {
-    const { skipTimeDecay = false, trace, diagnostics } = options;
+    const {
+      skipTimeDecay = false,
+      trace,
+      diagnostics,
+      preserveWhenHardFiltered = false,
+    } = options;
 
     // 1. Temporal scoring (mutually exclusive engines)
     let temporallyRanked: RetrievalResult[];
@@ -372,20 +387,27 @@ export class MemoryRetriever {
 
     // 3. Hard min-score filter
     if (trace) trace.startStage("hard_cutoff", lengthNormalized.map((r) => r.entry.id));
-    const hardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
+    const strictHardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
+    const hardFiltered =
+      preserveWhenHardFiltered && strictHardFiltered.length === 0 && lengthNormalized.length > 0
+        ? lengthNormalized
+        : strictHardFiltered;
     if (trace) trace.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
-    // 4. Time decay (when not already applied by temporal scoring engines)
+    // 4. Lifecycle scoring. DecayEngine replaces ordinary time decay, but it still
+    // needs to run here because the first temporal stage intentionally leaves
+    // decay-aware scoring untouched.
     let lifecycleRanked: RetrievalResult[];
-    if (skipTimeDecay) {
+    if (this.decayEngine) {
+      if (trace) trace.startStage("decay_boost", hardFiltered.map((r) => r.entry.id));
+      lifecycleRanked = applyDecayBoost(hardFiltered, this.decayEngine);
+      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
+    } else if (skipTimeDecay) {
       lifecycleRanked = hardFiltered;
     } else {
-      const decayStageName = this.decayEngine ? "decay_boost" : "time_decay";
-      if (trace) trace.startStage(decayStageName, hardFiltered.map((r) => r.entry.id));
-      lifecycleRanked = this.decayEngine
-        ? applyDecayBoost(hardFiltered, this.decayEngine)
-        : applyTimeDecay(hardFiltered, this.config);
+      if (trace) trace.startStage("time_decay", hardFiltered.map((r) => r.entry.id));
+      lifecycleRanked = applyTimeDecay(hardFiltered, this.config);
       if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
     }
     if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
@@ -662,6 +684,8 @@ export class MemoryRetriever {
       // Empty result sets are valid; only throw when both promises reject
       const bothFailed =
         vectorResult_.status === "rejected" && bm25Result_.status === "rejected";
+      const degraded =
+        vectorResult_.status === "rejected" || bm25Result_.status === "rejected";
 
       if (bothFailed) {
         const vectorError = vectorResult_.reason?.message || "unknown";
@@ -768,6 +792,7 @@ export class MemoryRetriever {
         skipTimeDecay,
         trace,
         diagnostics,
+        preserveWhenHardFiltered: degraded,
       });
       if (diagnostics?.latencyMs) diagnostics.latencyMs.postProcess = Date.now() - t4;
       return finalResults;

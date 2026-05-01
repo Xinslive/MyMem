@@ -73,7 +73,7 @@ export class EmbeddingCache {
     // When cache is full, evict oldest 25% by insertion order (O(n) but infrequent).
     // Map iteration order is insertion order, so oldest entries come first.
     if (this.cache.size >= this.maxSize) {
-      const evictCount = this.maxSize >> 2;
+      const evictCount = Math.max(1, Math.ceil(this.maxSize / 4));
       const keys = this.cache.keys();
       for (let i = 0; i < evictCount; i++) {
         const key = keys.next().value;

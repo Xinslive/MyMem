@@ -106,21 +106,37 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
     assert.equal((await store.list(["global"]))[0]?.text, "update from B");
   });
 
+  it("concurrent partial updates preserve fields from the latest locked row", async () => {
+    const { store, entry } = await createStoreWithEntry({
+      metadata: "{\"version\":1}",
+    });
+
+    const textUpdate = store.update(entry.id, {
+      text: "text update",
+    });
+    const metadataUpdate = store.update(entry.id, {
+      metadata: "{\"version\":2}",
+    });
+
+    await Promise.all([textUpdate, metadataUpdate]);
+
+    const result = await store.getById(entry.id);
+    assert.equal(result?.text, "text update");
+    assert.equal(result?.metadata, "{\"version\":2}");
+    assert.deepEqual(result?.vector, [0, 0, 0, 0]);
+  });
+
   it("access-tracker style metadata update preserves the row on write failure", async () => {
     const { store, entry } = await createStoreWithEntry({
       metadata: "{\"accessCount\":2}",
     });
     const warnings = [];
-    let failed = false;
 
-    // Wrap the store's update method to simulate failure
-    const origUpdate = store.update.bind(store);
-    store.update = async (...args) => {
-      if (!failed) {
-        failed = true;
-        throw new Error("injected update failure");
-      }
-      return origUpdate(...args);
+    // AccessTracker uses MemoryStore's batch metadata path when available.
+    // Wrap the actual write path to simulate a failed write-back.
+    const origUpdateBatchMetadata = store.updateBatchMetadata.bind(store);
+    store.updateBatchMetadata = async () => {
+      throw new Error("injected update failure");
     };
 
     const tracker = new AccessTracker({
@@ -136,13 +152,15 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
 
     tracker.recordAccess([entry.id]);
     await tracker.flush();
-    tracker.destroy();
-    store.update = origUpdate;
 
     const preserved = await store.getById(entry.id);
     assert.equal(preserved?.text, "original memory");
     assert.equal(preserved?.metadata, "{\"accessCount\":2}");
-    assert.ok(warnings.some((msg) => /write-back failed/i.test(msg)));
+    assert.ok(warnings.some((msg) => /write-back failed|batch write failed/i.test(msg)));
+
+    store.updateBatchMetadata = origUpdateBatchMetadata;
+    await tracker.flush();
+    tracker.destroy();
   });
 
   it("after a successful update, getById/list can still read the record", async () => {

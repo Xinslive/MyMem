@@ -163,7 +163,11 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   return {
     tuningPreset,
     embedding: {
-      provider: "openai-compatible",
+      provider: embedding.provider === "azure-openai" ? "azure-openai" : "openai-compatible",
+      apiVersion:
+        typeof embedding.apiVersion === "string"
+          ? embedding.apiVersion.trim()
+          : undefined,
       apiKey,
       model: embedding.model.trim(),
       baseURL: resolveEnvVars(embedding.baseURL.trim()),
