@@ -536,10 +536,10 @@ export function registerAutoRecallHook(params: {
       }
 
       const injectedAt = Date.now();
-      // Fire-and-forget: update injection metadata without blocking the recall result.
+      // Fire-and-forget: batch-update injection metadata in a single lock acquisition.
       // These writes are best-effort and should not add latency to the auto-recall path.
-      void Promise.allSettled(
-        selected.map(async (item) => {
+      void params.store.patchMetadataBatch(
+        selected.map((item) => {
           const meta = item.meta;
           const staleInjected =
             typeof meta.last_injected_at === "number" &&
@@ -552,9 +552,9 @@ export function registerAutoRecallHook(params: {
             ? (meta.bad_recall_count as number) + 1
             : (meta.bad_recall_count as number);
           const shouldSuppress = nextBadRecallCount >= 3 && minRepeated > 0;
-          await params.store.patchMetadata(
-            item.id,
-            {
+          return {
+            id: item.id,
+            patch: {
               injected_count: (meta.injected_count as number) + 1,
               last_injected_at: injectedAt,
               bad_recall_count: nextBadRecallCount,
@@ -564,11 +564,11 @@ export function registerAutoRecallHook(params: {
               access_count: ((meta.access_count as number) ?? 0) + 1,
               last_accessed_at: injectedAt,
             },
-            accessibleScopes,
-          );
+          };
         }),
+        accessibleScopes,
       ).catch((err) =>
-        api.logger.warn("mymem: injection metadata update failed: " + String(err)),
+        api.logger.warn("mymem: injection metadata batch update failed: " + String(err)),
       );
 
       // Run tier maintenance asynchronously after injection
@@ -690,22 +690,20 @@ export function registerAutoRecallHook(params: {
       const decayScores = params.decayEngine.scoreAll(candidates, now);
       const transitions = params.tierManager.evaluateAll(candidates, decayScores, now);
 
-      await Promise.allSettled(
-        transitions.map(async (transition) => {
-          await params.store.patchMetadata(
-            transition.memoryId,
-            {
-              tier: transition.toTier,
-              tier_updated_at: now,
-            },
-            scopeFilter,
-          );
-          api.logger.debug?.("mymem: tier transition " + transition.fromTier + " \u2192 " + transition.toTier + " for " + transition.memoryId + ": " + transition.reason);
-        }),
-      );
-
       if (transitions.length > 0) {
-        api.logger.debug?.("mymem: applied " + transitions.length + " tier transition(s)");
+        for (const t of transitions) {
+          api.logger.debug?.("mymem: tier transition " + t.fromTier + " \u2192 " + t.toTier + " for " + t.memoryId + ": " + t.reason);
+        }
+        const applied = await params.store.patchMetadataBatch(
+          transitions.map((t) => ({
+            id: t.memoryId,
+            patch: { tier: t.toTier, tier_updated_at: now },
+          })),
+          scopeFilter,
+        );
+        if (applied > 0) {
+          api.logger.debug?.("mymem: applied " + applied + " tier transition(s)");
+        }
       }
     } catch (err) {
       api.logger.warn("mymem: tier maintenance failed: " + String(err));

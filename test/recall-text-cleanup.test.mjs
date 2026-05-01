@@ -321,6 +321,7 @@ function makeRecallContext(results = makeResults()) {
     },
     store: {
       patchMetadata: async () => null,
+      patchMetadataBatch: async () => 0,
     },
     scopeManager: {
       getAccessibleScopes: () => ["global"],
@@ -457,6 +458,7 @@ describe("recall text cleanup", () => {
       },
       store: {
         patchMetadata: async () => null,
+      patchMetadataBatch: async () => 0,
       },
       retriever: {
         async retrieve(params = {}) {
@@ -557,6 +559,7 @@ describe("recall text cleanup", () => {
       },
       store: {
         patchMetadata: async () => null,
+      patchMetadataBatch: async () => 0,
       },
       retriever: {
         async retrieve() {

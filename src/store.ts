@@ -1372,6 +1372,65 @@ export class MemoryStore {
     });
   }
 
+  /**
+   * Batch patch metadata for multiple entries in a single lock acquisition.
+   * Each patch specifies an ID and a MetadataPatch object.
+   * Missing or scope-denied IDs are silently skipped. Returns the number updated.
+   */
+  async patchMetadataBatch(
+    patches: Array<{ id: string; patch: MetadataPatch }>,
+    scopeFilter?: string[],
+  ): Promise<number> {
+    await this.ensureInitialized();
+    if (patches.length === 0) return 0;
+
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return 0;
+
+    const updatedCount = await this.runWithFileLock(async () => {
+      const updatedRows: MemoryEntry[] = [];
+
+      for (const { id, patch } of patches) {
+        const rows = await this.findRowsByIdOrPrefix(id, FULL_ENTRY_COLUMNS);
+        if (rows.length === 0) continue;
+
+        const existing = mapRowToMemoryEntry(rows[0]);
+
+        if (
+          scopeFilter &&
+          scopeFilter.length > 0 &&
+          !scopeFilter.includes(existing.scope)
+        ) {
+          continue;
+        }
+
+        const metadata = buildSmartMetadata(existing, patch);
+        updatedRows.push({
+          ...existing,
+          metadata: stringifySmartMetadata(metadata),
+        });
+      }
+
+      if (updatedRows.length === 0) return 0;
+
+      try {
+        await this.table!
+          .mergeInsert(["id"])
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(toLanceRows(updatedRows));
+      } catch (mergeError) {
+        throw new Error(
+          `Failed to batch-patch metadata: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
+        );
+      }
+
+      return updatedRows.length;
+    });
+
+    this._statsCache = null;
+    return updatedCount;
+  }
+
   async bulkDelete(scopeFilter: string[], beforeTimestamp?: number): Promise<number> {
     await this.ensureInitialized();
 

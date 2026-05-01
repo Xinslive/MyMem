@@ -47,8 +47,10 @@ type TelemetryRecord = RetrievalTelemetryRecord | ExtractionTelemetryRecord;
 
 const DEFAULT_MAX_RECORDS = 1000;
 const DEFAULT_SAMPLE_RATE = 1;
+const TRIM_EVERY_N_APPENDS = 50;
 
 const writeQueues = new Map<string, Promise<void>>();
+const pendingAppends = new Map<string, number>();
 
 function clamp01(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
@@ -91,7 +93,7 @@ export function normalizeTelemetryConfig(
   const sampleRate = clamp01(sampleRateRaw, DEFAULT_SAMPLE_RATE);
 
   return {
-    persist: raw.persist === true,
+    persist: raw.persist !== false,
     dir: typeof raw.dir === "string" && raw.dir.trim().length > 0 ? raw.dir.trim() : undefined,
     maxRecords,
     sampleRate,
@@ -113,7 +115,14 @@ export async function appendJsonlRecord(
   await withWriteQueue(filePath, async () => {
     await mkdir(dirname(filePath), { recursive: true });
     await appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
-    await trimJsonlFile(filePath, maxRecords);
+
+    const count = (pendingAppends.get(filePath) ?? 0) + 1;
+    if (count >= TRIM_EVERY_N_APPENDS) {
+      pendingAppends.set(filePath, 0);
+      await trimJsonlFile(filePath, maxRecords);
+    } else {
+      pendingAppends.set(filePath, count);
+    }
   });
 }
 

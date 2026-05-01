@@ -99,7 +99,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const config = parsePluginConfig(api.pluginConfig);
   const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
   const telemetryStore = new TelemetryStore(
-    config.telemetry ?? { persist: false, maxRecords: 1000, sampleRate: 1 },
+    config.telemetry ?? { persist: true, maxRecords: 1000, sampleRate: 1 },
     api.resolvePath(resolveTelemetryDir(resolvedDbPath, config.telemetry?.dir)),
   );
 

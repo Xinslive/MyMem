@@ -795,6 +795,12 @@ describe("real before_prompt_build hook", () => {
         this.patches.push({ id, patch });
         return null;
       },
+      async patchMetadataBatch(patches, _scopeFilter) {
+        for (const { id, patch } of patches) {
+          this.patches.push({ id, patch });
+        }
+        return patches.length;
+      },
     };
 
     const retriever = {
