@@ -28,6 +28,7 @@ export { registerMemoryUpdateTool } from "./tools-update.js";
 export {
   registerMemoryStatsTool,
   registerMemoryDebugTool,
+  registerMemoryExplainTool,
   registerMemoryListTool,
   registerMemoryPromoteTool,
   registerMemoryArchiveTool,
@@ -42,6 +43,7 @@ import { registerMemoryForgetTool } from "./tools-forget.js";
 import { registerMemoryUpdateTool } from "./tools-update.js";
 import { registerMemoryStatsTool } from "./tools-management.js";
 import { registerMemoryDebugTool } from "./tools-management.js";
+import { registerMemoryExplainTool } from "./tools-management.js";
 import { registerMemoryListTool } from "./tools-management.js";
 import { registerMemoryPromoteTool } from "./tools-management.js";
 import { registerMemoryArchiveTool } from "./tools-management.js";
@@ -73,6 +75,7 @@ export function registerAllMemoryTools(
     registerMemoryStatsTool(api, context);
     registerMemoryDoctorTool(api, context);
     registerMemoryDebugTool(api, context);
+    registerMemoryExplainTool(api, context);
     registerMemoryListTool(api, context);
     registerMemoryPromoteTool(api, context);
     registerMemoryArchiveTool(api, context);

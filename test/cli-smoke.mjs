@@ -256,6 +256,39 @@ async function runCliSmoke() {
 
   assert.match(searchOutput, /search_regression_1/);
 
+  const explainJsonOutput = await captureStdout(async () => {
+    await searchProgram.parseAsync([
+      "node",
+      "openclaw",
+      "mymem",
+      "explain",
+      "Jige",
+      "--scope",
+      "global",
+      "--json",
+    ]);
+  });
+  const explainJson = JSON.parse(explainJsonOutput);
+  assert.equal(explainJson.query, "Jige");
+  assert.equal(explainJson.count, 1);
+  assert.equal(explainJson.results[0].id, "search_regression_1");
+  assert.ok(explainJson.explanation.summary.includes("Matched"));
+
+  const explainTextOutput = await captureStdout(async () => {
+    await searchProgram.parseAsync([
+      "node",
+      "openclaw",
+      "mymem",
+      "explain",
+      "Jige",
+      "--scope",
+      "global",
+    ]);
+  });
+  assert.match(explainTextOutput, /Memory Explain:/);
+  assert.match(explainTextOutput, /Stages:/);
+  assert.match(explainTextOutput, /search_regression_1/);
+
   const lexicalStore = new MemoryStore({
     dbPath: path.join(workDir, "lexical-db"),
     vectorDim: 4,

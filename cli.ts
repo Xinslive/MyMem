@@ -30,6 +30,10 @@ import {
   normalizeOAuthProviderId,
   performOAuthLogin,
 } from "./src/llm-oauth.js";
+import {
+  explainMemoryRetrieval,
+  formatRetrievalExplainText,
+} from "./src/retrieval-explain.js";
 
 /**
  * Ensure metadata string has memory_category (new-format) or inject it.
@@ -835,6 +839,80 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     };
   };
 
+  const runExplain = async (
+    query: string,
+    limit: number,
+    scopeFilter?: string[],
+    category?: string,
+  ) => {
+    const retriever = getSearchRetriever();
+    try {
+      return await explainMemoryRetrieval(retriever, {
+        query,
+        limit,
+        scopeFilter,
+        category,
+        source: "cli",
+        hasFtsSupport: context.store.hasFtsSupport,
+      });
+    } catch (error) {
+      const diagnostics = typeof retriever.getLastDiagnostics === "function"
+        ? retriever.getLastDiagnostics()
+        : null;
+      if (diagnostics) {
+        return {
+          text: formatRetrievalExplainText({
+            query,
+            count: 0,
+            results: [],
+            trace: {
+              query,
+              mode: context.retriever.getConfig().mode === "vector" ? "vector" : "hybrid",
+              startedAt: Date.now(),
+              stages: [],
+              finalCount: 0,
+              totalMs: 0,
+            },
+            diagnostics,
+            explanation: {
+              status: "empty" as const,
+              summary: "Retrieval failed before a complete trace was produced.",
+              reasons: [
+                `Failure stage: ${diagnostics.failureStage || "unknown"}.`,
+                `Error: ${error instanceof Error ? error.message : String(error)}.`,
+              ],
+              suggestions: ["Run mymem_debug with the same query for raw diagnostics."],
+            },
+          }),
+          details: {
+            query,
+            count: 0,
+            results: [],
+            trace: {
+              query,
+              mode: context.retriever.getConfig().mode === "vector" ? "vector" as const : "hybrid" as const,
+              startedAt: Date.now(),
+              stages: [],
+              finalCount: 0,
+              totalMs: 0,
+            },
+            diagnostics,
+            explanation: {
+              status: "empty" as const,
+              summary: "Retrieval failed before a complete trace was produced.",
+              reasons: [
+                `Failure stage: ${diagnostics.failureStage || "unknown"}.`,
+                `Error: ${error instanceof Error ? error.message : String(error)}.`,
+              ],
+              suggestions: ["Run mymem_debug with the same query for raw diagnostics."],
+            },
+          },
+        };
+      }
+      throw error;
+    }
+  };
+
   const memory = program
     .command("mymem")
     .description("Enhanced memory management commands (MyMem)");
@@ -1139,6 +1217,41 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           }
         }
         console.error("Search failed:", error);
+        process.exit(1);
+      }
+    });
+
+  memory
+    .command("explain <query>")
+    .description("Explain why memory retrieval matched or returned no results")
+    .option("--scope <scope>", "Search within specific scope")
+    .option("--category <category>", "Filter by category")
+    .option("--limit <n>", "Maximum number of results", "5")
+    .option("--json", "Output as JSON")
+    .action(async (query, options) => {
+      try {
+        const limit = parseInt(options.limit) || 5;
+        const scopeFilter = options.scope ? [options.scope] : undefined;
+        const report = await runExplain(
+          query,
+          limit,
+          scopeFilter,
+          options.category,
+        );
+        if (options.json) {
+          console.log(formatJson(report.details));
+        } else {
+          console.log(report.text);
+        }
+      } catch (error) {
+        if (options.json) {
+          console.log(formatJson({
+            error: "explain_failed",
+            message: error instanceof Error ? error.message : String(error),
+          }));
+          process.exit(1);
+        }
+        console.error("Explain failed:", error);
         process.exit(1);
       }
     });

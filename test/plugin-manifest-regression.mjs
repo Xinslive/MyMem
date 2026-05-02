@@ -26,6 +26,38 @@ const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 
+function schemaAt(pathExpression) {
+  const parts = pathExpression.split(".");
+  let current = manifest.configSchema;
+  for (const part of parts) {
+    current = current?.properties?.[part];
+  }
+  assert.ok(current, `configSchema should declare ${pathExpression}`);
+  return current;
+}
+
+function assertSchemaDefault(pathExpression, expected) {
+  assert.deepEqual(
+    schemaAt(pathExpression).default,
+    expected,
+    `${pathExpression} schema default should match runtime default`,
+  );
+}
+
+function assertSchemaEnumIncludes(pathExpression, expected) {
+  assert.ok(
+    schemaAt(pathExpression).enum.includes(expected),
+    `${pathExpression} schema enum should include ${expected}`,
+  );
+}
+
+function assertAnyOfTypes(pathExpression, expectedTypes) {
+  const schema = schemaAt(pathExpression);
+  const branches = schema.anyOf || schema.oneOf || [];
+  const actual = branches.map((item) => item.type).sort();
+  assert.deepEqual(actual, [...expectedTypes].sort(), `${pathExpression} should allow ${expectedTypes.join(" or ")}`);
+}
+
 function createMockApi(pluginConfig, options = {}) {
   return {
     pluginConfig,
@@ -68,104 +100,43 @@ for (const key of [
   "autoRecallMaxChars",
   "autoRecallPerItemMaxChars",
 ]) {
-  assert.ok(
-    Object.prototype.hasOwnProperty.call(manifest.configSchema.properties, key),
-    `configSchema should declare ${key}`,
-  );
+  schemaAt(key);
 }
 
-assert.ok(
-  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "auth"),
-  "configSchema should declare llm.auth",
-);
-assert.ok(
-  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "oauthPath"),
-  "configSchema should declare llm.oauthPath",
-);
-assert.ok(
-  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "oauthProvider"),
-  "configSchema should declare llm.oauthProvider",
-);
+for (const pathExpression of ["llm.auth", "llm.oauthPath", "llm.oauthProvider"]) {
+  schemaAt(pathExpression);
+}
 
-assert.equal(
-  manifest.configSchema.properties.autoRecallMinRepeated.default,
-  8,
-  "autoRecallMinRepeated schema default should be conservative",
-);
-assert.equal(
-  manifest.configSchema.properties.extractMinMessages.default,
-  5,
-  "extractMinMessages schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.sessionStrategy.default,
-  "memoryReflection",
-  "sessionStrategy schema default should enable reflection learning by default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecall.default,
-  true,
-  "autoRecall schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecallMinLength.default,
-  6,
-  "autoRecallMinLength schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecallMaxItems.default,
-  6,
-  "autoRecallMaxItems schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecallMaxChars.default,
-  800,
-  "autoRecallMaxChars schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecallPerItemMaxChars.default,
-  200,
-  "autoRecallPerItemMaxChars schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoRecallCandidatePoolSize.default,
-  12,
-  "autoRecallCandidatePoolSize schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.memoryReflection.properties.agentId.default,
-  "main",
-  "memoryReflection.agentId schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.autoCapture.default,
-  true,
-  "autoCapture schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.embedding.properties.chunking.default,
-  true,
-  "embedding.chunking schema default should match runtime default",
-);
-assert.equal(
-  manifest.configSchema.properties.embedding.properties.omitDimensions?.type,
-  "boolean",
-  "embedding.omitDimensions should be declared in the plugin schema",
-);
-assert.equal(
-  manifest.configSchema.properties.sessionMemory.properties.enabled.default,
-  false,
-  "sessionMemory.enabled schema default should match runtime default",
-);
-assert.ok(
-  manifest.configSchema.properties.retrieval.properties.rerankProvider.enum.includes("tei"),
-  "rerankProvider schema should include tei",
-);
-assert.equal(
-  manifest.configSchema.properties.retrieval.properties.rerank.default,
-  "cross-encoder",
-  "retrieval.rerank schema default should match runtime default preset",
-);
+assertSchemaDefault("autoRecallMinRepeated", 8);
+assertSchemaDefault("extractMinMessages", 5);
+assertSchemaDefault("sessionStrategy", "memoryReflection");
+assertSchemaDefault("autoRecall", true);
+assertSchemaDefault("autoRecallMinLength", 6);
+assertSchemaDefault("autoRecallMaxItems", 6);
+assertSchemaDefault("autoRecallMaxChars", 800);
+assertSchemaDefault("autoRecallPerItemMaxChars", 200);
+assertSchemaDefault("autoRecallCandidatePoolSize", 12);
+assertSchemaDefault("autoRecallTimeoutMs", 20000);
+assertSchemaDefault("autoRecallMaxQueryLength", 2000);
+assertSchemaDefault("maxRecallPerTurn", 10);
+assertSchemaDefault("recallMode", "full");
+assertSchemaDefault("memoryReflection.agentId", "main");
+assertSchemaDefault("autoCapture", true);
+assertSchemaDefault("embedding.chunking", true);
+assert.equal(schemaAt("embedding.omitDimensions").type, "boolean", "embedding.omitDimensions should be declared in the plugin schema");
+assertSchemaDefault("sessionMemory.enabled", false);
+assertSchemaDefault("telemetry.persist", true);
+assertSchemaDefault("telemetry.maxRecords", 1000);
+assertSchemaDefault("telemetry.sampleRate", 1);
+assertSchemaEnumIncludes("retrieval.rerankProvider", "tei");
+assertSchemaEnumIncludes("admissionControl.preset", "conservative");
+assertSchemaEnumIncludes("admissionControl.preset", "high-recall");
+assertSchemaDefault("retrieval.rerank", "cross-encoder");
+assertSchemaDefault("retrieval.hardMinScore", 0.55);
+assertSchemaDefault("retrieval.candidatePoolSize", 12);
+assertSchemaDefault("retrieval.tagPrefixes", ["proj", "env", "team", "scope"]);
+assertAnyOfTypes("hookEnhancements.sessionPrimer", ["boolean", "object"]);
+assertAnyOfTypes("hookEnhancements.selfCorrectionLoop", ["boolean", "object"]);
 
 assert.equal(
   manifest.version,

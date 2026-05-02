@@ -1,7 +1,7 @@
 /**
  * Agent Tool Definitions — Management Tools
- * Registration functions for mymem_stats, mymem_debug, mymem_list,
- * mymem_promote, mymem_archive, mymem_compact, and mymem_explain_rank.
+ * Registration functions for mymem_stats, mymem_debug, mymem_explain,
+ * mymem_list, mymem_promote, mymem_archive, mymem_compact, and mymem_explain_rank.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -23,6 +23,7 @@ import {
   parseSmartMetadata,
 } from "./smart-metadata.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { explainMemoryRetrieval } from "./retrieval-explain.js";
 
 export function registerMemoryStatsTool(
   api: OpenClawPluginApi,
@@ -313,6 +314,79 @@ export function registerMemoryDebugTool(
       };
     },
     { name: "mymem_debug" },
+  );
+}
+
+export function registerMemoryExplainTool(
+  api: OpenClawPluginApi,
+  context: ToolContext,
+) {
+  api.registerTool(
+    (toolCtx) => {
+      const runtimeContext = resolveToolContext(context, toolCtx);
+      return {
+        name: "mymem_explain",
+        label: "Memory Explain",
+        description:
+          "Explain why memory retrieval matched or returned no results, including stage drops and likely corrective actions.",
+        parameters: Type.Object({
+          query: Type.String({ description: "Search query to explain" }),
+          limit: Type.Optional(
+            Type.Number({ description: "Max results to return (default: 5, max: 20)" }),
+          ),
+          scope: Type.Optional(
+            Type.String({ description: "Specific memory scope to search in (optional)" }),
+          ),
+          category: Type.Optional(memoryCategoryEnum()),
+        }),
+        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+          const { query, limit = 5, scope, category } = params as {
+            query: string;
+            limit?: number;
+            scope?: string;
+            category?: string;
+          };
+          try {
+            const safeLimit = clampInt(limit, 1, 20);
+            const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
+            let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+            if (scope) {
+              if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
+                scopeFilter = [scope];
+              } else {
+                return {
+                  content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
+                  details: { error: "scope_access_denied", requestedScope: scope, query },
+                };
+              }
+            }
+
+            const report = await explainMemoryRetrieval(runtimeContext.retriever, {
+              query,
+              limit: safeLimit,
+              scopeFilter,
+              category,
+              source: "manual",
+              hasFtsSupport: runtimeContext.store.hasFtsSupport,
+            });
+
+            return {
+              content: [{ type: "text", text: report.text }],
+              details: report.details,
+            };
+          } catch (error) {
+            return {
+              content: [{
+                type: "text",
+                text: `Memory explain failed: ${error instanceof Error ? error.message : String(error)}`,
+              }],
+              details: { error: "explain_failed", query, message: String(error) },
+            };
+          }
+        },
+      };
+    },
+    { name: "mymem_explain" },
   );
 }
 

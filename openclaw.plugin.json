@@ -102,7 +102,7 @@
         "properties": {
           "persist": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "Persist retrieval/extraction telemetry to local JSONL files for tuning and replay benchmarks."
           },
           "dir": {

@@ -16,6 +16,7 @@
   "include": [
     "src/**/*.ts",
     "benchmark/run.ts",
+    "benchmark/recall-eval.ts",
     "index.ts",
     "cli.ts"
   ]
