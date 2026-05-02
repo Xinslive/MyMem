@@ -246,6 +246,43 @@ it("FeedbackLoop: onAdmissionRejected buffers entry when enabled", () => {
   loop.dispose();
 });
 
+it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted counts", () => {
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [] },
+    admissionController: { setAdaptiveTypePriors: () => {} },
+    config: {
+      enabled: true,
+      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, fromErrors: true, fromRejections: true },
+      priorAdaptation: { ...DEFAULT_PRIOR_ADAPTATION_CONFIG, enabled: true },
+    },
+    runtimeContext: {
+      workspaceDir: "/tmp/workspace",
+      dbPath: "/tmp/db",
+      admissionConfig: makeAdmissionConfig(),
+    },
+  });
+
+  loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
+  loop.onSelfImprovementError({ area: "extraction", summary: "extractor returned noise" });
+  loop.onAdmissionAdmitted("preferences");
+
+  const status = loop.getStatus();
+  assert.equal(status.enabled, true);
+  assert.equal(status.disposed, false);
+  assert.equal(status.noiseLearning.bufferedErrors, 1);
+  assert.equal(status.noiseLearning.bufferedRejections, 1);
+  assert.equal(status.priorAdaptation.enabled, true);
+  assert.equal(status.priorAdaptation.observedAdmitted, 1);
+  assert.deepStrictEqual(status.runtime, {
+    hasWorkspaceDir: true,
+    hasDbPath: true,
+    hasAdmissionConfig: true,
+  });
+
+  loop.dispose();
+});
+
 it("FeedbackLoop: periodic scan timer calls file and rejection scanners when runtime context is known", async () => {
   let errorScanCount = 0;
   let rejectionScanCount = 0;

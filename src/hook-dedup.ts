@@ -14,11 +14,16 @@ const _hookEventDedup = new Map<string, number>(); // key → timestamp
  * Returns true if this event was already processed (skip), false if first
  * occurrence (proceed). Automatically prunes expired entries when size > 200.
  */
-export function dedupHookEvent(handlerName: string, event: any): boolean {
-  const sk = typeof event?.sessionKey === "string" ? event.sessionKey : "?";
-  const ts = event?.timestamp instanceof Date
+type HookDedupEvent = {
+  sessionKey?: unknown;
+  timestamp?: unknown;
+};
+
+export function dedupHookEvent(handlerName: string, event: HookDedupEvent): boolean {
+  const sk = typeof event.sessionKey === "string" ? event.sessionKey : "?";
+  const ts = event.timestamp instanceof Date
     ? event.timestamp.getTime()
-    : (typeof event?.timestamp === "number" ? event.timestamp : Date.now());
+    : (typeof event.timestamp === "number" ? event.timestamp : Date.now());
   const key = `${handlerName}:${sk}:${ts}`;
   const now = Date.now();
 

@@ -493,6 +493,7 @@ const myMemPlugin = {
             retriever,
             scopeManager,
             embedder,
+            feedbackLoop,
           },
           {
             host: "127.0.0.1",

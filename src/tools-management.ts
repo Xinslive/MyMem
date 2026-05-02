@@ -24,6 +24,11 @@ import {
 } from "./smart-metadata.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { explainMemoryRetrieval } from "./retrieval-explain.js";
+import type { StoreIndexStatus } from "./store.js";
+
+type StoreWithOptionalIndexStatus = ToolContext["store"] & {
+  getIndexStatus?: () => Promise<StoreIndexStatus>;
+};
 
 export function registerMemoryStatsTool(
   api: OpenClawPluginApi,
@@ -69,8 +74,9 @@ export function registerMemoryStatsTool(
           const stats = await runtimeContext.store.stats(scopeFilter);
           const scopeManagerStats = runtimeContext.scopeManager.getStats();
           const retrievalConfig = runtimeContext.retriever.getConfig();
-          const indexStatus = typeof (runtimeContext.store as any).getIndexStatus === "function"
-            ? await (runtimeContext.store as any).getIndexStatus()
+          const storeWithIndexStatus = runtimeContext.store as StoreWithOptionalIndexStatus;
+          const indexStatus = typeof storeWithIndexStatus.getIndexStatus === "function"
+            ? await storeWithIndexStatus.getIndexStatus()
             : null;
           const persistentSummary = context.telemetry
             ? await context.telemetry.getPersistentSummary()

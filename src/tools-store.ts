@@ -13,6 +13,7 @@ import {
   deriveManualMemoryCategory,
   deriveManualMemoryLayer,
   fallbackToolLogger,
+  toLegacyMemoryCategory,
 } from "./tools-shared.js";
 import { stripEnvelopeMetadata } from "./smart-extractor.js";
 import { isNoise } from "./noise-filter.js";
@@ -150,6 +151,7 @@ export function registerMemoryStoreTool(
           }
 
           const safeImportance = clamp01(importance, 0.7);
+          const storeCategory = toLegacyMemoryCategory(category) ?? "other";
           const vector = await runtimeContext.embedder.embedPassage(stripped);
 
           // Temporal awareness: classify and infer expiry
@@ -201,7 +203,7 @@ export function registerMemoryStoreTool(
             (r) =>
               r.score > 0.95 &&
               r.score <= 0.98 &&
-              r.entry.category === category &&
+              r.entry.category === storeCategory &&
               SUPERSEDE_ELIGIBLE.has(r.entry.category),
           );
 
@@ -215,7 +217,7 @@ export function registerMemoryStoreTool(
             // Store new memory with supersedes link, preserving canonical fields
             // from the old entry (aligns with mymem_update supersede path).
             const newMeta = buildSmartMetadata(
-              { text, category: category as any, importance: safeImportance },
+              { text, category: storeCategory, importance: safeImportance },
               {
                 l0_abstract: text,
                 l1_overview: oldMeta.l1_overview || `- ${text}`,
@@ -224,7 +226,7 @@ export function registerMemoryStoreTool(
                 tier: oldMeta.tier,
                 source: "manual",
                 state: "confirmed",
-                memory_layer: deriveManualMemoryLayer(category as string),
+                memory_layer: deriveManualMemoryLayer(storeCategory),
                 last_confirmed_use_at: now,
                 bad_recall_count: 0,
                 suppressed_until_turn: 0,
@@ -244,7 +246,7 @@ export function registerMemoryStoreTool(
               text,
               vector,
               importance: safeImportance,
-              category: category as any,
+              category: storeCategory,
               scope: targetScope,
               metadata: stringifySmartMetadata(newMeta),
             });
@@ -275,7 +277,7 @@ export function registerMemoryStoreTool(
             if (context.mdMirror) {
               try {
                 await context.mdMirror(
-                  { text, category: category as string, scope: targetScope, timestamp: newEntry.timestamp },
+                  { text, category: storeCategory, scope: targetScope, timestamp: newEntry.timestamp },
                   { source: "mymem_store", agentId },
                 );
               } catch (mirrorErr) {
@@ -308,23 +310,23 @@ export function registerMemoryStoreTool(
             text,
             vector,
             importance: safeImportance,
-            category: category as any,
+            category: storeCategory,
             scope: targetScope,
             metadata: stringifySmartMetadata(
               buildSmartMetadata(
                 {
                   text,
-                  category: category as any,
+                  category: storeCategory,
                   importance: safeImportance,
                 },
                 {
                   l0_abstract: text,
                   l1_overview: `- ${text}`,
                   l2_content: text,
-                  memory_category: deriveManualMemoryCategory(category as string, text),
+                  memory_category: deriveManualMemoryCategory(storeCategory, text),
                   source: "manual",
                   state: "confirmed",
-                  memory_layer: deriveManualMemoryLayer(category as string),
+                  memory_layer: deriveManualMemoryLayer(storeCategory),
                   last_confirmed_use_at: Date.now(),
                   bad_recall_count: 0,
                   suppressed_until_turn: 0,
@@ -339,7 +341,7 @@ export function registerMemoryStoreTool(
           if (context.mdMirror) {
             try {
               await context.mdMirror(
-                { text, category: category as string, scope: targetScope, timestamp: entry.timestamp },
+                { text, category: storeCategory, scope: targetScope, timestamp: entry.timestamp },
                 { source: "mymem_store", agentId },
               );
             } catch (mirrorErr) {

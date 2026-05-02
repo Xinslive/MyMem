@@ -13,6 +13,7 @@ import {
 } from "./smart-metadata.js";
 import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
+import type { FeedbackLoopStatus } from "./feedback-loop.js";
 
 type DashboardStore = Pick<MemoryStore, "stats" | "list" | "hasFtsSupport"> & {
   delete?: MemoryStore["delete"];
@@ -40,6 +41,7 @@ export interface MemoryDashboardContext {
   retriever: DashboardRetriever;
   scopeManager: DashboardScopeManager;
   embedder?: Embedder;
+  feedbackLoop?: { getStatus: () => FeedbackLoopStatus } | null;
 }
 
 export interface MemoryDashboardServerOptions {
@@ -57,7 +59,10 @@ export interface RunningMemoryDashboardServer {
 type DashboardFilter = {
   scopeFilter?: string[];
   category?: string;
+  quality?: DashboardQualityFilter;
 };
+
+type DashboardQualityFilter = "bad_recall" | "suppressed" | "low_confidence" | "inactive";
 
 type DashboardAlert = {
   level: "ok" | "warning" | "danger";
@@ -88,6 +93,7 @@ type DashboardMemory = {
   sourceLabel: string;
   memoryType: string;
   memoryTypeLabel: string;
+  qualityFlags: DashboardQualityFilter[];
   details: {
     l0: string;
     l1: string;
@@ -118,6 +124,15 @@ const MEMORY_CATEGORY_KEYS = [
   "cases",
   "patterns",
 ];
+
+const MEMORY_CATEGORY_TO_STORE_CATEGORY: Record<string, MemoryEntry["category"]> = {
+  profile: "fact",
+  preferences: "preference",
+  entities: "entity",
+  events: "decision",
+  cases: "fact",
+  patterns: "other",
+};
 
 const MEMORY_TYPE_LABELS: Record<string, string> = {
   knowledge: "知识记忆",
@@ -165,10 +180,24 @@ function numberParam(url: URL, name: string, fallback: number, min: number, max:
 function resolveFilter(url: URL): DashboardFilter {
   const scope = singleParam(url, "scope");
   const category = singleParam(url, "category");
+  const quality = normalizeQualityFilter(singleParam(url, "quality"));
   return {
     scopeFilter: scope ? [scope] : undefined,
     category,
+    quality,
   };
+}
+
+function normalizeQualityFilter(value: string | undefined): DashboardQualityFilter | undefined {
+  switch (value) {
+    case "bad_recall":
+    case "suppressed":
+    case "low_confidence":
+    case "inactive":
+      return value;
+    default:
+      return undefined;
+  }
 }
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
@@ -257,6 +286,10 @@ function displayCategory(category: string): string {
   return MEMORY_CATEGORY_LABELS[category] ?? category;
 }
 
+function legacyCategoryPrefilter(category: string | undefined): MemoryEntry["category"] | undefined {
+  return category ? MEMORY_CATEGORY_TO_STORE_CATEGORY[category] : undefined;
+}
+
 function displayTier(tier: string): string {
   return TIER_LABELS[tier] ?? tier;
 }
@@ -267,6 +300,21 @@ function displaySource(source: string): string {
 
 function displayMemoryType(type: string): string {
   return MEMORY_TYPE_LABELS[type] ?? type;
+}
+
+function qualityFilterLabel(value: DashboardQualityFilter | undefined): string {
+  switch (value) {
+    case "bad_recall":
+      return "差召回";
+    case "suppressed":
+      return "已抑制";
+    case "low_confidence":
+      return "低置信";
+    case "inactive":
+      return "非有效";
+    default:
+      return "全部质量";
+  }
 }
 
 type DashboardExplainDetails = Awaited<ReturnType<typeof explainMemoryRetrieval>>["details"];
@@ -436,6 +484,11 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
   const tier = String(meta.memory_tier || meta.tier || meta.memory_layer || "working");
   const source = String(meta.source || "unknown");
   const memoryType = String(meta.memory_type || "knowledge");
+  const qualityFlags: DashboardQualityFilter[] = [];
+  if (Number(meta.bad_recall_count || 0) > 0) qualityFlags.push("bad_recall");
+  if (Number(meta.suppressed_until_turn || 0) > 0) qualityFlags.push("suppressed");
+  if (typeof meta.confidence === "number" && meta.confidence < 0.4) qualityFlags.push("low_confidence");
+  if (status !== "active") qualityFlags.push("inactive");
   return {
     id: entry.id,
     text: safeText,
@@ -459,6 +512,7 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
     sourceLabel: displaySource(source),
     memoryType,
     memoryTypeLabel: displayMemoryType(memoryType),
+    qualityFlags,
     details: {
       l0: displayMemoryText(meta.l0_abstract),
       l1: displayMemoryText(meta.l1_overview),
@@ -643,6 +697,7 @@ async function buildDashboardSummary(
     filters: {
       scope: filter.scopeFilter?.[0] ?? null,
       category: filter.category ?? null,
+      quality: filter.quality ?? null,
     },
     memory: stats,
     display: {
@@ -666,6 +721,7 @@ async function buildDashboardSummary(
       ftsStatus,
       indexStatus,
     },
+    feedbackLoop: context.feedbackLoop?.getStatus() ?? null,
     alerts: buildAlerts({
       totalCount: stats.totalCount,
       healthSignals: stats.healthSignals,
@@ -688,6 +744,8 @@ async function buildMemoryList(
     filters: {
       scope: filter.scopeFilter?.[0] ?? null,
       category: filter.category ?? null,
+      quality: filter.quality ?? null,
+      qualityLabel: qualityFilterLabel(filter.quality),
       limit,
       offset,
     },
@@ -709,15 +767,17 @@ async function loadDashboardMemories(
   let rawOffset = 0;
   let scanned = 0;
   const maxScanned = Math.min(10_000, (safeOffset + target) * 8 + 400);
+  const storeCategory = legacyCategoryPrefilter(filter.category);
 
   while (collected.length < safeOffset + target && scanned < maxScanned) {
-    const page = await context.store.list(filter.scopeFilter, undefined, pageSize, rawOffset);
+    const page = await context.store.list(filter.scopeFilter, storeCategory, pageSize, rawOffset);
     if (page.length === 0) break;
     rawOffset += page.length;
     scanned += page.length;
     for (const entry of page) {
       const serialized = serializeMemory(entry);
       if (filter.category && serialized.category !== filter.category) continue;
+      if (filter.quality && !serialized.qualityFlags.includes(filter.quality)) continue;
       collected.push(serialized);
     }
     if (page.length < pageSize) break;
@@ -1213,6 +1273,16 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     body[data-view="dashboard"] .memory-filter {
       display: none;
     }
+    .quality-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .quality-filter {
+      min-width: 126px;
+    }
     .masonry-list {
       column-count: 3;
       column-gap: 12px;
@@ -1295,6 +1365,10 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     .chip.green { background: var(--green-soft); color: var(--green); }
     .chip.amber { background: var(--amber-soft); color: var(--amber); }
     .chip.red { background: var(--red-soft); color: var(--red); }
+    .chip.quality {
+      background: #eef0ff;
+      color: #5547b8;
+    }
     .memory-text {
       font-size: 14px;
       line-height: 1.55;
@@ -1415,6 +1489,11 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin-top: 14px;
+    }
+    .feedback-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
     }
     .config-item {
       border: 1px solid var(--line);
@@ -1539,6 +1618,9 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         flex: 1 1 130px;
         max-width: none;
       }
+      .quality-filter {
+        flex: 1 1 140px;
+      }
       .memory-head-actions #memoryCount {
         flex: 1 1 100%;
       }
@@ -1551,6 +1633,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       .masonry-list { column-count: 2; }
       .memory-stats { grid-template-columns: 1fr; }
       .config-grid { grid-template-columns: 1fr; }
+      .feedback-grid { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: 1fr; }
       .stage { grid-template-columns: 1fr 70px 70px; }
     }
@@ -1633,6 +1716,15 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
               </div>
             </div>
           </section>
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">反馈循环</h2>
+              <span class="subtle" id="feedbackHint">--</span>
+            </div>
+            <div class="panel-body" id="feedbackLoopPanel">
+              <div class="empty-state">正在读取反馈循环状态...</div>
+            </div>
+          </section>
         </div>
 
         <aside class="column">
@@ -1677,6 +1769,15 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
             </div>
           </div>
           <div class="panel-body">
+            <div class="quality-strip" aria-label="质量筛选">
+              <select class="memory-filter quality-filter" id="qualityFilter" aria-label="质量筛选">
+                <option value="">全部质量</option>
+                <option value="bad_recall">差召回</option>
+                <option value="suppressed">已抑制</option>
+                <option value="low_confidence">低置信</option>
+                <option value="inactive">非有效</option>
+              </select>
+            </div>
             <div class="masonry-list" id="masonryMemories"></div>
             <div class="memories-controls">
               <span class="subtle" id="memoryLoadHint">按当前筛选加载</span>
@@ -1732,6 +1833,11 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       return Number.isFinite(n) ? n.toFixed(digits) : "--";
     }
 
+    function countValue(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? String(n) : "0";
+    }
+
     function retrievalModeLabel(mode) {
       return ({
         hybrid: "混合",
@@ -1752,12 +1858,23 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       })[value] || value || "未知";
     }
 
+    function qualityLabel(value) {
+      return ({
+        bad_recall: "差召回",
+        suppressed: "已抑制",
+        low_confidence: "低置信",
+        inactive: "非有效"
+      })[value] || "全部质量";
+    }
+
     function currentFilters() {
       const scope = $("scopeFilter").value;
       const category = $("categoryFilter").value;
+      const quality = $("qualityFilter").value;
       return {
         scope,
-        category
+        category,
+        quality
       };
     }
 
@@ -1866,11 +1983,48 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       }, "", { preserveOrder: true });
     }
 
+    function timeLabel(timestamp) {
+      const n = Number(timestamp);
+      if (!Number.isFinite(n) || n <= 0) return "尚未运行";
+      return new Date(n).toLocaleString("zh-CN");
+    }
+
+    function renderFeedbackLoop(summary) {
+      const status = summary.feedbackLoop;
+      if (!status) {
+        $("feedbackHint").textContent = "未启用";
+        $("feedbackLoopPanel").innerHTML = '<div class="empty-state">当前运行环境没有反馈循环状态。</div>';
+        return;
+      }
+      const noise = status.noiseLearning || {};
+      const prior = status.priorAdaptation || {};
+      const learned = Number(noise.learnedFromErrors || 0) + Number(noise.learnedFromRejections || 0);
+      $("feedbackHint").textContent = status.enabled && !status.disposed ? "运行中" : "已停止";
+      $("feedbackLoopPanel").innerHTML =
+        '<div class="feedback-grid">' +
+          '<div class="config-item"><div class="config-label">噪声学习</div><div class="config-value">' + countValue(learned) + '</div><div class="subtle">错误 ' + countValue(noise.learnedFromErrors) + '，拒绝 ' + countValue(noise.learnedFromRejections) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">待处理缓冲</div><div class="config-value">' + countValue(noise.bufferedErrors) + ' / ' + countValue(noise.bufferedRejections) + '</div><div class="subtle">错误 / 拒绝</div></div>' +
+          '<div class="config-item"><div class="config-label">先验自适应</div><div class="config-value">' + countValue(prior.cycles) + '</div><div class="subtle">观测准入 ' + countValue(prior.observedAdmitted) + '</div></div>' +
+        '</div>' +
+        '<div class="config-grid">' +
+          '<div class="config-item"><div class="config-label">最近扫描</div><div class="config-value">' + escapeHtml(timeLabel(noise.lastScanAt)) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">最近学习</div><div class="config-value">' + escapeHtml(timeLabel(noise.lastLearnedAt)) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">最近自适应</div><div class="config-value">' + escapeHtml(timeLabel(prior.lastAdaptedAt)) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">Cooldown 跳过</div><div class="config-value">' + countValue(noise.skippedRelearnCooldown) + '</div></div>' +
+        '</div>';
+    }
+
     function statusChip(status) {
       if (status === "active") return '<span class="chip green">有效</span>';
       if (status === "archived") return '<span class="chip amber">已归档</span>';
       if (status === "expired") return '<span class="chip red">已过期</span>';
       return '<span class="chip amber">已失效</span>';
+    }
+
+    function qualityChips(memory) {
+      return (memory.qualityFlags || []).map((flag) =>
+        '<span class="chip quality">' + escapeHtml(qualityLabel(flag)) + '</span>'
+      ).join("");
     }
 
     function renderMemoryCards(memories) {
@@ -1880,6 +2034,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
             '<span class="chip teal">' + escapeHtml(memory.categoryLabel) + '</span>' +
             '<span class="chip">' + escapeHtml(memory.scopeLabel) + '</span>' +
             statusChip(memory.status) +
+            qualityChips(memory) +
             '<span class="chip">' + escapeHtml(memory.ageLabel) + '</span>' +
           '</div>' +
           '<div class="memory-text">' + escapeHtml(memory.preview) + '</div>' +
@@ -1991,6 +2146,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="config-item"><div class="config-label">访问次数</div><div class="config-value">' + escapeHtml(memory.accessCount) + '</div></div>' +
           '<div class="config-item"><div class="config-label">来源</div><div class="config-value">' + escapeHtml(memory.sourceLabel) + '</div></div>' +
           '<div class="config-item"><div class="config-label">记忆层级</div><div class="config-value">' + escapeHtml(memory.tierLabel) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">质量标记</div><div class="config-value">' + escapeHtml((memory.qualityFlags || []).map(qualityLabel).join("、") || "无") + '</div></div>' +
         '</div>' +
         '<section class="detail-section"><h3>L0 摘要</h3><p class="detail-text">' + escapeHtml(detail.l0 || memory.preview) + '</p></section>' +
         '<section class="detail-section"><h3>L1 概览</h3><p class="detail-text">' + escapeHtml(detail.l1 || "") + '</p></section>' +
@@ -2050,6 +2206,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         const payload = await fetchJson("/api/memories" + queryString({
           scope: filters.scope,
           category: filters.category,
+          quality: filters.quality,
           limit: state.memoryLimit,
           offset
         }));
@@ -2077,6 +2234,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         renderScopeOptions(summary.scopes.available, filters.scope);
         renderKpis(summary);
         renderCharts(summary);
+        renderFeedbackLoop(summary);
         $("lastUpdated").textContent = "更新时间 " + new Date(summary.generatedAt).toLocaleString("zh-CN");
         if (isMemoriesView()) await loadMemories({ reset: true });
       } catch (error) {
@@ -2115,6 +2273,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     $("refreshBtn").addEventListener("click", refresh);
     $("scopeFilter").addEventListener("change", refresh);
     $("categoryFilter").addEventListener("change", refresh);
+    $("qualityFilter").addEventListener("change", refresh);
     $("explainBtn").addEventListener("click", explain);
     $("loadMoreBtn").addEventListener("click", () => {
       loadMemories({ reset: false }).catch((error) => alert(error.message || String(error)));

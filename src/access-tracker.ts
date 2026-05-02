@@ -12,6 +12,7 @@
  */
 
 import type { MemoryStore } from "./store.js";
+import type { MemoryEntry } from "./store.js";
 
 // ============================================================================
 // Types
@@ -31,6 +32,11 @@ export interface AccessTrackerOptions {
   };
   readonly debounceMs?: number;
 }
+
+type BatchMetadataStore = MemoryStore & {
+  getByIds(ids: string[]): Promise<Map<string, MemoryEntry>>;
+  updateBatchMetadata(patches: Array<{ id: string; metadata: string }>): Promise<number>;
+};
 
 // ============================================================================
 // Constants
@@ -334,23 +340,24 @@ export class AccessTracker {
 
     // Use batch methods if available (MemoryStore), otherwise fall back to
     // individual calls (for mock stores in tests or duck-typed implementations).
-    const hasBatchMethods = typeof (this.store as any).getByIds === "function"
-      && typeof (this.store as any).updateBatchMetadata === "function";
+    const batchStore = this.store as Partial<BatchMetadataStore>;
+    const hasBatchMethods = typeof batchStore.getByIds === "function"
+      && typeof batchStore.updateBatchMetadata === "function";
 
     if (hasBatchMethods) {
-      await this.doFlushBatch(batch);
+      await this.doFlushBatch(batch, batchStore as BatchMetadataStore);
     } else {
       await this.doFlushIndividual(batch);
     }
   }
 
   /** Batch flush: single read query + single lock write. */
-  private async doFlushBatch(batch: Map<string, number>): Promise<void> {
+  private async doFlushBatch(batch: Map<string, number>, store: BatchMetadataStore): Promise<void> {
     // Phase A: Batch read all entries in a single query
     const ids = [...batch.keys()];
-    let entries: Map<string, import("./store.js").MemoryEntry>;
+    let entries: Map<string, MemoryEntry>;
     try {
-      entries = await (this.store as any).getByIds(ids);
+      entries = await store.getByIds(ids);
     } catch (err) {
       for (const [id, delta] of batch) {
         this.pending.set(id, (this.pending.get(id) ?? 0) + delta);
@@ -374,7 +381,7 @@ export class AccessTracker {
 
     // Phase C: Batch write in a single lock acquisition
     try {
-      await (this.store as any).updateBatchMetadata(patches);
+      await store.updateBatchMetadata(patches);
       for (const patch of patches) {
         this._retryCount.delete(patch.id);
       }

@@ -51,6 +51,38 @@ export interface FeedbackLoopRuntimeContext {
   admissionConfig?: AdmissionControlConfig;
 }
 
+export interface FeedbackLoopStatus {
+  enabled: boolean;
+  disposed: boolean;
+  noiseLearning: {
+    fromErrors: boolean;
+    fromRejections: boolean;
+    bufferedErrors: number;
+    bufferedRejections: number;
+    processedErrors: number;
+    learnedRejectionClusters: number;
+    learnedFromErrors: number;
+    learnedFromRejections: number;
+    skippedRelearnCooldown: number;
+    failedEmbeddings: number;
+    scanCycles: number;
+    lastScanAt: number | null;
+    lastLearnedAt: number | null;
+  };
+  priorAdaptation: {
+    enabled: boolean;
+    observedAdmitted: number;
+    cycles: number;
+    lastAdaptedAt: number | null;
+    lastAdaptiveTypePriors: AdmissionTypePriors | null;
+  };
+  runtime: {
+    hasWorkspaceDir: boolean;
+    hasDbPath: boolean;
+    hasAdmissionConfig: boolean;
+  };
+}
+
 export const DEFAULT_NOISE_LEARNING_CONFIG: NoiseLearningConfig = {
   fromErrors: true,
   fromRejections: true,
@@ -264,6 +296,10 @@ class ProcessedErrorTracker {
   add(id: string): void {
     this.processed.add(id);
   }
+
+  get size(): number {
+    return this.processed.size;
+  }
 }
 
 // ============================================================================
@@ -288,6 +324,10 @@ class LearnedRejectionClusterTracker {
       latestRejectedAt: cluster.latestRejectedAt,
     });
     this.pruneOldest();
+  }
+
+  get size(): number {
+    return this.learned.size;
   }
 
   private pruneOldest(): void {
@@ -318,6 +358,16 @@ export class FeedbackLoop {
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
   private admittedTimestampsByCategory: Record<string, number[]> = {};
+  private learnedFromErrors = 0;
+  private learnedFromRejections = 0;
+  private skippedRelearnCooldown = 0;
+  private failedEmbeddings = 0;
+  private scanCycles = 0;
+  private adaptationCycles = 0;
+  private lastScanAt: number | null = null;
+  private lastLearnedAt: number | null = null;
+  private lastAdaptedAt: number | null = null;
+  private lastAdaptiveTypePriors: AdmissionTypePriors | null = null;
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private adaptationTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -372,6 +422,45 @@ export class FeedbackLoop {
     this.rememberRuntimeContext(context);
   }
 
+  getStatus(): FeedbackLoopStatus {
+    const now = Date.now();
+    this.pruneAdmittedTimestamps(now);
+    const observedAdmitted = Object.values(this.admittedTimestampsByCategory)
+      .reduce((sum, timestamps) => sum + timestamps.length, 0);
+
+    return {
+      enabled: this.config.enabled,
+      disposed: this.disposed,
+      noiseLearning: {
+        fromErrors: this.config.noiseLearning.fromErrors,
+        fromRejections: this.config.noiseLearning.fromRejections,
+        bufferedErrors: this.errorBuffer.length,
+        bufferedRejections: this.rejectionBuffer.length,
+        processedErrors: this.processedErrors.size,
+        learnedRejectionClusters: this.learnedRejectionClusters.size,
+        learnedFromErrors: this.learnedFromErrors,
+        learnedFromRejections: this.learnedFromRejections,
+        skippedRelearnCooldown: this.skippedRelearnCooldown,
+        failedEmbeddings: this.failedEmbeddings,
+        scanCycles: this.scanCycles,
+        lastScanAt: this.lastScanAt,
+        lastLearnedAt: this.lastLearnedAt,
+      },
+      priorAdaptation: {
+        enabled: this.config.priorAdaptation.enabled && Boolean(this.admissionController),
+        observedAdmitted,
+        cycles: this.adaptationCycles,
+        lastAdaptedAt: this.lastAdaptedAt,
+        lastAdaptiveTypePriors: this.lastAdaptiveTypePriors ? { ...this.lastAdaptiveTypePriors } : null,
+      },
+      runtime: {
+        hasWorkspaceDir: Boolean(this.runtimeContext.workspaceDir),
+        hasDbPath: Boolean(this.runtimeContext.dbPath),
+        hasAdmissionConfig: Boolean(this.runtimeContext.admissionConfig),
+      },
+    };
+  }
+
   // --- Hot-path callbacks (no I/O) ---
 
   onAdmissionRejected(entry: AdmissionRejectionAuditEntry): void {
@@ -403,6 +492,8 @@ export class FeedbackLoop {
   async scanErrorFile(baseDir: string): Promise<void> {
     this.rememberRuntimeContext({ workspaceDir: baseDir });
     if (this.disposed || !this.config.noiseLearning.fromErrors || !this.noiseBank?.initialized) return;
+    this.scanCycles++;
+    this.lastScanAt = Date.now();
 
     try {
       const filePath = join(baseDir, ".learnings", "ERRORS.md");
@@ -423,10 +514,13 @@ export class FeedbackLoop {
           if (vector && vector.length > 0) {
             this.noiseBank.learn(vector);
             this.processedErrors.add(entry.id);
+            this.learnedFromErrors++;
+            this.lastLearnedAt = Date.now();
             learned++;
             this.debugLog(`feedback-loop: learned noise from error ${entry.id}`);
           }
         } catch {
+          this.failedEmbeddings++;
           this.debugLog(`feedback-loop: failed to embed error ${entry.id}, skipping`);
         }
       }
@@ -450,9 +544,12 @@ export class FeedbackLoop {
         const vector = await this.embedder.embed(text);
         if (vector && vector.length > 0) {
           this.noiseBank.learn(vector);
+          this.learnedFromErrors++;
+          this.lastLearnedAt = Date.now();
           learned++;
         }
       } catch {
+        this.failedEmbeddings++;
         // Skip failed embeddings
       }
     }
@@ -463,6 +560,8 @@ export class FeedbackLoop {
   async scanRejectionAudits(dbPath: string, admissionConfig: AdmissionControlConfig): Promise<void> {
     this.rememberRuntimeContext({ dbPath, admissionConfig });
     if (this.disposed || !this.config.noiseLearning.fromRejections || !this.noiseBank?.initialized) return;
+    this.scanCycles++;
+    this.lastScanAt = Date.now();
 
     const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
     try {
@@ -477,6 +576,7 @@ export class FeedbackLoop {
       for (const cluster of clusters) {
         if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
         if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
+          this.skippedRelearnCooldown++;
           this.debugLog(`feedback-loop: skipped previously learned rejection cluster (count=${cluster.count}, key=${cluster.key})`);
           continue;
         }
@@ -488,10 +588,13 @@ export class FeedbackLoop {
           if (vector && vector.length > 0) {
             this.noiseBank.learn(vector);
             this.learnedRejectionClusters.markLearned(cluster, now);
+            this.learnedFromRejections++;
+            this.lastLearnedAt = Date.now();
             learned++;
             this.debugLog(`feedback-loop: learned noise from rejection cluster (count=${cluster.count}, avgScore=${cluster.avgScore.toFixed(3)})`);
           }
         } catch {
+          this.failedEmbeddings++;
           // Skip failed embeddings
         }
       }
@@ -513,6 +616,7 @@ export class FeedbackLoop {
     for (const cluster of clusters) {
       if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
       if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
+        this.skippedRelearnCooldown++;
         continue;
       }
       const text = cluster.representativeText.slice(0, 300);
@@ -523,9 +627,12 @@ export class FeedbackLoop {
         if (vector && vector.length > 0) {
           this.noiseBank.learn(vector);
           this.learnedRejectionClusters.markLearned(cluster, now);
+          this.learnedFromRejections++;
+          this.lastLearnedAt = Date.now();
           learned++;
         }
       } catch {
+        this.failedEmbeddings++;
         // Skip
       }
     }
@@ -591,6 +698,9 @@ export class FeedbackLoop {
 
       const adaptivePriors = this.getAdaptiveTypePriors(admissionConfig.typePriors, stats);
       this.admissionController.setAdaptiveTypePriors(adaptivePriors);
+      this.adaptationCycles++;
+      this.lastAdaptedAt = Date.now();
+      this.lastAdaptiveTypePriors = { ...adaptivePriors };
 
       this.debugLog(
         `feedback-loop: adapted type priors — ${MEMORY_CATEGORIES.map((c) => `${c}: ${adaptivePriors[c].toFixed(3)}`).join(", ")}`,

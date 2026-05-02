@@ -68,13 +68,34 @@ function createContext() {
       source: "manual",
     }),
   };
+  const lowConfidenceEntry = {
+    id: "dashboard_2",
+    text: "A legacy fact stores a stale profile-like note.",
+    category: "fact",
+    scope: "global",
+    importance: 0.42,
+    timestamp: Date.now() - 1000,
+    metadata: JSON.stringify({
+      memory_category: "profile",
+      l0_abstract: "Stale profile note.",
+      l1_overview: "- stale profile",
+      l2_content: "A legacy fact stores a stale profile-like note.",
+      state: "confirmed",
+      confidence: 0.21,
+      bad_recall_count: 2,
+      suppressed_until_turn: 4,
+      memory_layer: "working",
+      source: "auto",
+    }),
+  };
+  const entries = [entry, lowConfidenceEntry];
 
   return {
     store: {
       hasFtsSupport: true,
       getFtsStatus: () => ({ available: true, lastError: null }),
       getIndexStatus: async () => ({
-        totalRows: 1,
+        totalRows: 2,
         totalIndices: 3,
         names: ["text_idx", "vector_idx"],
         available: { fts: true, vector: true, scalar: ["scope", "category"] },
@@ -83,15 +104,18 @@ function createContext() {
         vectorIndexPending: false,
       }),
       stats: async () => ({
-        totalCount: 1,
-        scopeCounts: { global: 1 },
-        categoryCounts: { preference: 1 },
-        memoryCategoryCounts: { preferences: 1 },
-        recentActivity: { last24h: 1, last7d: 1, last30d: 1 },
-        tierDistribution: { durable: 1 },
-        healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+        totalCount: 2,
+        scopeCounts: { global: 2 },
+        categoryCounts: { preference: 1, fact: 1 },
+        memoryCategoryCounts: { preferences: 1, profile: 1 },
+        recentActivity: { last24h: 2, last7d: 2, last30d: 2 },
+        tierDistribution: { durable: 1, working: 1 },
+        healthSignals: { badRecall: 1, suppressed: 1, lowConfidence: 1 },
       }),
-      list: async () => [entry],
+      list: async (_scopeFilter, category, limit = 20, offset = 0) => {
+        const filtered = category ? entries.filter((item) => item.category === category) : entries;
+        return filtered.slice(offset, offset + limit);
+      },
       delete: async (id) => id === entry.id,
     },
     scopeManager: {
@@ -102,6 +126,39 @@ function createContext() {
       }),
       getAllScopes: () => ["global"],
       getAccessibleScopes: () => ["global"],
+    },
+    feedbackLoop: {
+      getStatus: () => ({
+        enabled: true,
+        disposed: false,
+        noiseLearning: {
+          fromErrors: true,
+          fromRejections: true,
+          bufferedErrors: 1,
+          bufferedRejections: 2,
+          processedErrors: 3,
+          learnedRejectionClusters: 4,
+          learnedFromErrors: 5,
+          learnedFromRejections: 6,
+          skippedRelearnCooldown: 7,
+          failedEmbeddings: 0,
+          scanCycles: 8,
+          lastScanAt: Date.now(),
+          lastLearnedAt: Date.now(),
+        },
+        priorAdaptation: {
+          enabled: true,
+          observedAdmitted: 9,
+          cycles: 10,
+          lastAdaptedAt: Date.now(),
+          lastAdaptiveTypePriors: { profile: 0.9 },
+        },
+        runtime: {
+          hasWorkspaceDir: true,
+          hasDbPath: true,
+          hasAdmissionConfig: true,
+        },
+      }),
     },
     retriever: {
       getConfig: () => ({
@@ -174,6 +231,8 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.match(page.body, /masonry-list/);
     assert.match(page.body, /data-action="delete"/);
     assert.match(page.body, /L0 摘要/);
+    assert.match(page.body, /反馈循环/);
+    assert.match(page.body, /qualityFilter/);
     assert.doesNotMatch(page.body, /按范围/);
     assert.doesNotMatch(page.body, /最近记忆/);
 
@@ -183,22 +242,35 @@ test("dashboard server serves page and read-only APIs", async () => {
 
     const summary = await requestJson(server.url + "/api/summary");
     assert.equal(summary.statusCode, 200);
-    assert.equal(summary.body.memory.totalCount, 1);
+    assert.equal(summary.body.memory.totalCount, 2);
     assert.equal(summary.body.retrieval.hasFtsSupport, true);
     assert.deepEqual(summary.body.scopes.available, ["global"]);
     assert.equal(summary.body.scopes.labels.global, "全局");
     assert.equal(summary.body.display.categoryCounts["用户偏好"], 1);
-    assert.equal(summary.body.display.categoryCounts["用户画像"], 0);
-    assert.equal(summary.body.display.recentActivity["1 天内"], 1);
-    assert.equal(summary.body.display.recentActivity["1 月内"], 1);
-    assert.equal(summary.body.display.recentActivity["全部"], 1);
+    assert.equal(summary.body.display.categoryCounts["用户画像"], 1);
+    assert.equal(summary.body.display.recentActivity["1 天内"], 2);
+    assert.equal(summary.body.display.recentActivity["1 月内"], 2);
+    assert.equal(summary.body.display.recentActivity["全部"], 2);
     assert.equal(summary.body.display.tierDistribution["长期记忆"], 1);
+    assert.equal(summary.body.feedbackLoop.noiseLearning.learnedFromErrors, 5);
+    assert.equal(summary.body.feedbackLoop.priorAdaptation.cycles, 10);
 
     const memories = await requestJson(server.url + "/api/memories?limit=1");
     assert.equal(memories.statusCode, 200);
     assert.equal(memories.body.memories[0].categoryLabel, "用户偏好");
     assert.equal(memories.body.memories[0].scopeLabel, "全局");
     assert.equal(memories.body.memories[0].details.l0, "The user likes clear dashboards.");
+
+    const profileMemories = await requestJson(server.url + "/api/memories?category=profile&limit=10");
+    assert.equal(profileMemories.statusCode, 200);
+    assert.deepEqual(profileMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
+    assert.equal(profileMemories.body.memories[0].categoryLabel, "用户画像");
+
+    const lowConfidenceMemories = await requestJson(server.url + "/api/memories?quality=low_confidence&limit=10");
+    assert.equal(lowConfidenceMemories.statusCode, 200);
+    assert.equal(lowConfidenceMemories.body.filters.qualityLabel, "低置信");
+    assert.deepEqual(lowConfidenceMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
+    assert.deepEqual(lowConfidenceMemories.body.memories[0].qualityFlags.sort(), ["bad_recall", "low_confidence", "suppressed"]);
 
     const explain = await requestJson(server.url + "/api/explain?query=dashboard&limit=3");
     assert.equal(explain.statusCode, 200);

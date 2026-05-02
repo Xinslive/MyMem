@@ -8,6 +8,14 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+function errnoDetails(error: unknown): { code: string; message: string } {
+  const err = error as NodeJS.ErrnoException;
+  return {
+    code: typeof err.code === "string" ? err.code : "",
+    message: typeof err.message === "string" ? err.message : String(error),
+  };
+}
+
 /**
  * Validate and prepare the storage directory before LanceDB connection.
  * Resolves symlinks, creates missing directories, and checks write permissions.
@@ -22,21 +30,22 @@ export function validateStoragePath(dbPath: string): string {
     if (stats.isSymbolicLink()) {
       try {
         resolvedPath = realpathSync(dbPath);
-      } catch (err: any) {
+      } catch (err) {
+        const details = errnoDetails(err);
         throw new Error(
           `dbPath "${dbPath}" is a symlink whose target does not exist.\n` +
           `  Fix: Create the target directory, or update the symlink to point to a valid path.\n` +
-          `  Details: ${err.code || ""} ${err.message}`,
+          `  Details: ${details.code} ${details.message}`,
         );
       }
     }
-  } catch (err: any) {
+  } catch (err) {
+    const details = errnoDetails(err);
     // Missing path is OK (it will be created below)
-    if (err?.code === "ENOENT") {
+    if (details.code === "ENOENT") {
       // no-op
     } else if (
-      typeof err?.message === "string" &&
-      err.message.includes("symlink whose target does not exist")
+      details.message.includes("symlink whose target does not exist")
     ) {
       throw err;
     } else {
@@ -48,12 +57,13 @@ export function validateStoragePath(dbPath: string): string {
   if (!existsSync(resolvedPath)) {
     try {
       mkdirSync(resolvedPath, { recursive: true });
-    } catch (err: any) {
+    } catch (err) {
+      const details = errnoDetails(err);
       throw new Error(
         `Failed to create dbPath directory "${resolvedPath}".\n` +
         `  Fix: Ensure the parent directory "${dirname(resolvedPath)}" exists and is writable,\n` +
         `       or create it manually: mkdir -p "${resolvedPath}"\n` +
-        `  Details: ${err.code || ""} ${err.message}`,
+        `  Details: ${details.code} ${details.message}`,
       );
     }
   }
@@ -61,12 +71,13 @@ export function validateStoragePath(dbPath: string): string {
   // Check write permissions
   try {
     accessSync(resolvedPath, constants.W_OK);
-  } catch (err: any) {
+  } catch (err) {
+    const details = errnoDetails(err);
     throw new Error(
       `dbPath directory "${resolvedPath}" is not writable.\n` +
       `  Fix: Check permissions with: ls -la "${dirname(resolvedPath)}"\n` +
       `       Or grant write access: chmod u+w "${resolvedPath}"\n` +
-      `  Details: ${err.code || ""} ${err.message}`,
+      `  Details: ${details.code} ${details.message}`,
     );
   }
 
