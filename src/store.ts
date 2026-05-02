@@ -26,7 +26,7 @@ import {
   isVectorIndexType,
   isScalarIndexType,
   recommendedVectorPartitions,
-  tokenizeForSearch,
+  tokenSetForSearch,
   scoreLexicalHitPreTokenized,
   normalizeSearchText,
   resolveMemoryId,
@@ -1096,7 +1096,7 @@ export class MemoryStore {
 
     // Pre-tokenize query once (shared across all candidates)
     const normalizedQuery = normalizeSearchText(trimmedQuery);
-    const queryTokens = new Set(tokenizeForSearch(normalizedQuery));
+    const queryTokens = tokenSetForSearch(normalizedQuery);
 
     for (const row of rows) {
       const entry = mapRowToMemoryEntry(row, false);
@@ -1117,7 +1117,7 @@ export class MemoryStore {
         .filter(c => c.text)
         .map(c => {
           const normalized = normalizeSearchText(c.text);
-          return { tokens: new Set(tokenizeForSearch(normalized)), weight: c.weight, normalized };
+          return { tokens: tokenSetForSearch(normalized), weight: c.weight, normalized };
         });
       const score = scoreLexicalHitPreTokenized(queryTokens, preTokenized, normalizedQuery);
 

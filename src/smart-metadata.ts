@@ -23,6 +23,10 @@ type EntryLike = {
   metadata?: string;
 };
 
+type EntryWithParsedMetadata = EntryLike & {
+  _parsedMeta?: SmartMemoryMetadata;
+};
+
 export interface MemoryRelation {
   type: string;
   targetId: string;
@@ -496,9 +500,9 @@ export function stringifySmartMetadata(
 
 export function toLifecycleMemory(
   id: string,
-  entry: EntryLike,
+  entry: EntryWithParsedMetadata,
 ): LifecycleMemory {
-  const metadata = parseSmartMetadata(entry.metadata, entry);
+  const metadata = entry._parsedMeta ?? parseSmartMetadata(entry.metadata, entry);
   const createdAt =
     typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
       ? entry.timestamp
@@ -527,9 +531,9 @@ export function toLifecycleMemory(
  * and the raw SmartMemoryMetadata (for in-place mutation before write-back).
  */
 export function getDecayableFromEntry(
-  entry: EntryLike & { id?: string },
+  entry: EntryWithParsedMetadata & { id?: string },
 ): { memory: DecayableMemory; meta: SmartMemoryMetadata } {
-  const meta = (entry as any)._parsedMeta ?? parseSmartMetadata(entry.metadata, entry);
+  const meta = entry._parsedMeta ?? parseSmartMetadata(entry.metadata, entry);
   const createdAt =
     typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
       ? entry.timestamp

@@ -83,6 +83,10 @@ export function recommendedVectorPartitions(totalRows: number): number {
 // Pre-compiled regex for CJK character detection (hot path in tokenizeForSearch)
 const CJK_RE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯]/;
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+const TOKEN_SET_CACHE_MAX_ENTRIES = 2_048;
+const TOKEN_SET_CACHE_MAX_CHARS = 4_096;
+const EMPTY_TOKEN_SET: ReadonlySet<string> = new Set();
+const tokenSetCache = new Map<string, ReadonlySet<string>>();
 
 export function tokenizeForSearch(text: string): string[] {
   const lower = text.toLowerCase();
@@ -115,6 +119,28 @@ export function tokenizeForSearch(text: string): string[] {
   return tokens;
 }
 
+export function tokenSetForSearch(normalizedText: string): ReadonlySet<string> {
+  if (!normalizedText) return EMPTY_TOKEN_SET;
+  if (normalizedText.length > TOKEN_SET_CACHE_MAX_CHARS) {
+    return new Set(tokenizeForSearch(normalizedText));
+  }
+
+  const cached = tokenSetCache.get(normalizedText);
+  if (cached) {
+    tokenSetCache.delete(normalizedText);
+    tokenSetCache.set(normalizedText, cached);
+    return cached;
+  }
+
+  const tokens = new Set(tokenizeForSearch(normalizedText));
+  tokenSetCache.set(normalizedText, tokens);
+  if (tokenSetCache.size > TOKEN_SET_CACHE_MAX_ENTRIES) {
+    const oldestKey = tokenSetCache.keys().next().value;
+    if (oldestKey !== undefined) tokenSetCache.delete(oldestKey);
+  }
+  return tokens;
+}
+
 /**
  * Token-based lexical scoring with coverage weighting.
  *
@@ -128,11 +154,9 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
   const normalizedQuery = normalizeSearchText(query);
   if (!normalizedQuery) return 0;
 
-  const queryTokens = tokenizeForSearch(normalizedQuery);
-  if (queryTokens.length === 0) return 0;
+  const queryTokenSet = tokenSetForSearch(normalizedQuery);
+  if (queryTokenSet.size === 0) return 0;
 
-  // Deduplicate query tokens for coverage calculation
-  const queryTokenSet = new Set(queryTokens);
   const querySize = queryTokenSet.size;
 
   let bestScore = 0;
@@ -142,7 +166,7 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
     if (!normalized) continue;
 
     // Token-based matching: count how many unique query tokens appear in candidate
-    const candidateTokenSet = new Set(tokenizeForSearch(normalized));
+    const candidateTokenSet = tokenSetForSearch(normalized);
     let matchedTokens = 0;
     for (const qt of queryTokenSet) {
       if (candidateTokenSet.has(qt)) matchedTokens++;
@@ -178,8 +202,8 @@ export function scoreLexicalHit(query: string, candidates: Array<{ text: string;
  * same query is scored against many candidates.
  */
 export function scoreLexicalHitPreTokenized(
-  queryTokens: Set<string>,
-  candidates: Array<{ tokens: Set<string>; weight: number; normalized: string }>,
+  queryTokens: ReadonlySet<string>,
+  candidates: Array<{ tokens: ReadonlySet<string>; weight: number; normalized: string }>,
   normalizedQuery: string,
 ): number {
   if (queryTokens.size === 0) return 0;
