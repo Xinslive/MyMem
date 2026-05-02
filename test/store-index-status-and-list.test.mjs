@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import jitiFactory from "jiti";
@@ -68,6 +68,58 @@ describe("MemoryStore index status and list pagination", () => {
       assert.match(store.lastFtsError || "", /simulated FTS failure/);
     } finally {
       MemoryStore.prototype.createFtsIndex = originalCreateFtsIndex;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses an existing versioned FTS index without rebuilding", async () => {
+    const { dir, store } = makeStore(nullLogger);
+    let dropCount = 0;
+    let createCount = 0;
+    writeFileSync(join(dir, ".mymem-fts-index.version"), "ngram-v1\n");
+    const table = {
+      async listIndices() {
+        return [{ name: "text_idx", indexType: "FTS", columns: ["text"] }];
+      },
+      async dropIndex() {
+        dropCount++;
+      },
+      async createIndex() {
+        createCount++;
+      },
+    };
+
+    try {
+      await store.createFtsIndex(table);
+      assert.equal(dropCount, 0);
+      assert.equal(createCount, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates an unversioned FTS index once and writes the version marker", async () => {
+    const { dir, store } = makeStore(nullLogger);
+    let dropCount = 0;
+    let createCount = 0;
+    const table = {
+      async listIndices() {
+        return [{ name: "text_idx", indexType: "FTS", columns: ["text"] }];
+      },
+      async dropIndex() {
+        dropCount++;
+      },
+      async createIndex() {
+        createCount++;
+      },
+    };
+
+    try {
+      await store.createFtsIndex(table);
+      assert.equal(dropCount, 1);
+      assert.equal(createCount, 1);
+      assert.equal(readFileSync(join(dir, ".mymem-fts-index.version"), "utf8"), "ngram-v1\n");
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

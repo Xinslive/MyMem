@@ -4,6 +4,17 @@
   "description": "OpenClaw enhanced LanceDB memory plugin with hybrid retrieval (Vector + BM25), cross-encoder rerank, multi-scope isolation, long-context chunking, and management CLI",
   "type": "module",
   "main": "index.ts",
+  "files": [
+    "index.ts",
+    "cli.ts",
+    "src",
+    "lesson",
+    "scripts",
+    "benchmark",
+    "openclaw.plugin.json",
+    "README.md",
+    "TECHNICAL_DOC.md"
+  ],
   "keywords": [
     "openclaw",
     "openclaw-plugin",

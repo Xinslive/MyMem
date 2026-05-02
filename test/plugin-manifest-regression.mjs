@@ -177,6 +177,29 @@ assert.equal(
   "18.1.0",
   "package.json should declare apache-arrow directly so OpenClaw plugin installs do not miss the LanceDB runtime dependency",
 );
+assert.ok(
+  Array.isArray(pkg.files),
+  "package.json should use a files whitelist to keep local runtime data out of published packages",
+);
+for (const expectedPackagePath of [
+  "index.ts",
+  "cli.ts",
+  "src",
+  "lesson",
+  "scripts",
+  "openclaw.plugin.json",
+]) {
+  assert.ok(
+    pkg.files.includes(expectedPackagePath),
+    `package.json files whitelist should include ${expectedPackagePath}`,
+  );
+}
+for (const forbiddenPackagePath of [".claude", ".claude/", "~", "~/", "~/.claude-mem", "test"]) {
+  assert.ok(
+    !pkg.files.includes(forbiddenPackagePath),
+    `package.json files whitelist should not include ${forbiddenPackagePath}`,
+  );
+}
 
 const workDir = mkdtempSync(path.join(tmpdir(), "memory-plugin-regression-"));
 const services = [];

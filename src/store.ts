@@ -6,7 +6,7 @@ import type * as LanceDB from "@lancedb/lancedb";
 import { Index as LanceDbIndex } from "@lancedb/lancedb";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { mkdir, stat, unlink } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./smart-metadata.js";
 import { clampInt } from "./utils.js";
@@ -101,6 +101,8 @@ const TABLE_NAME = "memories";
 const serializedStoreContext = new AsyncLocalStorage<Set<object>>();
 const batchStoreContext = new AsyncLocalStorage<Map<object, MemoryEntry[]>>();
 const METADATA_BATCH_CHUNK_SIZE = 200;
+const FTS_INDEX_VERSION = "ngram-v1";
+const FTS_INDEX_VERSION_FILE = ".mymem-fts-index.version";
 
 type BatchRunOptions = {
   onBeforeFlush?: () => void;
@@ -688,12 +690,37 @@ export class MemoryStore {
     this.table = table;
   }
 
-  private async createFtsIndex(table: LanceDB.Table): Promise<void> {
+  private getFtsIndexVersionPath(): string {
+    return join(this.config.dbPath, FTS_INDEX_VERSION_FILE);
+  }
+
+  private async readFtsIndexVersion(): Promise<string | null> {
+    try {
+      return (await readFile(this.getFtsIndexVersionPath(), "utf8")).trim() || null;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      this.log.warn(`could not read FTS index version marker: ${err}`);
+      return null;
+    }
+  }
+
+  private async writeFtsIndexVersion(): Promise<void> {
+    try {
+      await writeFile(this.getFtsIndexVersionPath(), `${FTS_INDEX_VERSION}\n`, "utf8");
+    } catch (err) {
+      this.log.warn(`could not write FTS index version marker: ${err}`);
+    }
+  }
+
+  private async createFtsIndex(
+    table: LanceDB.Table,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
     try {
       // Skip recreation if the FTS index was already created in this process
       // lifetime. The index uses ngram tokenizer and doesn't need migration
       // on subsequent doInitialize() calls.
-      if (this.ftsIndexCreated) {
+      if (this.ftsIndexCreated && !options.force) {
         return;
       }
 
@@ -702,6 +729,13 @@ export class MemoryStore {
       const existingFts = (indices as unknown as LanceIndex[])?.find(
         (idx) => idx.indexType === "FTS" || idx.columns?.includes("text"),
       );
+
+      if (existingFts && !options.force) {
+        const version = await this.readFtsIndexVersion();
+        if (version === FTS_INDEX_VERSION) {
+          return;
+        }
+      }
 
       const ftsConfig = LanceDbIndex.fts({
         withPosition: true,
@@ -716,8 +750,8 @@ export class MemoryStore {
       });
 
       if (existingFts) {
-        // Migrate: drop old index (may have been created with "simple" tokenizer)
-        // and recreate with ngram tokenizer for CJK support.
+        // Migrate once: older stores may have been created with the simple
+        // tokenizer. The version marker prevents repeating this on every start.
         try {
           await table.dropIndex((existingFts as LanceIndex).name || "text");
         } catch (err) {
@@ -730,6 +764,7 @@ export class MemoryStore {
         replace: true,
         waitTimeoutSeconds: 60,
       });
+      await this.writeFtsIndexVersion();
     } catch (err) {
       throw new Error(
         `FTS index creation failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1572,7 +1607,8 @@ export class MemoryStore {
         }
       }
       // Recreate
-      await this.createFtsIndex(this.table!);
+      this.ftsIndexCreated = false;
+      await this.createFtsIndex(this.table!, { force: true });
       await this.getIndexStatusInternal(this.table!);
       this._lastFtsError = null;
       return { success: true };
