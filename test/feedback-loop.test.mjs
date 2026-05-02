@@ -117,6 +117,7 @@ it("normalizeFeedbackLoopConfig: noiseLearning sub-fields", () => {
       minRejectionsForScan: 10,
       scanIntervalMs: 600_000,
       maxLearnPerScan: 5,
+      relearnCooldownMs: 3_600_000,
       errorAreas: ["extraction"],
     },
   });
@@ -125,6 +126,7 @@ it("normalizeFeedbackLoopConfig: noiseLearning sub-fields", () => {
   assert.equal(result.noiseLearning.minRejectionsForScan, 10);
   assert.equal(result.noiseLearning.scanIntervalMs, 600_000);
   assert.equal(result.noiseLearning.maxLearnPerScan, 5);
+  assert.equal(result.noiseLearning.relearnCooldownMs, 3_600_000);
   assert.deepStrictEqual(result.noiseLearning.errorAreas, ["extraction"]);
 });
 
@@ -157,6 +159,7 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
       minRejectionsForScan: 0, // below minimum, should use default
       scanIntervalMs: 30_000,  // below minimum (60000), should use default
       maxLearnPerScan: 100,    // above maximum (10), should use default
+      relearnCooldownMs: -1, // below minimum, should use default
       errorAreas: 123,         // invalid, should use default
     },
     priorAdaptation: {
@@ -169,6 +172,7 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   assert.equal(result.noiseLearning.minRejectionsForScan, DEFAULT_NOISE_LEARNING_CONFIG.minRejectionsForScan);
   assert.equal(result.noiseLearning.scanIntervalMs, DEFAULT_NOISE_LEARNING_CONFIG.scanIntervalMs);
   assert.equal(result.noiseLearning.maxLearnPerScan, DEFAULT_NOISE_LEARNING_CONFIG.maxLearnPerScan);
+  assert.equal(result.noiseLearning.relearnCooldownMs, DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs);
   assert.deepStrictEqual(result.noiseLearning.errorAreas, DEFAULT_NOISE_LEARNING_CONFIG.errorAreas);
   assert.equal(result.priorAdaptation.learningRate, DEFAULT_PRIOR_ADAPTATION_CONFIG.learningRate);
   assert.equal(result.priorAdaptation.maxAdjustment, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxAdjustment);
@@ -549,6 +553,126 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
       adaptivePriors.events < admissionConfig.typePriors.events,
       "recent tail rejections should lower the events prior",
     );
+  } finally {
+    Date.now = originalNow;
+    rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
+  }
+});
+
+// ============================================================================
+// End-to-end Rejection Audit Noise Learning
+// ============================================================================
+
+it("scanRejectionAudits: learns each rejection cluster once during cooldown", async () => {
+  const now = Date.now();
+  const originalNow = Date.now;
+  Date.now = () => now;
+
+  let embedCallCount = 0;
+  let learnCallCount = 0;
+  const embedder = {
+    embed: async () => {
+      embedCallCount++;
+      return [0.1, 0.2, 0.3];
+    },
+  };
+  const noiseBank = {
+    initialized: true,
+    learn: () => {
+      learnCallCount++;
+    },
+  };
+  const loop = new FeedbackLoop({
+    noiseBank,
+    embedder,
+    admissionController: null,
+    config: {
+      enabled: true,
+      noiseLearning: {
+        ...DEFAULT_NOISE_LEARNING_CONFIG,
+        minRejectionsForScan: 2,
+        maxLearnPerScan: 10,
+        relearnCooldownMs: 60_000,
+      },
+      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+    },
+  });
+  const dir = tmpDir();
+  const dbPath = join(dir, "db");
+  const admissionConfig = makeAdmissionConfig();
+
+  try {
+    mkdirSync(dbPath, { recursive: true });
+    writeRejectedAudits(dbPath, [
+      makeRejectedAudit("events", now - 2_000, 0.1),
+      makeRejectedAudit("events", now - 1_000, 0.1),
+    ]);
+
+    await loop.scanRejectionAudits(dbPath, admissionConfig);
+    await loop.scanRejectionAudits(dbPath, admissionConfig);
+
+    assert.equal(embedCallCount, 1, "repeat scans should not re-embed the same learned rejection cluster");
+    assert.equal(learnCallCount, 1, "repeat scans should not relearn the same rejection cluster during cooldown");
+  } finally {
+    Date.now = originalNow;
+    rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
+  }
+});
+
+it("scanRejectionAudits: relearns an updated cluster after cooldown", async () => {
+  const baseNow = Date.now();
+  const originalNow = Date.now;
+  let fakeNow = baseNow;
+  Date.now = () => fakeNow;
+
+  let learnCallCount = 0;
+  const embedder = { embed: async () => [0.1, 0.2, 0.3] };
+  const noiseBank = {
+    initialized: true,
+    learn: () => {
+      learnCallCount++;
+    },
+  };
+  const loop = new FeedbackLoop({
+    noiseBank,
+    embedder,
+    admissionController: null,
+    config: {
+      enabled: true,
+      noiseLearning: {
+        ...DEFAULT_NOISE_LEARNING_CONFIG,
+        minRejectionsForScan: 2,
+        maxLearnPerScan: 10,
+        relearnCooldownMs: 60_000,
+      },
+      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+    },
+  });
+  const dir = tmpDir();
+  const dbPath = join(dir, "db");
+  const admissionConfig = makeAdmissionConfig();
+
+  try {
+    mkdirSync(dbPath, { recursive: true });
+    writeRejectedAudits(dbPath, [
+      makeRejectedAudit("events", baseNow - 2_000, 0.1),
+      makeRejectedAudit("events", baseNow - 1_000, 0.1),
+    ]);
+
+    await loop.scanRejectionAudits(dbPath, admissionConfig);
+
+    fakeNow = baseNow + 61_000;
+    writeRejectedAudits(dbPath, [
+      makeRejectedAudit("events", baseNow - 2_000, 0.1),
+      makeRejectedAudit("events", baseNow - 1_000, 0.1),
+      makeRejectedAudit("events", fakeNow - 1_000, 0.1),
+    ]);
+
+    await loop.scanRejectionAudits(dbPath, admissionConfig);
+
+    assert.equal(learnCallCount, 2, "updated clusters should be eligible again after cooldown");
   } finally {
     Date.now = originalNow;
     rmSync(dir, { recursive: true, force: true });

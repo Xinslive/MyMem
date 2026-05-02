@@ -183,6 +183,7 @@ export interface PluginConfig {
       minRejectionsForScan?: number;
       scanIntervalMs?: number;
       maxLearnPerScan?: number;
+      relearnCooldownMs?: number;
       errorAreas?: string[];
     };
     priorAdaptation?: {

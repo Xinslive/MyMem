@@ -200,7 +200,6 @@ export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, 
 
           const entryText = match[0];
           const summary = extractLearningSection(entryText, "Summary") || "Summarize the source learning here.";
-          const details = extractLearningSection(entryText, "Details");
           const suggestedAction = extractLearningSection(entryText, "Suggested Action");
           const area = extractLearningField(entryText, "Area") || "general";
           const category = extractLearningField(entryText, "Category") || "";

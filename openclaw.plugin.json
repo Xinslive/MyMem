@@ -1198,6 +1198,13 @@
                 "default": 3,
                 "description": "Maximum number of noise prototypes learned per scan cycle."
               },
+              "relearnCooldownMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2592000000,
+                "default": 86400000,
+                "description": "Minimum time before the same rejection cluster can reinforce the noise bank again. Set 0 to allow every scan to relearn updated clusters."
+              },
               "errorAreas": {
                 "type": "array",
                 "items": {

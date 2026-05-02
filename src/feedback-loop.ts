@@ -25,6 +25,7 @@ export interface NoiseLearningConfig {
   minRejectionsForScan: number;
   scanIntervalMs: number;
   maxLearnPerScan: number;
+  relearnCooldownMs: number;
   errorAreas: string[];
 }
 
@@ -56,6 +57,7 @@ export const DEFAULT_NOISE_LEARNING_CONFIG: NoiseLearningConfig = {
   minRejectionsForScan: 5,
   scanIntervalMs: 300_000, // 5 minutes
   maxLearnPerScan: 3,
+  relearnCooldownMs: 86_400_000, // 24 hours
   errorAreas: ["extraction", "admission"],
 };
 
@@ -120,9 +122,11 @@ function parseErrorsFile(content: string): ParsedErrorEntry[] {
 // ============================================================================
 
 interface RejectionCluster {
+  key: string;
   category: string;
   count: number;
   avgScore: number;
+  latestRejectedAt: number;
   representativeText: string;
 }
 
@@ -131,40 +135,63 @@ function clusterRejections(
   minClusterSize: number,
   rejectThreshold: number,
 ): RejectionCluster[] {
-  const clusters = new Map<string, { count: number; totalScore: number; texts: string[]; cat: string }>();
+  const clusters = new Map<string, { count: number; totalScore: number; latestRejectedAt: number; texts: string[]; cat: string }>();
 
   for (const entry of entries) {
     if (entry.audit.score > rejectThreshold - 0.1) continue;
 
     const cat = String(entry.candidate?.category ?? "other");
-    const key = `${cat}::${tokenKey(entry.conversation_excerpt ?? entry.candidate?.abstract ?? "")}`;
+    const text = getRejectionClusterText(entry);
+    const key = `${cat}::${tokenKey(text)}`;
+    const rejectedAt = getRejectedAt(entry);
     const existing = clusters.get(key);
     if (existing) {
       existing.count++;
       existing.totalScore += entry.audit.score;
-      existing.texts.push(entry.candidate?.abstract ?? "");
+      existing.latestRejectedAt = Math.max(existing.latestRejectedAt, rejectedAt);
+      existing.texts.push(text);
     } else {
-      clusters.set(key, { count: 1, totalScore: entry.audit.score, texts: [entry.candidate?.abstract ?? ""], cat });
+      clusters.set(key, { count: 1, totalScore: entry.audit.score, latestRejectedAt: rejectedAt, texts: [text], cat });
     }
   }
 
   const result: RejectionCluster[] = [];
-  for (const [, cluster] of clusters) {
+  for (const [key, cluster] of clusters) {
     if (cluster.count < minClusterSize) continue;
     result.push({
+      key,
       category: cluster.cat,
       count: cluster.count,
       avgScore: cluster.totalScore / cluster.count,
+      latestRejectedAt: cluster.latestRejectedAt,
       representativeText: cluster.texts[cluster.texts.length - 1] ?? cluster.texts[0] ?? "",
     });
   }
   return result;
 }
 
+function getRejectionClusterText(entry: AdmissionRejectionAuditEntry): string {
+  return [
+    entry.candidate?.abstract,
+    entry.candidate?.content,
+    entry.conversation_excerpt,
+  ].find((value) => typeof value === "string" && value.trim().length > 0)?.trim() ?? "";
+}
+
+function getRejectedAt(entry: AdmissionRejectionAuditEntry): number {
+  if (Number.isFinite(entry.rejected_at)) return entry.rejected_at;
+  if (Number.isFinite(entry.audit.evaluated_at)) return entry.audit.evaluated_at;
+  return 0;
+}
+
 function tokenKey(text: string): string {
-  const tokens = text.toLowerCase().trim().split(/\s+/).filter(Boolean).slice(0, 5);
+  const normalized = text.toLowerCase().normalize("NFKC").trim();
+  const tokens = normalized.match(/[\p{Letter}\p{Number}]+/gu)?.slice(0, 8) ?? [];
+  if (tokens.length === 0) {
+    return normalized.replace(/\s+/g, " ").slice(0, 120);
+  }
   tokens.sort();
-  return tokens.join(" ");
+  return tokens.join(" ").slice(0, 180);
 }
 
 const MAX_REJECTION_AUDIT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -240,6 +267,41 @@ class ProcessedErrorTracker {
 }
 
 // ============================================================================
+// Learned Rejection Cluster Tracker (in-memory dedup)
+// ============================================================================
+
+const MAX_TRACKED_REJECTION_CLUSTERS = 1_000;
+
+class LearnedRejectionClusterTracker {
+  private learned = new Map<string, { learnedAt: number; latestRejectedAt: number }>();
+
+  shouldLearn(cluster: RejectionCluster, now: number, cooldownMs: number): boolean {
+    const existing = this.learned.get(cluster.key);
+    if (!existing) return true;
+    if (cluster.latestRejectedAt <= existing.latestRejectedAt) return false;
+    return now - existing.learnedAt >= cooldownMs;
+  }
+
+  markLearned(cluster: RejectionCluster, now: number): void {
+    this.learned.set(cluster.key, {
+      learnedAt: now,
+      latestRejectedAt: cluster.latestRejectedAt,
+    });
+    this.pruneOldest();
+  }
+
+  private pruneOldest(): void {
+    if (this.learned.size <= MAX_TRACKED_REJECTION_CLUSTERS) return;
+    const entries = Array.from(this.learned.entries())
+      .sort((left, right) => left[1].learnedAt - right[1].learnedAt);
+    const removeCount = entries.length - MAX_TRACKED_REJECTION_CLUSTERS;
+    for (let i = 0; i < removeCount; i++) {
+      this.learned.delete(entries[i][0]);
+    }
+  }
+}
+
+// ============================================================================
 // Feedback Loop
 // ============================================================================
 
@@ -252,6 +314,7 @@ export class FeedbackLoop {
   private runtimeContext: FeedbackLoopRuntimeContext;
 
   private processedErrors = new ProcessedErrorTracker();
+  private learnedRejectionClusters = new LearnedRejectionClusterTracker();
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
   private admittedTimestampsByCategory: Record<string, number[]> = {};
@@ -408,10 +471,15 @@ export class FeedbackLoop {
       });
 
       const clusters = clusterRejections(entries, this.config.noiseLearning.minRejectionsForScan, admissionConfig.rejectThreshold);
+      const now = Date.now();
 
       let learned = 0;
       for (const cluster of clusters) {
         if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
+        if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
+          this.debugLog(`feedback-loop: skipped previously learned rejection cluster (count=${cluster.count}, key=${cluster.key})`);
+          continue;
+        }
         const text = cluster.representativeText.slice(0, 300);
         if (!text.trim()) continue;
 
@@ -419,6 +487,7 @@ export class FeedbackLoop {
           const vector = await this.embedder.embed(text);
           if (vector && vector.length > 0) {
             this.noiseBank.learn(vector);
+            this.learnedRejectionClusters.markLearned(cluster, now);
             learned++;
             this.debugLog(`feedback-loop: learned noise from rejection cluster (count=${cluster.count}, avgScore=${cluster.avgScore.toFixed(3)})`);
           }
@@ -438,10 +507,14 @@ export class FeedbackLoop {
 
     const clusters = clusterRejections(this.rejectionBuffer, this.config.noiseLearning.minRejectionsForScan, rejectThreshold);
     this.rejectionBuffer = [];
+    const now = Date.now();
 
     let learned = 0;
     for (const cluster of clusters) {
       if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
+      if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
+        continue;
+      }
       const text = cluster.representativeText.slice(0, 300);
       if (!text.trim()) continue;
 
@@ -449,6 +522,7 @@ export class FeedbackLoop {
         const vector = await this.embedder.embed(text);
         if (vector && vector.length > 0) {
           this.noiseBank.learn(vector);
+          this.learnedRejectionClusters.markLearned(cluster, now);
           learned++;
         }
       } catch {
@@ -612,6 +686,13 @@ export class FeedbackLoop {
     this.pruneAdmittedTimestamps(now);
     return this.admittedTimestampsByCategory[category]?.length ?? 0;
   }
+
+  private getRelearnCooldownMs(): number {
+    const cooldownMs = this.config.noiseLearning.relearnCooldownMs;
+    return Number.isFinite(cooldownMs) && cooldownMs >= 0
+      ? cooldownMs
+      : DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs;
+  }
 }
 
 // ============================================================================
@@ -644,6 +725,8 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
         ? Math.floor(nl.scanIntervalMs) : DEFAULT_NOISE_LEARNING_CONFIG.scanIntervalMs,
       maxLearnPerScan: typeof nl.maxLearnPerScan === "number" && nl.maxLearnPerScan >= 1 && nl.maxLearnPerScan <= 10
         ? Math.floor(nl.maxLearnPerScan) : DEFAULT_NOISE_LEARNING_CONFIG.maxLearnPerScan,
+      relearnCooldownMs: typeof nl.relearnCooldownMs === "number" && nl.relearnCooldownMs >= 0 && nl.relearnCooldownMs <= 30 * 86_400_000
+        ? Math.floor(nl.relearnCooldownMs) : DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs,
       errorAreas: Array.isArray(nl.errorAreas) && nl.errorAreas.every((e: unknown) => typeof e === "string")
         ? (nl.errorAreas as string[]) : DEFAULT_NOISE_LEARNING_CONFIG.errorAreas,
     },
