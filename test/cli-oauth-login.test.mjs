@@ -11,10 +11,10 @@ const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createMemoryCLI } = jiti("../cli.ts");
 
 const ENV_KEYS = [
-  "MEMORY_PRO_OAUTH_AUTHORIZE_URL",
-  "MEMORY_PRO_OAUTH_TOKEN_URL",
-  "MEMORY_PRO_OAUTH_REDIRECT_URI",
-  "MEMORY_PRO_OAUTH_CLIENT_ID",
+  "MYMEM_OAUTH_AUTHORIZE_URL",
+  "MYMEM_OAUTH_TOKEN_URL",
+  "MYMEM_OAUTH_REDIRECT_URI",
+  "MYMEM_OAUTH_CLIENT_ID",
   "OPENCLAW_HOME",
 ];
 
@@ -99,10 +99,10 @@ describe("mymem auth", () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const tokenPort = server.address().port;
 
-    process.env.MEMORY_PRO_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
-    process.env.MEMORY_PRO_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
-    process.env.MEMORY_PRO_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
-    process.env.MEMORY_PRO_OAUTH_CLIENT_ID = "test-client-id";
+    process.env.MYMEM_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
+    process.env.MYMEM_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
+    process.env.MYMEM_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
+    process.env.MYMEM_OAUTH_CLIENT_ID = "test-client-id";
 
     const configPath = path.join(tempDir, "openclaw.json");
     const oauthPath = path.join(tempDir, ".mymem", "oauth.json");
@@ -151,7 +151,7 @@ describe("mymem auth", () => {
           const parsed = new URL(url);
           const state = parsed.searchParams.get("state");
           setTimeout(() => {
-            const callback = new URL(process.env.MEMORY_PRO_OAUTH_REDIRECT_URI);
+            const callback = new URL(process.env.MYMEM_OAUTH_REDIRECT_URI);
             callback.searchParams.set("code", authCode);
             callback.searchParams.set("state", state || "");
             http.get(callback);
@@ -273,10 +273,10 @@ describe("mymem auth", () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const tokenPort = server.address().port;
 
-    process.env.MEMORY_PRO_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
-    process.env.MEMORY_PRO_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
-    process.env.MEMORY_PRO_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
-    process.env.MEMORY_PRO_OAUTH_CLIENT_ID = "test-client-id";
+    process.env.MYMEM_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
+    process.env.MYMEM_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
+    process.env.MYMEM_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
+    process.env.MYMEM_OAUTH_CLIENT_ID = "test-client-id";
 
     const configPath = path.join(tempDir, "openclaw.json");
     const oauthPath = path.join(tempDir, ".mymem", "oauth.json");
@@ -315,7 +315,7 @@ describe("mymem auth", () => {
           const parsed = new URL(url);
           const state = parsed.searchParams.get("state");
           setTimeout(() => {
-            const callback = new URL(process.env.MEMORY_PRO_OAUTH_REDIRECT_URI);
+            const callback = new URL(process.env.MYMEM_OAUTH_REDIRECT_URI);
             callback.searchParams.set("code", authCode);
             callback.searchParams.set("state", state || "");
             http.get(callback);
@@ -384,10 +384,10 @@ describe("mymem auth", () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const tokenPort = server.address().port;
 
-    process.env.MEMORY_PRO_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
-    process.env.MEMORY_PRO_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
-    process.env.MEMORY_PRO_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
-    process.env.MEMORY_PRO_OAUTH_CLIENT_ID = "test-client-id";
+    process.env.MYMEM_OAUTH_AUTHORIZE_URL = `http://127.0.0.1:${tokenPort}/oauth/authorize`;
+    process.env.MYMEM_OAUTH_TOKEN_URL = `http://127.0.0.1:${tokenPort}/oauth/token`;
+    process.env.MYMEM_OAUTH_REDIRECT_URI = `http://localhost:${redirectPort}/auth/callback`;
+    process.env.MYMEM_OAUTH_CLIENT_ID = "test-client-id";
     process.env.OPENCLAW_HOME = path.join(tempDir, "openclaw-home");
 
     const configPath = path.join(tempDir, "openclaw.json");
@@ -422,7 +422,7 @@ describe("mymem auth", () => {
           const parsed = new URL(url);
           const state = parsed.searchParams.get("state");
           setTimeout(() => {
-            const callback = new URL(process.env.MEMORY_PRO_OAUTH_REDIRECT_URI);
+            const callback = new URL(process.env.MYMEM_OAUTH_REDIRECT_URI);
             callback.searchParams.set("code", authCode);
             callback.searchParams.set("state", state || "");
             http.get(callback);

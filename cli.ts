@@ -34,6 +34,7 @@ import {
   explainMemoryRetrieval,
   formatRetrievalExplainText,
 } from "./src/retrieval-explain.js";
+import { startMemoryDashboardServer } from "./src/dashboard-server.js";
 
 /**
  * Ensure metadata string has memory_category (new-format) or inject it.
@@ -1305,6 +1306,41 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         }
       } catch (error) {
         console.error("Failed to get statistics:", error);
+        process.exit(1);
+      }
+    });
+
+  memory
+    .command("dashboard")
+    .description("Start a local MyMem dashboard for non-technical memory inspection")
+    .option("--host <host>", "Host to bind", "127.0.0.1")
+    .option("--port <n>", "Port to listen on", "1314")
+    .action(async (options) => {
+      try {
+        const port = parseInt(options.port) || 1314;
+        const server = await startMemoryDashboardServer(context, {
+          host: options.host || "127.0.0.1",
+          port,
+        });
+
+        console.log(`MyMem dashboard running at ${server.url}`);
+        console.log("Press Ctrl+C to stop.");
+
+        const shutdown = async () => {
+          await server.close();
+          process.exit(0);
+        };
+        process.once("SIGINT", () => {
+          void shutdown();
+        });
+        process.once("SIGTERM", () => {
+          void shutdown();
+        });
+        await new Promise(() => {
+          // Keep the CLI process alive while the dashboard server is running.
+        });
+      } catch (error) {
+        console.error("Failed to start dashboard:", error);
         process.exit(1);
       }
     });

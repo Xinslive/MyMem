@@ -6,6 +6,7 @@ import type {
 } from "./retriever.js";
 import type { RetrievalTrace, RetrievalStageResult } from "./retrieval-trace.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 
 type ExplainSource = Extract<RetrievalContext["source"], "manual" | "cli">;
@@ -117,7 +118,7 @@ function searchFoundNoCandidates(trace: RetrievalTrace): boolean {
 function serializeExplainResults(results: RetrievalResult[]) {
   return results.map((result) => ({
     id: result.entry.id,
-    text: result.entry.text,
+    text: redactSecrets(result.entry.text),
     category: getDisplayCategoryTag(result.entry),
     rawCategory: result.entry.category,
     scope: result.entry.scope,

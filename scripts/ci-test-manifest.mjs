@@ -23,6 +23,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/context-support-e2e.mjs" },
   { group: "storage-and-schema", runner: "node", file: "test/cross-process-lock.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-cache.test.mjs" },
+  { group: "cli-smoke", runner: "node", file: "test/dashboard-server.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-error-hints.test.mjs" },
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-lru.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-ollama-abort.test.mjs", args: ["--test"] },
