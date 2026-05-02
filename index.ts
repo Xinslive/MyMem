@@ -37,6 +37,10 @@ import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
 import { summarizeTextPreview, summarizeMessageContent } from "./src/capture-detection.js";
 import { createLlmClient } from "./src/llm-client.js";
 import { createMemoryUpgrader } from "./src/memory-upgrader.js";
+import {
+  startMemoryDashboardServer,
+  type RunningMemoryDashboardServer,
+} from "./src/dashboard-server.js";
 
 // Import singleton state management
 import {
@@ -478,6 +482,39 @@ const myMemPlugin = {
     // ========================================================================
 
     const autoBackup = createAutoBackup({ api, store, resolvedDbPath });
+    let dashboardServer: RunningMemoryDashboardServer | null = null;
+
+    const startDashboard = async () => {
+      if (dashboardServer || isCliMode()) return;
+      try {
+        dashboardServer = await startMemoryDashboardServer(
+          {
+            store,
+            retriever,
+            scopeManager,
+            embedder,
+          },
+          {
+            host: "127.0.0.1",
+            port: 1314,
+          },
+        );
+        api.logger.info(`mymem: dashboard started at ${dashboardServer.url}`);
+      } catch (error) {
+        api.logger.warn(`mymem: dashboard auto-start skipped: ${String(error)}`);
+      }
+    };
+
+    const stopDashboard = async () => {
+      const server = dashboardServer;
+      dashboardServer = null;
+      if (!server) return;
+      try {
+        await server.close();
+      } catch (error) {
+        api.logger.warn(`mymem: dashboard stop failed: ${String(error)}`);
+      }
+    };
 
     // ========================================================================
     // Service Registration
@@ -486,6 +523,8 @@ const myMemPlugin = {
     api.registerService?.({
       id: "mymem",
       start: async () => {
+        await startDashboard();
+
         // IMPORTANT: Do not block gateway startup on external network calls.
         // If embedding/retrieval tests hang (bad network / slow provider), the gateway
         // may never bind its HTTP port, causing restart timeouts.
@@ -616,6 +655,7 @@ const myMemPlugin = {
         if (feedbackLoop) feedbackLoop.start();
       },
       stop: async () => {
+        await stopDashboard();
         autoBackup.stop();
         if (feedbackLoop) feedbackLoop.dispose();
         api.logger.info("mymem: stopped");

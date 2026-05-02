@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./smart-metadata.js";
+import type { MemoryCategory } from "./memory-categories.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
 
@@ -92,7 +93,8 @@ type StatsResult = {
   totalCount: number;
   scopeCounts: Record<string, number>;
   categoryCounts: Record<string, number>;
-  recentActivity: { last24h: number; last7d: number };
+  memoryCategoryCounts: Record<string, number>;
+  recentActivity: { last24h: number; last7d: number; last30d: number };
   tierDistribution: Record<string, number>;
   healthSignals: { badRecall: number; suppressed: number; lowConfidence: number };
 };
@@ -1212,7 +1214,8 @@ export class MemoryStore {
     totalCount: number;
     scopeCounts: Record<string, number>;
     categoryCounts: Record<string, number>;
-    recentActivity: { last24h: number; last7d: number };
+    memoryCategoryCounts: Record<string, number>;
+    recentActivity: { last24h: number; last7d: number; last30d: number };
     tierDistribution: Record<string, number>;
     healthSignals: { badRecall: number; suppressed: number; lowConfidence: number };
   }> {
@@ -1223,7 +1226,8 @@ export class MemoryStore {
         totalCount: 0,
         scopeCounts: {},
         categoryCounts: {},
-        recentActivity: { last24h: 0, last7d: 0 },
+        memoryCategoryCounts: {},
+        recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
         tierDistribution: {},
         healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
       };
@@ -1242,12 +1246,14 @@ export class MemoryStore {
     const now = Date.now();
     const h24 = 24 * 60 * 60 * 1000;
     const d7 = 7 * h24;
+    const d30 = 30 * h24;
 
     // Phase 1: lightweight count queries (no row data loaded)
-    const [totalCount, last24h, last7d] = await Promise.all([
+    const [totalCount, last24h, last7d, last30d] = await Promise.all([
       this.countRowsWithFilter(whereClause),
       this.countRowsWithFilter(combineWhereClauses([whereClause, `timestamp >= ${now - h24}`])),
       this.countRowsWithFilter(combineWhereClauses([whereClause, `timestamp >= ${now - d7}`])),
+      this.countRowsWithFilter(combineWhereClauses([whereClause, `timestamp >= ${now - d30}`])),
     ]);
 
     if (totalCount === 0) {
@@ -1255,7 +1261,8 @@ export class MemoryStore {
         totalCount: 0,
         scopeCounts: {},
         categoryCounts: {},
-        recentActivity: { last24h: 0, last7d: 0 },
+        memoryCategoryCounts: {},
+        recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
         tierDistribution: {},
         healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
       };
@@ -1271,6 +1278,7 @@ export class MemoryStore {
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
+    const memoryCategoryCounts: Record<string, number> = {};
     const tierDistribution: Record<string, number> = {};
     let badRecall = 0;
     let suppressed = 0;
@@ -1286,6 +1294,8 @@ export class MemoryStore {
 
       // Use pre-parsed metadata from _parsedMeta (cached by mapRowToMemoryEntry)
       const meta = entry._parsedMeta!;
+      const memoryCategory = String((meta.memory_category || category) as MemoryCategory);
+      memoryCategoryCounts[memoryCategory] = (memoryCategoryCounts[memoryCategory] || 0) + 1;
       const tier = String(meta.memory_tier || meta.memory_layer || "unknown");
       tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
       if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
@@ -1297,7 +1307,8 @@ export class MemoryStore {
       totalCount,
       scopeCounts,
       categoryCounts,
-      recentActivity: { last24h, last7d },
+      memoryCategoryCounts,
+      recentActivity: { last24h, last7d, last30d },
       tierDistribution,
       healthSignals: { badRecall, suppressed, lowConfidence },
     };
