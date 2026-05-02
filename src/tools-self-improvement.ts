@@ -15,6 +15,8 @@ import {
   escapeRegExp,
   parseLearningBacklogEntries,
   buildSelfImprovementDistillPatch,
+  extractLearningSection,
+  extractLearningField,
   type LearningBacklogEntry,
 } from "./tools-shared.js";
 import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./self-improvement-files.js";
@@ -83,6 +85,72 @@ export function registerSelfImprovementLogTool(api: OpenClawPluginApi, context: 
   );
 }
 
+function buildTriggerConditions(summary: string, area: string, category: string, isLearning: boolean): string[] {
+  const conditions: string[] = [];
+
+  if (isLearning) {
+    if (category === "correction") {
+      conditions.push("When repeating a task that previously produced incorrect results");
+      conditions.push("When the agent detects a pattern matching the corrected behavior");
+    } else if (category === "knowledge_gap") {
+      conditions.push("When the agent encounters a domain or topic with known gaps");
+      conditions.push("Before starting work in the area described below");
+    } else {
+      conditions.push("When performing tasks in the same domain or area");
+      conditions.push("When the approach described has proven effective before");
+    }
+  } else {
+    conditions.push("When a command or tool fails with a similar symptom");
+    conditions.push("Before retrying an operation that previously caused this error");
+  }
+
+  if (area && area !== "general") {
+    conditions.push(`When working in the \`${area}\` area`);
+  }
+
+  const summaryLower = summary.toLowerCase();
+  if (summaryLower.includes("test")) {
+    conditions.push("When writing or running tests");
+  }
+  if (summaryLower.includes("deploy") || summaryLower.includes("ci")) {
+    conditions.push("When deploying or running CI pipelines");
+  }
+  if (summaryLower.includes("config") || summaryLower.includes("env")) {
+    conditions.push("When modifying configuration or environment variables");
+  }
+
+  return conditions;
+}
+
+function buildWorkflowSteps(suggestedAction: string, summary: string, isLearning: boolean): string[] {
+  const steps: string[] = [];
+
+  if (suggestedAction && suggestedAction !== "-") {
+    const actionLines = suggestedAction
+      .split("\n")
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter((line) => line.length > 0);
+
+    for (const line of actionLines) {
+      steps.push(line);
+    }
+  }
+
+  if (steps.length === 0) {
+    if (isLearning) {
+      steps.push(`Apply the approach described: ${summary}`);
+    } else {
+      steps.push(`Check for the root cause described: ${summary}`);
+      steps.push("Apply the documented fix or workaround");
+    }
+  }
+
+  steps.push("Verify the outcome matches expectations");
+  steps.push("Log any new learnings if the situation differs from the original");
+
+  return steps;
+}
+
 export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, context: ToolContext) {
   api.registerTool(
     (toolCtx) => ({
@@ -130,8 +198,17 @@ export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, 
             };
           }
 
-          const summaryMatch = match[0].match(/### Summary\n([\s\S]*?)\n###/m);
-          const summary = (summaryMatch?.[1] ?? "Summarize the source learning here.").trim();
+          const entryText = match[0];
+          const summary = extractLearningSection(entryText, "Summary") || "Summarize the source learning here.";
+          const details = extractLearningSection(entryText, "Details");
+          const suggestedAction = extractLearningSection(entryText, "Suggested Action");
+          const area = extractLearningField(entryText, "Area") || "general";
+          const category = extractLearningField(entryText, "Category") || "";
+          const isLearning = sourceFile === "LEARNINGS.md";
+
+          const triggerConditions = buildTriggerConditions(summary, area, category, isLearning);
+          const workflowSteps = buildWorkflowSteps(suggestedAction, summary, isLearning);
+
           const safeOutputDir = outputDir
             .replace(/\\/g, "/")
             .split("/")
@@ -156,11 +233,10 @@ export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, 
             summary,
             "",
             "## When To Use",
-            "- [TODO] Define trigger conditions",
+            ...triggerConditions.map((c) => `- ${c}`),
             "",
             "## Steps",
-            "1. [TODO] Add repeatable workflow steps",
-            "2. [TODO] Add verification steps",
+            ...workflowSteps.map((s, i) => `${i + 1}. ${s}`),
             "",
             "## Source Learning",
             `- Learning ID: ${learningId}`,

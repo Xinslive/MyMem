@@ -16,6 +16,9 @@ const BOILERPLATE_RE = /^(hi|hello|hey|good morning|good evening|greetings)|^fre
 // Extractor artifacts from validation prompts / synthetic summaries
 const DIAGNOSTIC_ARTIFACT_RE = /\bquery\s*->\s*(none|no explicit solution|unknown|not found)\b|\buser asked for\b.*\b(none|no explicit solution|unknown|not found)\b|\bno explicit solution\b/i;
 
+// Reflection event metadata — pure anchors with no retrievable content
+const REFLECTION_EVENT_RE = /^reflection-event\s*·/m;
+
 /**
  * Envelope noise patterns — Discord/channel metadata headers and blocks
  * that have zero informational value for memory extraction.
@@ -61,6 +64,7 @@ export function isNoise(text: string, options: NoiseFilterOptions = {}): boolean
   if (opts.filterMetaQuestions && META_QUESTION_RE.test(trimmed)) return true;
   if (opts.filterBoilerplate && BOILERPLATE_RE.test(trimmed)) return true;
   if (DIAGNOSTIC_ARTIFACT_RE.test(trimmed)) return true;
+  if (REFLECTION_EVENT_RE.test(trimmed)) return true;
 
   return false;
 }

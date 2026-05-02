@@ -59,6 +59,18 @@ describe("HybridNoiseDetector - Regex Detection", () => {
       assert.equal(isNoiseFromFilter("user asked for no explicit solution"), true);
     });
 
+    it("detects reflection event metadata", () => {
+      assert.equal(isNoiseFromFilter([
+        "reflection-event · main",
+        "eventId=refl-20260502091231-7952ab1d",
+        "session=183f5063-c26b-4a3c-b6ba-1beeef02958e",
+        "agent=main",
+        "command=new",
+        "usedFallback=false",
+      ].join("\n")), true);
+      assert.equal(isNoiseFromFilter("reflection-event · agent:custom"), true);
+    });
+
     it("allows valid memory content", () => {
       assert.equal(isNoiseFromFilter("User prefers dark mode theme"), false);
       assert.equal(isNoiseFromFilter("The project uses TypeScript for type safety"), false);

@@ -417,6 +417,7 @@ export class MemoryScopeManager implements ScopeManager {
       custom: 0,
       project: 0,
       user: 0,
+      reflection: 0,
       other: 0,
     };
 
@@ -429,10 +430,10 @@ export class MemoryScopeManager implements ScopeManager {
         scopesByType.custom++;
       } else if (scope.startsWith("project:")) {
         scopesByType.project++;
-      } else if (scope.startsWith("user:") || scope.startsWith("reflection:")) {
-        // TODO: add a dedicated `reflection` bucket once downstream dashboards accept it.
-        // For now, reflection scopes are counted under `user` for schema compatibility.
+      } else if (scope.startsWith("user:")) {
         scopesByType.user++;
+      } else if (scope.startsWith("reflection:")) {
+        scopesByType.reflection++;
       } else {
         scopesByType.other++;
       }
