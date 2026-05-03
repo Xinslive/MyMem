@@ -79,9 +79,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist(conversationText) {
           capturedConversationText = conversationText;
           return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
@@ -153,9 +150,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist(conversationText) {
           capturedConversationText = conversationText;
           return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
@@ -219,9 +213,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist(conversationText) {
           capturedConversationText = conversationText;
           return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
@@ -293,9 +284,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist(conversationText) {
           extractionRuns++;
           capturedConversationText = conversationText;
@@ -366,9 +354,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist() {
           extractionRuns++;
           return { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };
@@ -435,9 +420,6 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async filterNoiseByEmbedding(texts) {
-          return texts;
-        },
         async extractAndPersist(conversationText) {
           capturedConversationText = conversationText;
           return { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };

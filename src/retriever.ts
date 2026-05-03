@@ -11,7 +11,6 @@ import { expandQuery } from "./query-expander.js";
 import type { DecayEngine, DecayableMemory } from "./decay-engine.js";
 import { RecencyEngine } from "./recency-engine.js";
 import type { TierManager } from "./tier-manager.js";
-import type { HybridNoiseDetector } from "./noise-detector.js";
 import {
   getDecayableFromEntry,
   isMemoryExpired,
@@ -77,7 +76,6 @@ export class MemoryRetriever {
   private tierManager: TierManager | null = null;
   private _statsCollector: RetrievalStatsCollector | null = null;
   private recencyEngine: RecencyEngine | null = null;
-  private hybridNoiseDetector: HybridNoiseDetector | null = null;
 
   constructor(
     private store: MemoryStore,
@@ -98,11 +96,6 @@ export class MemoryRetriever {
   /** Set the lightweight RecencyEngine (used when DecayEngine is not configured). */
   setRecencyEngine(engine: RecencyEngine): void {
     this.recencyEngine = engine;
-  }
-
-  /** Set the hybrid noise detector (Regex + Embedding). */
-  setNoiseDetector(detector: HybridNoiseDetector): void {
-    this.hybridNoiseDetector = detector;
   }
 
   /** Enable aggregate retrieval statistics collection. */
@@ -418,9 +411,7 @@ export class MemoryRetriever {
     if (trace) trace.startStage("noise_filter", lifecycleRanked.map((r) => r.entry.id));
     let denoised: RetrievalResult[];
     if (this.config.filterNoise) {
-      denoised = this.hybridNoiseDetector
-        ? await this.hybridNoiseDetector.filter(lifecycleRanked, (r) => r.entry.text)
-        : filterNoise(lifecycleRanked, (r) => r.entry.text);
+      denoised = filterNoise(lifecycleRanked, (r) => r.entry.text);
     } else {
       denoised = lifecycleRanked;
     }
@@ -1115,9 +1106,6 @@ export function createRetriever(
   );
   if (options?.recencyEngine) {
     retriever.setRecencyEngine(options.recencyEngine);
-  }
-  if (options?.noiseDetector) {
-    retriever.setNoiseDetector(options.noiseDetector);
   }
   if (options?.tierManager) {
     retriever.setTierManager(options.tierManager);

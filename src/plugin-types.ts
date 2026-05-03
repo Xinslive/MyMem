@@ -183,15 +183,6 @@ export interface PluginConfig {
   };
   feedbackLoop?: {
     enabled?: boolean;
-    noiseLearning?: {
-      fromErrors?: boolean;
-      fromRejections?: boolean;
-      minRejectionsForScan?: number;
-      scanIntervalMs?: number;
-      maxLearnPerScan?: number;
-      relearnCooldownMs?: number;
-      errorAreas?: string[];
-    };
     priorAdaptation?: {
       enabled?: boolean;
       adaptationIntervalMs?: number;

@@ -240,12 +240,10 @@ export type BatchIdStore = {
 import type { DecayEngine } from "./decay-engine.js";
 import { RecencyEngine } from "./recency-engine.js";
 import type { TierManager } from "./tier-manager.js";
-import type { HybridNoiseDetector } from "./noise-detector.js";
 
 export interface RetrieverLifecycleOptions {
   decayEngine?: DecayEngine;
   recencyEngine?: RecencyEngine;
-  noiseDetector?: HybridNoiseDetector;
   tierManager?: TierManager;
   logger?: Pick<Logger, "debug" | "warn">;
 }

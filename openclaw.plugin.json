@@ -1233,67 +1233,12 @@
       "feedbackLoop": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Feedback loops connecting self-improvement errors, corrections, and admission rejections back into noise detection, admission priors, and preventive lessons.",
+        "description": "Feedback loops connecting self-improvement errors, corrections, and admission rejections back into admission priors and preventive lessons.",
         "properties": {
           "enabled": {
             "type": "boolean",
             "default": true,
             "description": "Master switch for feedback loops. When false, no scanning or adaptation occurs."
-          },
-          "noiseLearning": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "fromErrors": {
-                "type": "boolean",
-                "default": true,
-                "description": "Learn noise prototypes from error entries with matching areas."
-              },
-              "fromRejections": {
-                "type": "boolean",
-                "default": true,
-                "description": "Learn noise prototypes from accumulated admission rejections."
-              },
-              "minRejectionsForScan": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 50,
-                "default": 5,
-                "description": "Minimum rejection audits to accumulate before scanning for noise patterns."
-              },
-              "scanIntervalMs": {
-                "type": "integer",
-                "minimum": 60000,
-                "maximum": 3600000,
-                "default": 300000,
-                "description": "Scan interval in milliseconds for error files and rejection audits."
-              },
-              "maxLearnPerScan": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 10,
-                "default": 3,
-                "description": "Maximum number of noise prototypes learned per scan cycle."
-              },
-              "relearnCooldownMs": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 2592000000,
-                "default": 86400000,
-                "description": "Minimum time before the same rejection cluster can reinforce the noise bank again. Set 0 to allow every scan to relearn updated clusters."
-              },
-              "errorAreas": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": [
-                  "extraction",
-                  "admission"
-                ],
-                "description": "Only learn noise from errors with these area values."
-              }
-            }
           },
           "priorAdaptation": {
             "type": "object",

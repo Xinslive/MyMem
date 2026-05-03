@@ -67,7 +67,6 @@ MyMem-main/
 │   ├── decay-engine.ts      # Weibull 衰减模型
 │   ├── tier-manager.ts      # 三层记忆升降级
 │   ├── noise-filter.ts      # 正则噪声过滤
-│   ├── noise-prototypes.ts  # 向量噪声原型库
 │   ├── scopes.ts            # 多作用域访问控制
 │   ├── tools.ts             # 工具注册总入口
 │   └── ... (100+ 模块)
@@ -682,9 +681,9 @@ Working ──(age > 60 days, low access)──→ Peripheral
 
 ### 9.1 双层噪声检测
 
-MyMem 使用两层噪声过滤：
+MyMem 使用静态噪声过滤：
 
-**第一层：正则噪声过滤**（`src/noise-filter.ts`）
+**正则噪声过滤**（`src/noise-filter.ts`）
 
 ```typescript
 // 四类噪声模式
@@ -694,23 +693,11 @@ const BOILERPLATE_PATTERNS = [...];   // 会话模板（"Hello"）
 const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 ```
 
-**第二层：向量噪声原型库**（`src/noise-prototypes.ts`）
+提取是否写入记忆由 LLM 和准入控制判断；系统不再维护会自我学习的向量噪声原型库。
 
-```typescript
-class NoisePrototypeBank {
-  private vectors: number[][] = [];  // 噪声原型向量
-  private builtinCount = 0;          // 内置原型数
+### 9.2 噪声过滤边界
 
-  // 内置 ~15 个多语言噪声原型
-  // 召回查询、Agent 否认、问候语
-}
-```
-
-使用余弦相似度（阈值 0.82）检测语言无关的噪声。原型库会在 LLM 提取返回零记忆时自动学习新的噪声模式。
-
-### 9.2 混合噪声检测器
-
-`src/noise-detector.ts` 将正则过滤和向量原型库结合为 `HybridNoiseDetector`，在检索结果中过滤低质量记忆。
+`src/noise-filter.ts` 只处理明显模板噪声；非模板内容是否值得记忆交给 LLM 提取和 admission-control 治理。
 
 ---
 
@@ -720,10 +707,9 @@ class NoisePrototypeBank {
 
 `src/feedback-loop.ts` 实现两个反馈循环：
 
-**循环 1：噪声学习**
-- 来源：工具错误 + 准入拒绝
-- 动作：将反复出现的噪声模式添加到 `NoisePrototypeBank`
-- 配置：最少 5 次拒绝触发扫描，每次最多学习 3 个新模式
+**循环 1：预防教训**
+- 来源：工具错误 + 用户修正 + 错误文件
+- 动作：将反复出现的问题证据更新到 preventive lesson 记忆
 
 **循环 2：先验适应**
 - 来源：准入控制的拒绝率统计
@@ -1098,8 +1084,6 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | 模块 | 功能 |
 |------|------|
 | `noise-filter.ts` | 正则噪声模式检测 |
-| `noise-prototypes.ts` | 向量噪声原型库 |
-| `noise-detector.ts` | 混合噪声检测器 |
 | `capture-detector.ts` | 捕获决策检测 |
 | `capture-detection.ts` | 捕获信号分析 |
 
@@ -1130,7 +1114,7 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 
 | 模块 | 功能 |
 |------|------|
-| `feedback-loop.ts` | 双循环反馈（噪声学习 + 先验适应） |
+| `feedback-loop.ts` | 双循环反馈（预防教训 + 先验适应） |
 | `self-improvement-hook.ts` | 自我改进 Hook |
 | `self-improvement-files.ts` | 学习文件持久化 |
 | `hook-enhancements.ts` | Hook 级增强（10 种软干预） |

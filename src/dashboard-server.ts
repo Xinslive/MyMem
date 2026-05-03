@@ -449,7 +449,7 @@ function buildDashboardExplanation(
     suggestions.push("可以降低 retrieval.minScore，或放宽查询词。");
   } else if (allDropStage?.name === "noise_filter") {
     reasons.push("噪声过滤移除了所有剩余候选。");
-    suggestions.push("可以检查候选文本和噪声学习设置。");
+    suggestions.push("可以检查候选文本和 retrieval.filterNoise 设置。");
   } else if (allDropStage?.name === "rerank") {
     reasons.push("重排阶段移除了所有候选。");
     suggestions.push("可以检查重排配置，或临时关闭重排做对比。");
@@ -1996,21 +1996,20 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         $("feedbackLoopPanel").innerHTML = '<div class="empty-state">当前运行环境没有反馈循环状态。</div>';
         return;
       }
-      const noise = status.noiseLearning || {};
       const prior = status.priorAdaptation || {};
-      const learned = Number(noise.learnedFromErrors || 0) + Number(noise.learnedFromRejections || 0);
+      const lessons = status.preventiveLessons || {};
       $("feedbackHint").textContent = status.enabled && !status.disposed ? "运行中" : "已停止";
       $("feedbackLoopPanel").innerHTML =
         '<div class="feedback-grid">' +
-          '<div class="config-item"><div class="config-label">噪声学习</div><div class="config-value">' + countValue(learned) + '</div><div class="subtle">错误 ' + countValue(noise.learnedFromErrors) + '，拒绝 ' + countValue(noise.learnedFromRejections) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">待处理缓冲</div><div class="config-value">' + countValue(noise.bufferedErrors) + ' / ' + countValue(noise.bufferedRejections) + '</div><div class="subtle">错误 / 拒绝</div></div>' +
+          '<div class="config-item"><div class="config-label">预防教训</div><div class="config-value">' + countValue(lessons.learned) + '</div><div class="subtle">更新 ' + countValue(lessons.updated) + '，确认 ' + countValue(lessons.promoted) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">待处理证据</div><div class="config-value">' + countValue(lessons.bufferedEvidence) + '</div><div class="subtle">错误 / 修正</div></div>' +
           '<div class="config-item"><div class="config-label">先验自适应</div><div class="config-value">' + countValue(prior.cycles) + '</div><div class="subtle">观测准入 ' + countValue(prior.observedAdmitted) + '</div></div>' +
         '</div>' +
         '<div class="config-grid">' +
-          '<div class="config-item"><div class="config-label">最近扫描</div><div class="config-value">' + escapeHtml(timeLabel(noise.lastScanAt)) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">最近学习</div><div class="config-value">' + escapeHtml(timeLabel(noise.lastLearnedAt)) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">最近扫描</div><div class="config-value">' + escapeHtml(timeLabel(lessons.lastScanAt)) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">扫描轮次</div><div class="config-value">' + countValue(lessons.scanCycles) + '</div></div>' +
           '<div class="config-item"><div class="config-label">最近自适应</div><div class="config-value">' + escapeHtml(timeLabel(prior.lastAdaptedAt)) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">Cooldown 跳过</div><div class="config-value">' + countValue(noise.skippedRelearnCooldown) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">教训跳过</div><div class="config-value">' + countValue(lessons.skipped) + '</div></div>' +
         '</div>';
     }
 

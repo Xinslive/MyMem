@@ -59,7 +59,6 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/memory-update-supersede.test.mjs" },
   { group: "core-regression", runner: "node", file: "test/memory-upgrader-diagnostics.test.mjs" },
   { group: "storage-and-schema", runner: "node", file: "test/migrate-legacy-schema.test.mjs", args: ["--test"] },
-  { group: "core-regression", runner: "node", file: "test/noise-detector.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/nvidia-nim-provider-profile.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/oauth-refresh-race.test.mjs", args: ["--test"] },
   { group: "cli-smoke", runner: "node", file: "test/openclaw-host-functional.mjs" },

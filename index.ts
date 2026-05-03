@@ -117,8 +117,6 @@ const myMemPlugin = {
       smartExtractor,
       smartExtractionLlmClient,
       decayEngine,
-      recencyEngine: _recencyEngine,
-      hybridNoiseDetector: _hybridNoiseDetector,
       tierManager,
       extractionRateLimiter,
       feedbackLoop,

@@ -22,8 +22,6 @@ import { createScopeManager } from "./scopes.js";
 import { createMigrator } from "./migrate.js";
 import { parseClawteamScopes, applyClawteamScopes } from "./clawteam-scope.js";
 import { SmartExtractor, createExtractionRateLimiter } from "./smart-extractor.js";
-import { NoisePrototypeBank } from "./noise-prototypes.js";
-import { HybridNoiseDetector } from "./noise-detector.js";
 import { createLlmClient } from "./llm-client.js";
 import type { LlmClient } from "./llm-client.js";
 import { createDecayEngine, DEFAULT_DECAY_CONFIG } from "./decay-engine.js";
@@ -57,7 +55,6 @@ export interface PluginSingletonState {
   embedder: ReturnType<typeof createEmbedder>;
   decayEngine: ReturnType<typeof createDecayEngine>;
   recencyEngine: RecencyEngine;
-  hybridNoiseDetector: HybridNoiseDetector;
   tierManager: ReturnType<typeof createTierManager>;
   retriever: ReturnType<typeof createRetriever>;
   scopeManager: ReturnType<typeof createScopeManager>;
@@ -166,22 +163,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     ...DEFAULT_TIER_CONFIG,
     ...(config.tier || {}),
   });
-  const sharedNoiseBank = new NoisePrototypeBank((msg: string) => api.logger.debug(msg));
-  sharedNoiseBank.init(embedder).catch((err) =>
-    api.logger.debug(`mymem: noise bank init: ${String(err)}`),
-  );
-  const hybridNoiseDetector = new HybridNoiseDetector(embedder, sharedNoiseBank, {
-    learnFromRegex: true,
-    debugLog: (msg: string) => api.logger.debug(msg),
-  });
-  hybridNoiseDetector.init().catch((err) =>
-    api.logger.debug(`mymem: hybrid noise detector init: ${String(err)}`),
-  );
   const retriever = createRetriever(
     store,
     embedder,
     { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval },
-    { decayEngine, recencyEngine, noiseDetector: hybridNoiseDetector, tierManager, logger: api.logger },
+    { decayEngine, recencyEngine, tierManager, logger: api.logger },
   );
   const statsCollector = new RetrievalStatsCollector(config.telemetry?.maxRecords ?? 1000);
   if (telemetryStore.enabled) {
@@ -262,7 +248,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           : undefined,
         log: (msg: string) => api.logger.info(msg),
         debugLog: (msg: string) => api.logger.debug(msg),
-        noiseBank: sharedNoiseBank,
       });
 
       (isCliMode() ? api.logger.debug : api.logger.info)(
@@ -270,13 +255,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         + llmModel
         + ", timeoutMs: "
         + llmTimeoutMs
-        + ", noise bank: ON)",
+        + ")",
       );
 
       if (feedbackLoopConfig.enabled) {
         feedbackLoop = new FeedbackLoop({
-          noiseBank: sharedNoiseBank,
-          embedder,
           admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
           store,
           config: feedbackLoopConfig,
@@ -292,8 +275,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       api.logger.warn(`mymem: smart extraction init failed, falling back to regex: ${String(err)}`);
       if (feedbackLoopConfig.enabled) {
         feedbackLoop = new FeedbackLoop({
-          noiseBank: sharedNoiseBank,
-          embedder,
           admissionController: null,
           store,
           config: feedbackLoopConfig,
@@ -308,8 +289,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     }
   } else if (feedbackLoopConfig.enabled) {
     feedbackLoop = new FeedbackLoop({
-      noiseBank: sharedNoiseBank,
-      embedder,
       admissionController: null,
       store,
       config: feedbackLoopConfig,
@@ -371,7 +350,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     embedder,
     decayEngine,
     recencyEngine,
-    hybridNoiseDetector,
     tierManager,
     retriever,
     scopeManager,

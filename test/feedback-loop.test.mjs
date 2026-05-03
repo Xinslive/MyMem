@@ -4,7 +4,7 @@
  * Run: node --test test/feedback-loop.test.mjs
  */
 
-import { describe, it } from "node:test";
+import { it } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,15 +16,10 @@ const {
   FeedbackLoop,
   normalizeFeedbackLoopConfig,
   DEFAULT_FEEDBACK_LOOP_CONFIG,
-  DEFAULT_NOISE_LEARNING_CONFIG,
   DEFAULT_PRIOR_ADAPTATION_CONFIG,
   DEFAULT_PREVENTIVE_LESSON_CONFIG,
 } = jiti("../src/feedback-loop.ts");
 const { parseSmartMetadata } = jiti("../src/smart-metadata.ts");
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 function tmpDir() {
   const dir = join(tmpdir(), `feedback-loop-test-${Date.now()}-${Math.random()}`);
@@ -112,24 +107,19 @@ function makeLessonStore() {
   };
 }
 
-// ============================================================================
-// Config Normalization Tests
-// ============================================================================
-
 it("normalizeFeedbackLoopConfig: enabled defaults to true for empty/no config", () => {
   assert.equal(normalizeFeedbackLoopConfig(null).enabled, true);
   assert.equal(normalizeFeedbackLoopConfig(undefined).enabled, true);
   assert.equal(normalizeFeedbackLoopConfig({}).enabled, true);
-  // null/undefined also equal the full DEFAULT_FEEDBACK_LOOP_CONFIG
-  assert.equal(normalizeFeedbackLoopConfig(null).noiseLearning.maxLearnPerScan, DEFAULT_NOISE_LEARNING_CONFIG.maxLearnPerScan);
+  assert.deepStrictEqual(normalizeFeedbackLoopConfig(null), DEFAULT_FEEDBACK_LOOP_CONFIG);
 });
 
 it("normalizeFeedbackLoopConfig: enabled=true", () => {
   const result = normalizeFeedbackLoopConfig({ enabled: true });
   assert.equal(result.enabled, true);
-  assert.deepStrictEqual(result.noiseLearning, DEFAULT_NOISE_LEARNING_CONFIG);
   assert.deepStrictEqual(result.priorAdaptation, DEFAULT_PRIOR_ADAPTATION_CONFIG);
   assert.deepStrictEqual(result.preventiveLessons, DEFAULT_PREVENTIVE_LESSON_CONFIG);
+  assert.equal("noiseLearning" in result, false);
 });
 
 it("normalizeFeedbackLoopConfig: enabled=false when explicitly set", () => {
@@ -137,12 +127,12 @@ it("normalizeFeedbackLoopConfig: enabled=false when explicitly set", () => {
   assert.equal(result.enabled, false);
 });
 
-it("normalizeFeedbackLoopConfig: noiseLearning sub-fields", () => {
+it("normalizeFeedbackLoopConfig: ignores removed noiseLearning config", () => {
   const result = normalizeFeedbackLoopConfig({
     enabled: true,
     noiseLearning: {
-      fromErrors: false,
-      fromRejections: false,
+      fromErrors: true,
+      fromRejections: true,
       minRejectionsForScan: 10,
       scanIntervalMs: 600_000,
       maxLearnPerScan: 5,
@@ -150,13 +140,8 @@ it("normalizeFeedbackLoopConfig: noiseLearning sub-fields", () => {
       errorAreas: ["extraction"],
     },
   });
-  assert.equal(result.noiseLearning.fromErrors, false);
-  assert.equal(result.noiseLearning.fromRejections, false);
-  assert.equal(result.noiseLearning.minRejectionsForScan, 10);
-  assert.equal(result.noiseLearning.scanIntervalMs, 600_000);
-  assert.equal(result.noiseLearning.maxLearnPerScan, 5);
-  assert.equal(result.noiseLearning.relearnCooldownMs, 3_600_000);
-  assert.deepStrictEqual(result.noiseLearning.errorAreas, ["extraction"]);
+  assert.equal("noiseLearning" in result, false);
+  assert.deepStrictEqual(result.priorAdaptation, DEFAULT_PRIOR_ADAPTATION_CONFIG);
 });
 
 it("normalizeFeedbackLoopConfig: priorAdaptation sub-fields", () => {
@@ -208,25 +193,17 @@ it("normalizeFeedbackLoopConfig: preventiveLessons sub-fields", () => {
 it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   const result = normalizeFeedbackLoopConfig({
     enabled: true,
-    noiseLearning: {
-      minRejectionsForScan: 0, // below minimum, should use default
-      scanIntervalMs: 30_000,  // below minimum (60000), should use default
-      maxLearnPerScan: 100,    // above maximum (10), should use default
-      relearnCooldownMs: -1, // below minimum, should use default
-      errorAreas: 123,         // invalid, should use default
-    },
     priorAdaptation: {
-      learningRate: 5,    // above max (0.5), should use default
-      maxAdjustment: 0,  // below min (0.01), should use default
-      observationWindowMs: 1_000, // below minimum, should use default
-      maxRejectionAudits: 1, // below minimum, should use default
+      learningRate: 5,
+      maxAdjustment: 0,
+      observationWindowMs: 1_000,
+      maxRejectionAudits: 1,
+    },
+    preventiveLessons: {
+      minEvidenceToConfirm: 100,
+      pendingConfidence: 2,
     },
   });
-  assert.equal(result.noiseLearning.minRejectionsForScan, DEFAULT_NOISE_LEARNING_CONFIG.minRejectionsForScan);
-  assert.equal(result.noiseLearning.scanIntervalMs, DEFAULT_NOISE_LEARNING_CONFIG.scanIntervalMs);
-  assert.equal(result.noiseLearning.maxLearnPerScan, DEFAULT_NOISE_LEARNING_CONFIG.maxLearnPerScan);
-  assert.equal(result.noiseLearning.relearnCooldownMs, DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs);
-  assert.deepStrictEqual(result.noiseLearning.errorAreas, DEFAULT_NOISE_LEARNING_CONFIG.errorAreas);
   assert.equal(result.priorAdaptation.learningRate, DEFAULT_PRIOR_ADAPTATION_CONFIG.learningRate);
   assert.equal(result.priorAdaptation.maxAdjustment, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxAdjustment);
   assert.equal(result.priorAdaptation.observationWindowMs, DEFAULT_PRIOR_ADAPTATION_CONFIG.observationWindowMs);
@@ -235,82 +212,55 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   assert.equal(result.preventiveLessons.pendingConfidence, DEFAULT_PREVENTIVE_LESSON_CONFIG.pendingConfidence);
 });
 
-// ============================================================================
-// FeedbackLoop Lifecycle Tests
-// ============================================================================
-
 it("FeedbackLoop: start/dispose when disabled does nothing", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
-    config: { enabled: false, noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG, priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG },
+    config: { enabled: false, priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG },
   });
   loop.start();
-  loop.dispose(); // Should not throw
+  loop.dispose();
 });
 
 it("FeedbackLoop: dispose clears timers", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
-    admissionController: null,
+    admissionController: { setAdaptiveTypePriors: () => {} },
+    store: makeLessonStore(),
     config: {
       enabled: true,
-      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, scanIntervalMs: 10 },
       priorAdaptation: { ...DEFAULT_PRIOR_ADAPTATION_CONFIG, adaptationIntervalMs: 10 },
+      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
+    },
+    runtimeContext: {
+      workspaceDir: "/tmp/workspace",
+      dbPath: "/tmp/db",
+      admissionConfig: { rejectThreshold: 0.45 },
     },
   });
   loop.start();
-  loop.dispose(); // Should not throw
-});
-
-it("FeedbackLoop: onAdmissionRejected buffers entry when enabled", () => {
-  const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
-    admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, fromRejections: true, scanIntervalMs: 999_999 },
-      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-    },
-  });
-  loop.onAdmissionRejected({
-    version: "amac-v1",
-    rejected_at: Date.now(),
-    session_key: "test",
-    target_scope: "global",
-    scope_filter: [],
-    candidate: { category: "preferences", abstract: "test", overview: "", content: "" },
-    audit: {
-      version: "amac-v1",
-      decision: "reject",
-      score: 0.3,
-      reason: "test",
-      thresholds: { reject: 0.45, admit: 0.6 },
-      weights: {},
-      feature_scores: {},
-      matched_existing_memory_ids: [],
-      compared_existing_memory_ids: [],
-      max_similarity: 0,
-      evaluated_at: Date.now(),
-    },
-    conversation_excerpt: "test conversation",
-  });
   loop.dispose();
 });
 
-it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted counts", () => {
+it("FeedbackLoop: onAdmissionRejected is accepted but no longer buffers noise samples", () => {
+  const loop = new FeedbackLoop({
+    admissionController: null,
+    config: {
+      enabled: true,
+      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+    },
+  });
+  loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
+  const status = loop.getStatus();
+  assert.equal("noiseLearning" in status, false);
+  loop.dispose();
+});
+
+it("FeedbackLoop: getStatus exposes runtime context, lessons, and admitted counts", () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: { setAdaptiveTypePriors: () => {} },
     store: lessonStore,
     config: {
       enabled: true,
-      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, fromErrors: true, fromRejections: true },
       priorAdaptation: { ...DEFAULT_PRIOR_ADAPTATION_CONFIG, enabled: true },
       preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
     },
@@ -322,15 +272,14 @@ it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted count
   });
 
   loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
-  loop.onSelfImprovementError({ area: "extraction", summary: "extractor returned noise" });
+  loop.onSelfImprovementError({ area: "extraction", summary: "extractor returned no useful candidate" });
   loop.onPreventiveLessonEvidence({ source: "user_correction", summary: "Don't use stale recall.", scope: "global" });
   loop.onAdmissionAdmitted("preferences");
 
   const status = loop.getStatus();
   assert.equal(status.enabled, true);
   assert.equal(status.disposed, false);
-  assert.equal(status.noiseLearning.bufferedErrors, 1);
-  assert.equal(status.noiseLearning.bufferedRejections, 1);
+  assert.equal("noiseLearning" in status, false);
   assert.equal(status.preventiveLessons.bufferedEvidence, 2);
   assert.equal(status.priorAdaptation.enabled, true);
   assert.equal(status.priorAdaptation.observedAdmitted, 1);
@@ -343,66 +292,13 @@ it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted count
   loop.dispose();
 });
 
-it("FeedbackLoop: periodic scan timer calls file and rejection scanners when runtime context is known", async () => {
-  let errorScanCount = 0;
-  let rejectionScanCount = 0;
-
-  const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
-    admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: {
-        ...DEFAULT_NOISE_LEARNING_CONFIG,
-        fromErrors: true,
-        fromRejections: true,
-        scanIntervalMs: 10,
-      },
-      priorAdaptation: {
-        ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
-        enabled: false,
-      },
-    },
-    runtimeContext: {
-      workspaceDir: "/tmp/workspace",
-      dbPath: "/tmp/db",
-      admissionConfig: { rejectThreshold: 0.45 },
-    },
-  });
-
-  loop.scanErrorFile = async () => {
-    errorScanCount++;
-  };
-  loop.scanRejectionAudits = async () => {
-    rejectionScanCount++;
-  };
-
-  try {
-    loop.start();
-    await new Promise((resolve) => setTimeout(resolve, 35));
-  } finally {
-    loop.dispose();
-  }
-
-  assert.ok(errorScanCount >= 1, `expected periodic error scans, got ${errorScanCount}`);
-  assert.ok(rejectionScanCount >= 1, `expected periodic rejection scans, got ${rejectionScanCount}`);
-});
-
 it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled", async () => {
   let adaptationCount = 0;
 
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: {},
     config: {
       enabled: true,
-      noiseLearning: {
-        ...DEFAULT_NOISE_LEARNING_CONFIG,
-        fromErrors: false,
-        fromRejections: false,
-      },
       priorAdaptation: {
         ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
         enabled: true,
@@ -432,13 +328,10 @@ it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled
 it("FeedbackLoop: preventive lesson evidence without an existing lesson is skipped", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [0.1, 0.2], embedPassage: async () => [0.1, 0.2] },
     admissionController: null,
     store: lessonStore,
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
       preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
     },
@@ -481,13 +374,10 @@ it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", as
     }),
   });
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [0.1, 0.2], embedPassage: async () => [0.1, 0.2] },
     admissionController: null,
     store: lessonStore,
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
       preventiveLessons: {
         ...DEFAULT_PREVENTIVE_LESSON_CONFIG,
@@ -521,20 +411,11 @@ it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", as
   loop.dispose();
 });
 
-// ============================================================================
-// Error File Parsing Tests
-// ============================================================================
-
-it("parseErrorsFile: extracts id, area, summary, details", () => {
-  // Access the private function via jiti's live module — use FeedbackLoop internals indirectly
-  const { FeedbackLoop } = jiti("../src/feedback-loop.ts");
+it("getAdaptiveTypePriors: increases and decreases category priors from observations", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
     config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
-  // Test getAdaptiveTypePriors as a proxy for config normalization
   const base = { profile: 0.95, preferences: 0.9, entities: 0.75, events: 0.45, cases: 0.8, patterns: 0.85 };
   const stats = {
     preferences: { admitted: 90, rejected: 10 },
@@ -546,55 +427,38 @@ it("parseErrorsFile: extracts id, area, summary, details", () => {
   loop.dispose();
 });
 
-it("parseErrorsFile: getAdaptiveTypePriors respects maxAdjustment", () => {
+it("getAdaptiveTypePriors: respects maxAdjustment", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: {
         enabled: true,
         adaptationIntervalMs: 600_000,
         minObservations: 1,
-        learningRate: 1.0,  // Max learning rate
-        maxAdjustment: 0.05, // Tight clamp
+        learningRate: 1.0,
+        maxAdjustment: 0.05,
       },
     },
   });
 
   const base = { profile: 0.95, preferences: 0.9, entities: 0.75, events: 0.45, cases: 0.8, patterns: 0.85 };
   const stats = {
-    preferences: { admitted: 100, rejected: 0 },  // 100% admit rate
-    entities: { admitted: 0, rejected: 100 },  // 0% admit rate
+    preferences: { admitted: 100, rejected: 0 },
+    entities: { admitted: 0, rejected: 100 },
   };
 
   const adaptive = loop.getAdaptiveTypePriors(base, stats);
-
-  // With 100% admit rate: delta = 1.0 * (1.0 - 0.5) = 0.5
-  // clamped to base ± maxAdjustment = 0.9 ± 0.05
-  assert.ok(
-    adaptive.preferences <= base.preferences + 0.05 + 0.0001,
-    `preferences=${adaptive.preferences} should be clamped within maxAdjustment=0.05 of base=${base.preferences}`,
-  );
-  // With 0% admit rate: delta = 1.0 * (0 - 0.5) = -0.5
-  // clamped to base ± maxAdjustment = 0.75 ± 0.05
-  assert.ok(
-    adaptive.entities >= base.entities - 0.05 - 0.0001,
-    `entities=${adaptive.entities} should be clamped within maxAdjustment=0.05 of base=${base.entities}`,
-  );
+  assert.ok(adaptive.preferences <= base.preferences + 0.05 + 0.0001);
+  assert.ok(adaptive.entities >= base.entities - 0.05 - 0.0001);
   loop.dispose();
 });
 
 it("getAdaptiveTypePriors: ignores categories below minObservations", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: {
         ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
         minObservations: 50,
@@ -604,31 +468,29 @@ it("getAdaptiveTypePriors: ignores categories below minObservations", () => {
 
   const base = { profile: 0.95, preferences: 0.9, entities: 0.75, events: 0.45, cases: 0.8, patterns: 0.85 };
   const stats = {
-    preferences: { admitted: 5, rejected: 5 },  // total=10, below minObservations=50
+    preferences: { admitted: 5, rejected: 5 },
   };
 
   const adaptive = loop.getAdaptiveTypePriors(base, stats);
-  assert.equal(adaptive.preferences, base.preferences, "Should use base when below minObservations");
+  assert.equal(adaptive.preferences, base.preferences);
   loop.dispose();
 });
 
 it("getAdaptiveTypePriors: clamps to [0, 1]", () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
     config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
   const base = { profile: 0.01, preferences: 0.99, entities: 0.5, events: 0.5, cases: 0.5, patterns: 0.5 };
   const stats = {
-    profile: { admitted: 100, rejected: 0 },      // Would push to 1.0+
-    preferences: { admitted: 0, rejected: 100 },  // Would push to 0.0-
+    profile: { admitted: 100, rejected: 0 },
+    preferences: { admitted: 0, rejected: 100 },
   };
 
   const adaptive = loop.getAdaptiveTypePriors(base, stats);
-  assert.ok(adaptive.profile <= 1.0, "profile should be clamped to 1.0");
-  assert.ok(adaptive.preferences >= 0.0, "preferences should be clamped to 0.0");
+  assert.ok(adaptive.profile <= 1.0);
+  assert.ok(adaptive.preferences >= 0.0);
   loop.dispose();
 });
 
@@ -639,8 +501,6 @@ it("forceAdaptationCycle: ignores rejected audits outside observationWindowMs", 
 
   let adaptivePriors = null;
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: {
       setAdaptiveTypePriors: (priors) => {
         adaptivePriors = priors;
@@ -648,7 +508,6 @@ it("forceAdaptationCycle: ignores rejected audits outside observationWindowMs", 
     },
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: {
         ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
         minObservations: 3,
@@ -674,11 +533,7 @@ it("forceAdaptationCycle: ignores rejected audits outside observationWindowMs", 
     await loop.forceAdaptationCycle(dbPath, admissionConfig);
 
     assert.ok(adaptivePriors, "adaptation should set type priors");
-    assert.equal(
-      adaptivePriors.events,
-      admissionConfig.typePriors.events,
-      "old-only rejections should not lower the events prior",
-    );
+    assert.equal(adaptivePriors.events, admissionConfig.typePriors.events);
   } finally {
     Date.now = originalNow;
     rmSync(dir, { recursive: true, force: true });
@@ -693,8 +548,6 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
 
   let adaptivePriors = null;
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: {
       setAdaptiveTypePriors: (priors) => {
         adaptivePriors = priors;
@@ -702,7 +555,6 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
     },
     config: {
       enabled: true,
-      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: {
         ...DEFAULT_PRIOR_ADAPTATION_CONFIG,
         minObservations: 3,
@@ -733,15 +585,8 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
     await loop.forceAdaptationCycle(dbPath, admissionConfig);
 
     assert.ok(adaptivePriors, "adaptation should set type priors");
-    assert.equal(
-      adaptivePriors.preferences,
-      admissionConfig.typePriors.preferences,
-      "older rows outside the maxRejectionAudits tail should not affect preferences",
-    );
-    assert.ok(
-      adaptivePriors.events < admissionConfig.typePriors.events,
-      "recent tail rejections should lower the events prior",
-    );
+    assert.equal(adaptivePriors.preferences, admissionConfig.typePriors.preferences);
+    assert.ok(adaptivePriors.events < admissionConfig.typePriors.events);
   } finally {
     Date.now = originalNow;
     rmSync(dir, { recursive: true, force: true });
@@ -749,158 +594,34 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
   }
 });
 
-// ============================================================================
-// End-to-end Rejection Audit Noise Learning
-// ============================================================================
-
-it("scanRejectionAudits: learns each rejection cluster once during cooldown", async () => {
-  const now = Date.now();
-  const originalNow = Date.now;
-  Date.now = () => now;
-
-  let embedCallCount = 0;
-  let learnCallCount = 0;
-  const embedder = {
-    embed: async () => {
-      embedCallCount++;
-      return [0.1, 0.2, 0.3];
-    },
-  };
-  const noiseBank = {
-    initialized: true,
-    learn: () => {
-      learnCallCount++;
-    },
-  };
-  const loop = new FeedbackLoop({
-    noiseBank,
-    embedder,
-    admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: {
-        ...DEFAULT_NOISE_LEARNING_CONFIG,
-        minRejectionsForScan: 2,
-        maxLearnPerScan: 10,
-        relearnCooldownMs: 60_000,
-      },
-      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-    },
+it("scanErrorFile: reads matching errors as preventive evidence without embedding", async () => {
+  const lessonStore = makeLessonStore();
+  const existing = await lessonStore.store({
+    text: "Prevent extractor stale fixture failures",
+    vector: [0.1, 0.2],
+    importance: 0.72,
+    category: "other",
+    scope: "global",
+    metadata: JSON.stringify({
+      l0_abstract: "Prevent extractor stale fixture failures",
+      l1_overview: "- Prevent extractor stale fixture failures",
+      l2_content: "Prevent extractor stale fixture failures",
+      memory_category: "patterns",
+      reasoning_strategy: true,
+      strategy_kind: "preventive",
+      canonical_id: "preventive:test_failure:ERR-20260419-001",
+      state: "pending",
+      evidence_count: 1,
+      confidence: 0.4,
+    }),
   });
-  const dir = tmpDir();
-  const dbPath = join(dir, "db");
-  const admissionConfig = makeAdmissionConfig();
-
-  try {
-    mkdirSync(dbPath, { recursive: true });
-    writeRejectedAudits(dbPath, [
-      makeRejectedAudit("events", now - 2_000, 0.1),
-      makeRejectedAudit("events", now - 1_000, 0.1),
-    ]);
-
-    await loop.scanRejectionAudits(dbPath, admissionConfig);
-    await loop.scanRejectionAudits(dbPath, admissionConfig);
-
-    assert.equal(embedCallCount, 1, "repeat scans should not re-embed the same learned rejection cluster");
-    assert.equal(learnCallCount, 1, "repeat scans should not relearn the same rejection cluster during cooldown");
-  } finally {
-    Date.now = originalNow;
-    rmSync(dir, { recursive: true, force: true });
-    loop.dispose();
-  }
-});
-
-it("scanRejectionAudits: relearns an updated cluster after cooldown", async () => {
-  const baseNow = Date.now();
-  const originalNow = Date.now;
-  let fakeNow = baseNow;
-  Date.now = () => fakeNow;
-
-  let learnCallCount = 0;
-  const embedder = { embed: async () => [0.1, 0.2, 0.3] };
-  const noiseBank = {
-    initialized: true,
-    learn: () => {
-      learnCallCount++;
-    },
-  };
   const loop = new FeedbackLoop({
-    noiseBank,
-    embedder,
     admissionController: null,
+    store: lessonStore,
     config: {
       enabled: true,
-      noiseLearning: {
-        ...DEFAULT_NOISE_LEARNING_CONFIG,
-        minRejectionsForScan: 2,
-        maxLearnPerScan: 10,
-        relearnCooldownMs: 60_000,
-      },
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-    },
-  });
-  const dir = tmpDir();
-  const dbPath = join(dir, "db");
-  const admissionConfig = makeAdmissionConfig();
-
-  try {
-    mkdirSync(dbPath, { recursive: true });
-    writeRejectedAudits(dbPath, [
-      makeRejectedAudit("events", baseNow - 2_000, 0.1),
-      makeRejectedAudit("events", baseNow - 1_000, 0.1),
-    ]);
-
-    await loop.scanRejectionAudits(dbPath, admissionConfig);
-
-    fakeNow = baseNow + 61_000;
-    writeRejectedAudits(dbPath, [
-      makeRejectedAudit("events", baseNow - 2_000, 0.1),
-      makeRejectedAudit("events", baseNow - 1_000, 0.1),
-      makeRejectedAudit("events", fakeNow - 1_000, 0.1),
-    ]);
-
-    await loop.scanRejectionAudits(dbPath, admissionConfig);
-
-    assert.equal(learnCallCount, 2, "updated clusters should be eligible again after cooldown");
-  } finally {
-    Date.now = originalNow;
-    rmSync(dir, { recursive: true, force: true });
-    loop.dispose();
-  }
-});
-
-// ============================================================================
-// End-to-end Error File Scanning
-// ============================================================================
-
-it("scanErrorFile: reads errors and calls embed", async () => {
-  let embedCallCount = 0;
-  let embedText = "";
-  const embedder = {
-    embed: async (text) => {
-      embedCallCount++;
-      embedText = text;
-      return [0.1, 0.2, 0.3];
-    },
-  };
-
-  const noiseBank = {
-    initialized: true,
-    learn: () => {},
-  };
-
-  const loop = new FeedbackLoop({
-    noiseBank,
-    embedder,
-    admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: {
-        ...DEFAULT_NOISE_LEARNING_CONFIG,
-        errorAreas: ["extraction"],
-        maxLearnPerScan: 1,
-      },
-      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
     },
   });
 
@@ -918,29 +639,42 @@ Test error details
 
     await loop.scanErrorFile(dir);
 
-    assert.equal(embedCallCount, 1, "embed should be called once");
-    assert.ok(embedText.includes("Test error summary"), "should embed the summary text");
+    const entry = lessonStore.entries.get(existing.id);
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    assert.equal(meta.evidence_count, 2);
+    assert.equal(loop.getStatus().preventiveLessons.updated, 1);
+    assert.equal(loop.getStatus().preventiveLessons.scanCycles, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
   }
-
-  loop.dispose();
 });
 
 it("scanErrorFile: skips already-processed errors", async () => {
-  let embedCallCount = 0;
-  const embedder = { embed: async () => { embedCallCount++; return [0.1]; } };
-  const noiseBank = { initialized: true, learn: () => {} };
-
+  const lessonStore = makeLessonStore();
+  await lessonStore.store({
+    text: "Prevent extractor stale fixture failures",
+    vector: [0.1, 0.2],
+    importance: 0.72,
+    category: "other",
+    scope: "global",
+    metadata: JSON.stringify({
+      l0_abstract: "Prevent extractor stale fixture failures",
+      l1_overview: "- Prevent extractor stale fixture failures",
+      l2_content: "Prevent extractor stale fixture failures",
+      memory_category: "patterns",
+      reasoning_strategy: true,
+      strategy_kind: "preventive",
+      canonical_id: "preventive:test_failure:ERR-20260419-001",
+      state: "pending",
+      evidence_count: 1,
+      confidence: 0.4,
+    }),
+  });
   const loop = new FeedbackLoop({
-    noiseBank,
-    embedder,
     admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, errorAreas: ["extraction"], maxLearnPerScan: 10 },
-      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-    },
+    store: lessonStore,
+    config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
   const dir = tmpDir();
@@ -952,34 +686,22 @@ it("scanErrorFile: skips already-processed errors", async () => {
 Test
 `, "utf-8");
 
-    // First scan
     await loop.scanErrorFile(dir);
-    assert.equal(embedCallCount, 1);
+    await loop.scanErrorFile(dir);
 
-    // Second scan — should skip already processed
-    await loop.scanErrorFile(dir);
-    assert.equal(embedCallCount, 1, "second scan should not re-embed same error");
+    assert.equal(loop.getStatus().preventiveLessons.updated, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
   }
-
-  loop.dispose();
 });
 
 it("scanErrorFile: skips non-matching area", async () => {
-  let embedCallCount = 0;
-  const embedder = { embed: async () => { embedCallCount++; return [0.1]; } };
-  const noiseBank = { initialized: true, learn: () => {} };
-
+  const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
-    noiseBank,
-    embedder,
     admissionController: null,
-    config: {
-      enabled: true,
-      noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, errorAreas: ["extraction"], maxLearnPerScan: 10 },
-      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-    },
+    store: lessonStore,
+    config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
   const dir = tmpDir();
@@ -992,22 +714,21 @@ UI related error
 `, "utf-8");
 
     await loop.scanErrorFile(dir);
-    assert.equal(embedCallCount, 0, "should not embed non-matching area");
+    assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
+    assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    loop.dispose();
   }
-
-  loop.dispose();
 });
 
 it("scanErrorFile: handles missing file gracefully", async () => {
   const loop = new FeedbackLoop({
-    noiseBank: null,
-    embedder: { embed: async () => [] },
     admissionController: null,
+    store: makeLessonStore(),
     config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
-  await loop.scanErrorFile("/nonexistent/path"); // Should not throw
+  await loop.scanErrorFile("/nonexistent/path");
   loop.dispose();
 });

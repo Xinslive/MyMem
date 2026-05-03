@@ -131,27 +131,23 @@ function createContext() {
       getStatus: () => ({
         enabled: true,
         disposed: false,
-        noiseLearning: {
-          fromErrors: true,
-          fromRejections: true,
-          bufferedErrors: 1,
-          bufferedRejections: 2,
-          processedErrors: 3,
-          learnedRejectionClusters: 4,
-          learnedFromErrors: 5,
-          learnedFromRejections: 6,
-          skippedRelearnCooldown: 7,
-          failedEmbeddings: 0,
-          scanCycles: 8,
-          lastScanAt: Date.now(),
-          lastLearnedAt: Date.now(),
-        },
         priorAdaptation: {
           enabled: true,
           observedAdmitted: 9,
           cycles: 10,
           lastAdaptedAt: Date.now(),
           lastAdaptiveTypePriors: { profile: 0.9 },
+        },
+        preventiveLessons: {
+          enabled: true,
+          bufferedEvidence: 1,
+          learned: 2,
+          updated: 3,
+          promoted: 4,
+          skipped: 5,
+          failed: 0,
+          scanCycles: 8,
+          lastScanAt: Date.now(),
         },
         runtime: {
           hasWorkspaceDir: true,
@@ -252,7 +248,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(summary.body.display.recentActivity["1 月内"], 2);
     assert.equal(summary.body.display.recentActivity["全部"], 2);
     assert.equal(summary.body.display.tierDistribution["长期记忆"], 1);
-    assert.equal(summary.body.feedbackLoop.noiseLearning.learnedFromErrors, 5);
+    assert.equal(summary.body.feedbackLoop.preventiveLessons.updated, 3);
     assert.equal(summary.body.feedbackLoop.priorAdaptation.cycles, 10);
 
     const memories = await requestJson(server.url + "/api/memories?limit=1");

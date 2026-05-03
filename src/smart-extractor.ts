@@ -27,7 +27,6 @@ import {
   normalizeCategory,
 } from "./memory-categories.js";
 import { isNoise } from "./noise-filter.js";
-import type { NoisePrototypeBank } from "./noise-prototypes.js";
 import {
   type WorkspaceBoundaryConfig,
   isUserMdExclusiveMemory,
@@ -64,8 +63,6 @@ export {
 // ============================================================================
 
 const MAX_MEMORIES_PER_EXTRACTION = 5;
-const ZERO_EXTRACTION_LEARN_MIN_CHARS = 20;
-const ZERO_EXTRACTION_LEARN_MIN_SIMILARITY = 0.72;
 
 // ============================================================================
 // Smart Extractor
@@ -84,8 +81,6 @@ export interface SmartExtractorConfig {
   log?: (msg: string) => void;
   /** Debug logger function. */
   debugLog?: (msg: string) => void;
-  /** Optional embedding-based noise prototype bank for language-agnostic noise filtering. */
-  noiseBank?: NoisePrototypeBank;
   /** Facts reserved for workspace-managed USER.md should never enter LanceDB. */
   workspaceBoundary?: WorkspaceBoundaryConfig;
   /** Optional admission-control governance layer before downstream dedup/persistence. */
@@ -210,8 +205,6 @@ export class SmartExtractor {
 
     if (candidates.length === 0) {
       this.log("mymem: smart-extractor: no memories extracted");
-      // LLM returned zero candidates → strongest noise signal → feedback to noise bank
-      this.learnAsNoise(conversationText);
       attachTelemetry();
       if (this.onExtractionComplete) {
         await this.onExtractionComplete({
@@ -378,116 +371,6 @@ export class SmartExtractor {
       });
     }
     return stats;
-  }
-
-  // --------------------------------------------------------------------------
-  // Embedding Noise Pre-Filter
-  // --------------------------------------------------------------------------
-
-  /**
-   * Filter out texts that match noise prototypes by embedding similarity.
-   * Long texts (>300 chars) are passed through without checking.
-   * Only active when noiseBank is configured and initialized.
-   *
-   * Uses batch embedding to reduce API round-trips from N to 1.
-   */
-  async filterNoiseByEmbedding(texts: string[]): Promise<string[]> {
-    const noiseBank = this.config.noiseBank;
-    if (!noiseBank || !noiseBank.initialized) return texts;
-
-    // Partition: short/long texts bypass noise check; mid-length need embedding
-    const SHORT_THRESHOLD = 8;
-    const LONG_THRESHOLD = 300;
-    const bypassFlags: boolean[] = texts.map(
-      (t) => t.length <= SHORT_THRESHOLD || t.length > LONG_THRESHOLD,
-    );
-
-    const needsEmbedIndices: number[] = [];
-    const needsEmbedTexts: string[] = [];
-    for (let i = 0; i < texts.length; i++) {
-      if (!bypassFlags[i]) {
-        needsEmbedIndices.push(i);
-        needsEmbedTexts.push(texts[i]);
-      }
-    }
-
-    // Batch embed all mid-length texts in a single API call
-    let vectors: number[][] = [];
-    if (needsEmbedTexts.length > 0) {
-      try {
-        vectors = await this.embedder.embedBatch(needsEmbedTexts);
-      } catch (err) {
-        this.debugLog?.(`smart-extractor: batch embed failed: ${err}, passing through texts unchanged`);
-        // Batch failed — pass all through
-        return texts.slice();
-      }
-    }
-
-    const result: string[] = new Array(texts.length);
-    // First, fill in bypass texts (always kept)
-    for (let i = 0; i < texts.length; i++) {
-      if (bypassFlags[i]) {
-        result[i] = texts[i];
-      }
-    }
-
-    // Then, check noise for embedded texts
-    for (let j = 0; j < needsEmbedIndices.length; j++) {
-      const idx = needsEmbedIndices[j];
-      const vec = vectors[j];
-      if (!vec || vec.length === 0) {
-        result[idx] = texts[idx];
-        continue;
-      }
-      if (noiseBank.isNoise(vec)) {
-        this.debugLog(
-          `mymem: smart-extractor: embedding noise filtered: ${texts[idx].slice(0, 80)}`,
-        );
-        // Leave result[idx] as undefined — will be compacted below
-      } else {
-        result[idx] = texts[idx];
-      }
-    }
-
-    // Compact: remove undefined slots (filtered-out entries).
-    // Use explicit undefined check rather than filter(Boolean) to preserve
-    // empty strings that were legitimately in bypass slots.
-    return result.filter((x): x is string => x !== undefined);
-  }
-
-  /**
-   * Feed back conversation text to the noise prototype bank.
-   * Called when LLM extraction returns zero candidates (strongest noise signal).
-   */
-  private async learnAsNoise(conversationText: string): Promise<void> {
-    const noiseBank = this.config.noiseBank;
-    if (!noiseBank || !noiseBank.initialized) return;
-
-    try {
-      const tail = conversationText.slice(-300).trim();
-      if (tail.length < ZERO_EXTRACTION_LEARN_MIN_CHARS) {
-        this.debugLog(
-          "mymem: smart-extractor: skipped zero-extraction noise learning (text too short)",
-        );
-        return;
-      }
-      const vec = await this.embedder.embed(tail);
-      if (vec && vec.length > 0) {
-        const maxSimilarity = noiseBank.maxSimilarity(vec);
-        if (!isNoise(tail) && maxSimilarity < ZERO_EXTRACTION_LEARN_MIN_SIMILARITY) {
-          this.debugLog(
-            `mymem: smart-extractor: skipped zero-extraction noise learning (maxSim=${maxSimilarity.toFixed(3)})`,
-          );
-          return;
-        }
-        noiseBank.learn(vec);
-        this.debugLog(
-          `mymem: smart-extractor: learned noise from zero-extraction (maxSim=${maxSimilarity.toFixed(3)})`,
-        );
-      }
-    } catch (err) {
-      this.debugLog?.(`smart-extractor: failed to learn noise prototype: ${err}`);
-    }
   }
 
   // --------------------------------------------------------------------------

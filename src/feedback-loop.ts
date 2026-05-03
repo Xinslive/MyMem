@@ -1,17 +1,15 @@
 /**
  * Feedback Loop — connects self-improvement errors and admission rejections
- * back into noise detection and admission prior tuning.
+ * back into admission prior tuning and preventive lessons.
  *
  * Two loops:
- * 1. Error/rejection patterns → NoisePrototypeBank (learn noise from repeated failures)
+ * 1. Error/correction patterns → preventive lesson memories
  * 2. Admission rejection rates → AdmissionController type priors (adapt over time)
  */
 
 import { createHash } from "node:crypto";
 import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { NoisePrototypeBank } from "./noise-prototypes.js";
-import type { Embedder } from "./embedder.js";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
@@ -22,16 +20,6 @@ import { buildReasoningStrategyFields } from "./reasoning-strategy.js";
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface NoiseLearningConfig {
-  fromErrors: boolean;
-  fromRejections: boolean;
-  minRejectionsForScan: number;
-  scanIntervalMs: number;
-  maxLearnPerScan: number;
-  relearnCooldownMs: number;
-  errorAreas: string[];
-}
 
 export interface PriorAdaptationConfig {
   enabled: boolean;
@@ -55,7 +43,6 @@ export interface PreventiveLessonLearningConfig {
 
 export interface FeedbackLoopConfig {
   enabled: boolean;
-  noiseLearning: NoiseLearningConfig;
   priorAdaptation: PriorAdaptationConfig;
   preventiveLessons: PreventiveLessonLearningConfig;
 }
@@ -89,21 +76,6 @@ export interface PreventiveLessonEvidence {
 export interface FeedbackLoopStatus {
   enabled: boolean;
   disposed: boolean;
-  noiseLearning: {
-    fromErrors: boolean;
-    fromRejections: boolean;
-    bufferedErrors: number;
-    bufferedRejections: number;
-    processedErrors: number;
-    learnedRejectionClusters: number;
-    learnedFromErrors: number;
-    learnedFromRejections: number;
-    skippedRelearnCooldown: number;
-    failedEmbeddings: number;
-    scanCycles: number;
-    lastScanAt: number | null;
-    lastLearnedAt: number | null;
-  };
   priorAdaptation: {
     enabled: boolean;
     observedAdmitted: number;
@@ -119,6 +91,8 @@ export interface FeedbackLoopStatus {
     promoted: number;
     skipped: number;
     failed: number;
+    scanCycles: number;
+    lastScanAt: number | null;
   };
   runtime: {
     hasWorkspaceDir: boolean;
@@ -127,15 +101,8 @@ export interface FeedbackLoopStatus {
   };
 }
 
-export const DEFAULT_NOISE_LEARNING_CONFIG: NoiseLearningConfig = {
-  fromErrors: true,
-  fromRejections: true,
-  minRejectionsForScan: 5,
-  scanIntervalMs: 300_000, // 5 minutes
-  maxLearnPerScan: 3,
-  relearnCooldownMs: 86_400_000, // 24 hours
-  errorAreas: ["extraction", "admission"],
-};
+const FEEDBACK_SCAN_INTERVAL_MS = 300_000; // 5 minutes
+const PREVENTIVE_LESSON_ERROR_AREAS = ["extraction", "admission"];
 
 export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
   enabled: true,
@@ -159,7 +126,6 @@ export const DEFAULT_PREVENTIVE_LESSON_CONFIG: PreventiveLessonLearningConfig = 
 
 export const DEFAULT_FEEDBACK_LOOP_CONFIG: FeedbackLoopConfig = {
   enabled: true,
-  noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
   priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
   preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
 };
@@ -274,83 +240,6 @@ function parseErrorsFile(content: string): ParsedErrorEntry[] {
   return entries;
 }
 
-// ============================================================================
-// Rejection Audit Clustering
-// ============================================================================
-
-interface RejectionCluster {
-  key: string;
-  category: string;
-  count: number;
-  avgScore: number;
-  latestRejectedAt: number;
-  representativeText: string;
-}
-
-function clusterRejections(
-  entries: AdmissionRejectionAuditEntry[],
-  minClusterSize: number,
-  rejectThreshold: number,
-): RejectionCluster[] {
-  const clusters = new Map<string, { count: number; totalScore: number; latestRejectedAt: number; texts: string[]; cat: string }>();
-
-  for (const entry of entries) {
-    if (entry.audit.score > rejectThreshold - 0.1) continue;
-
-    const cat = String(entry.candidate?.category ?? "other");
-    const text = getRejectionClusterText(entry);
-    const key = `${cat}::${tokenKey(text)}`;
-    const rejectedAt = getRejectedAt(entry);
-    const existing = clusters.get(key);
-    if (existing) {
-      existing.count++;
-      existing.totalScore += entry.audit.score;
-      existing.latestRejectedAt = Math.max(existing.latestRejectedAt, rejectedAt);
-      existing.texts.push(text);
-    } else {
-      clusters.set(key, { count: 1, totalScore: entry.audit.score, latestRejectedAt: rejectedAt, texts: [text], cat });
-    }
-  }
-
-  const result: RejectionCluster[] = [];
-  for (const [key, cluster] of clusters) {
-    if (cluster.count < minClusterSize) continue;
-    result.push({
-      key,
-      category: cluster.cat,
-      count: cluster.count,
-      avgScore: cluster.totalScore / cluster.count,
-      latestRejectedAt: cluster.latestRejectedAt,
-      representativeText: cluster.texts[cluster.texts.length - 1] ?? cluster.texts[0] ?? "",
-    });
-  }
-  return result;
-}
-
-function getRejectionClusterText(entry: AdmissionRejectionAuditEntry): string {
-  return [
-    entry.candidate?.abstract,
-    entry.candidate?.content,
-    entry.conversation_excerpt,
-  ].find((value) => typeof value === "string" && value.trim().length > 0)?.trim() ?? "";
-}
-
-function getRejectedAt(entry: AdmissionRejectionAuditEntry): number {
-  if (Number.isFinite(entry.rejected_at)) return entry.rejected_at;
-  if (Number.isFinite(entry.audit.evaluated_at)) return entry.audit.evaluated_at;
-  return 0;
-}
-
-function tokenKey(text: string): string {
-  const normalized = text.toLowerCase().normalize("NFKC").trim();
-  const tokens = normalized.match(/[\p{Letter}\p{Number}]+/gu)?.slice(0, 8) ?? [];
-  if (tokens.length === 0) {
-    return normalized.replace(/\s+/g, " ").slice(0, 120);
-  }
-  tokens.sort();
-  return tokens.join(" ").slice(0, 180);
-}
-
 const MAX_REJECTION_AUDIT_TAIL_BYTES = 8 * 1024 * 1024;
 
 async function readTailText(filePath: string, maxBytes: number): Promise<string> {
@@ -428,77 +317,27 @@ class ProcessedErrorTracker {
 }
 
 // ============================================================================
-// Learned Rejection Cluster Tracker (in-memory dedup)
-// ============================================================================
-
-const MAX_TRACKED_REJECTION_CLUSTERS = 1_000;
-
-class LearnedRejectionClusterTracker {
-  private learned = new Map<string, { learnedAt: number; latestRejectedAt: number }>();
-
-  shouldLearn(cluster: RejectionCluster, now: number, cooldownMs: number): boolean {
-    const existing = this.learned.get(cluster.key);
-    if (!existing) return true;
-    if (cluster.latestRejectedAt <= existing.latestRejectedAt) return false;
-    return now - existing.learnedAt >= cooldownMs;
-  }
-
-  markLearned(cluster: RejectionCluster, now: number): void {
-    this.learned.set(cluster.key, {
-      learnedAt: now,
-      latestRejectedAt: cluster.latestRejectedAt,
-    });
-    this.pruneOldest();
-  }
-
-  get size(): number {
-    return this.learned.size;
-  }
-
-  private pruneOldest(): void {
-    if (this.learned.size <= MAX_TRACKED_REJECTION_CLUSTERS) return;
-    const entries = Array.from(this.learned.entries())
-      .sort((left, right) => left[1].learnedAt - right[1].learnedAt);
-    const removeCount = entries.length - MAX_TRACKED_REJECTION_CLUSTERS;
-    for (let i = 0; i < removeCount; i++) {
-      this.learned.delete(entries[i][0]);
-    }
-  }
-}
-
-// ============================================================================
 // Feedback Loop
 // ============================================================================
 
 export class FeedbackLoop {
-  private noiseBank: NoisePrototypeBank | null;
-  private embedder: Embedder;
   private admissionController: AdmissionController | null;
   private lessonStore: LessonStore | null;
   private config: FeedbackLoopConfig;
   private debugLog: (msg: string) => void;
   private runtimeContext: FeedbackLoopRuntimeContext;
 
-  private processedErrors = new ProcessedErrorTracker();
   private processedPreventiveLessonErrors = new ProcessedErrorTracker();
-  private learnedRejectionClusters = new LearnedRejectionClusterTracker();
-  private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
-  private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
   private preventiveLessonBuffer: PreventiveLessonEvidence[] = [];
   private admittedTimestampsByCategory: Record<string, number[]> = {};
-  private learnedFromErrors = 0;
-  private learnedFromRejections = 0;
   private learnedPreventiveLessons = 0;
   private updatedPreventiveLessons = 0;
   private promotedPreventiveLessons = 0;
   private skippedPreventiveLessons = 0;
   private failedPreventiveLessons = 0;
-  private skippedRelearnCooldown = 0;
-  private failedEmbeddings = 0;
   private scanCycles = 0;
   private adaptationCycles = 0;
   private lastScanAt: number | null = null;
-  private lastLearnedAt: number | null = null;
   private lastAdaptedAt: number | null = null;
   private lastAdaptiveTypePriors: AdmissionTypePriors | null = null;
   private scanTimer: ReturnType<typeof setInterval> | null = null;
@@ -506,21 +345,16 @@ export class FeedbackLoop {
   private disposed = false;
 
   constructor(opts: {
-    noiseBank: NoisePrototypeBank | null;
-    embedder: Embedder;
     admissionController: AdmissionController | null;
     store?: LessonStore | null;
     config: FeedbackLoopConfig;
     debugLog?: (msg: string) => void;
     runtimeContext?: FeedbackLoopRuntimeContext;
   }) {
-    this.noiseBank = opts.noiseBank;
-    this.embedder = opts.embedder;
     this.admissionController = opts.admissionController;
     this.lessonStore = opts.store ?? null;
     this.config = {
       ...opts.config,
-      noiseLearning: opts.config.noiseLearning ?? DEFAULT_NOISE_LEARNING_CONFIG,
       priorAdaptation: opts.config.priorAdaptation ?? DEFAULT_PRIOR_ADAPTATION_CONFIG,
       preventiveLessons: opts.config.preventiveLessons ?? DEFAULT_PREVENTIVE_LESSON_CONFIG,
     };
@@ -535,10 +369,10 @@ export class FeedbackLoop {
     if (this.disposed || !this.config.enabled) return;
     if (this.scanTimer || this.adaptationTimer) return;
 
-    if (this.config.noiseLearning.fromErrors || this.config.noiseLearning.fromRejections) {
+    if (this.config.preventiveLessons.enabled && this.config.preventiveLessons.fromErrors && this.lessonStore) {
       this.scanTimer = setInterval(
-        () => void this.runNoiseScanCycle().catch(() => {}),
-        this.config.noiseLearning.scanIntervalMs,
+        () => void this.runFeedbackScanCycle().catch(() => {}),
+        FEEDBACK_SCAN_INTERVAL_MS,
       );
     }
     if (this.config.priorAdaptation.enabled && this.admissionController) {
@@ -571,21 +405,6 @@ export class FeedbackLoop {
     return {
       enabled: this.config.enabled,
       disposed: this.disposed,
-      noiseLearning: {
-        fromErrors: this.config.noiseLearning.fromErrors,
-        fromRejections: this.config.noiseLearning.fromRejections,
-        bufferedErrors: this.errorBuffer.length,
-        bufferedRejections: this.rejectionBuffer.length,
-        processedErrors: this.processedErrors.size,
-        learnedRejectionClusters: this.learnedRejectionClusters.size,
-        learnedFromErrors: this.learnedFromErrors,
-        learnedFromRejections: this.learnedFromRejections,
-        skippedRelearnCooldown: this.skippedRelearnCooldown,
-        failedEmbeddings: this.failedEmbeddings,
-        scanCycles: this.scanCycles,
-        lastScanAt: this.lastScanAt,
-        lastLearnedAt: this.lastLearnedAt,
-      },
       priorAdaptation: {
         enabled: this.config.priorAdaptation.enabled && Boolean(this.admissionController),
         observedAdmitted,
@@ -601,6 +420,8 @@ export class FeedbackLoop {
         promoted: this.promotedPreventiveLessons,
         skipped: this.skippedPreventiveLessons,
         failed: this.failedPreventiveLessons,
+        scanCycles: this.scanCycles,
+        lastScanAt: this.lastScanAt,
       },
       runtime: {
         hasWorkspaceDir: Boolean(this.runtimeContext.workspaceDir),
@@ -613,10 +434,8 @@ export class FeedbackLoop {
   // --- Hot-path callbacks (no I/O) ---
 
   onAdmissionRejected(entry: AdmissionRejectionAuditEntry): void {
+    void entry;
     if (this.disposed || !this.config.enabled) return;
-    if (this.config.noiseLearning.fromRejections) {
-      this.rejectionBuffer.push(entry);
-    }
   }
 
   /** Record an admitted memory by category for prior adaptation. */
@@ -631,10 +450,7 @@ export class FeedbackLoop {
 
   onSelfImprovementError(params: { summary: string; details?: string; area?: string }): void {
     if (this.disposed || !this.config.enabled) return;
-    if (this.config.noiseLearning.fromErrors && this.config.noiseLearning.errorAreas.includes(params.area ?? "")) {
-      this.errorBuffer.push(params);
-    }
-    if (this.config.preventiveLessons.fromErrors && this.config.noiseLearning.errorAreas.includes(params.area ?? "")) {
+    if (this.config.preventiveLessons.fromErrors && PREVENTIVE_LESSON_ERROR_AREAS.includes(params.area ?? "")) {
       this.onPreventiveLessonEvidence({
         summary: params.summary,
         details: params.details,
@@ -661,12 +477,11 @@ export class FeedbackLoop {
 
   async scanErrorFile(baseDir: string): Promise<void> {
     this.rememberRuntimeContext({ workspaceDir: baseDir });
-    const learnNoise = this.config.noiseLearning.fromErrors && Boolean(this.noiseBank?.initialized);
     const learnLessons =
       this.config.preventiveLessons.enabled &&
       this.config.preventiveLessons.fromErrors &&
       Boolean(this.lessonStore);
-    if (this.disposed || (!learnNoise && !learnLessons)) return;
+    if (this.disposed || !learnLessons) return;
     this.scanCycles++;
     this.lastScanAt = Date.now();
 
@@ -675,91 +490,29 @@ export class FeedbackLoop {
       const content = await readFile(filePath, "utf-8");
       const entries = parseErrorsFile(content);
 
-      const maxPerScan = Math.max(
-        learnNoise ? this.config.noiseLearning.maxLearnPerScan : 0,
-        learnLessons ? this.config.preventiveLessons.maxLearnPerScan : 0,
-      );
+      const maxPerScan = this.config.preventiveLessons.maxLearnPerScan;
       let processed = 0;
       for (const entry of entries) {
         if (processed >= maxPerScan) break;
-        const noiseProcessed = this.processedErrors.has(entry.id);
         const lessonProcessed = this.processedPreventiveLessonErrors.has(entry.id);
-        if ((!learnNoise || noiseProcessed) && (!learnLessons || lessonProcessed)) continue;
-        if (!this.config.noiseLearning.errorAreas.some((a) => entry.area.toLowerCase().includes(a))) continue;
+        if (lessonProcessed) continue;
+        if (!PREVENTIVE_LESSON_ERROR_AREAS.some((a) => entry.area.toLowerCase().includes(a))) continue;
 
-        const text = (entry.summary + (entry.details ? "\n" + entry.details : "")).slice(0, 300);
-        if (!text.trim()) continue;
-
-        let processedEntry = false;
-        if (learnNoise && !noiseProcessed && this.noiseBank?.initialized) {
-          try {
-            const vector = await this.embedder.embed(text);
-            if (vector && vector.length > 0) {
-              this.noiseBank.learn(vector);
-              this.processedErrors.add(entry.id);
-              this.learnedFromErrors++;
-              this.lastLearnedAt = Date.now();
-              this.debugLog(`feedback-loop: learned noise from error ${entry.id}`);
-              processedEntry = true;
-            }
-          } catch {
-            this.failedEmbeddings++;
-            this.debugLog(`feedback-loop: failed to embed error ${entry.id}, skipping`);
-          }
-        }
-
-        if (learnLessons && !lessonProcessed) {
-          this.onPreventiveLessonEvidence({
-            summary: entry.summary,
-            details: entry.details,
-            area: entry.area,
-            source: "error_file",
-            signatureHash: entry.id,
-          });
-          this.processedPreventiveLessonErrors.add(entry.id);
-          processedEntry = true;
-        }
-
-        if (processedEntry) {
-          processed++;
-        }
+        this.onPreventiveLessonEvidence({
+          summary: entry.summary,
+          details: entry.details,
+          area: entry.area,
+          source: "error_file",
+          signatureHash: entry.id,
+        });
+        this.processedPreventiveLessonErrors.add(entry.id);
+        processed++;
       }
     } catch {
       // File doesn't exist yet — not an error
     }
 
-    await this.drainErrorBuffer();
     await this.drainPreventiveLessonBuffer();
-  }
-
-  private async drainErrorBuffer(): Promise<void> {
-    if (!this.noiseBank?.initialized) return;
-
-    let learned = 0;
-    while (this.errorBuffer.length > 0 && learned < this.config.noiseLearning.maxLearnPerScan) {
-      const entry = this.errorBuffer.shift()!;
-      const text = (entry.summary + (entry.details ? "\n" + entry.details : "")).slice(0, 300);
-      if (!text.trim()) continue;
-
-      try {
-        const vector = await this.embedder.embed(text);
-        if (vector && vector.length > 0) {
-          this.noiseBank.learn(vector);
-          this.learnedFromErrors++;
-          this.lastLearnedAt = Date.now();
-          learned++;
-          this.onPreventiveLessonEvidence({
-            summary: entry.summary,
-            details: entry.details,
-            area: entry.area,
-            source: "tool_error",
-          });
-        }
-      } catch {
-        this.failedEmbeddings++;
-        // Skip failed embeddings
-      }
-    }
   }
 
   async drainPreventiveLessonBuffer(): Promise<void> {
@@ -838,90 +591,6 @@ export class FeedbackLoop {
     this.skippedPreventiveLessons++;
   }
 
-  // --- Rejection Audit Scanning ---
-
-  async scanRejectionAudits(dbPath: string, admissionConfig: AdmissionControlConfig): Promise<void> {
-    this.rememberRuntimeContext({ dbPath, admissionConfig });
-    if (this.disposed || !this.config.noiseLearning.fromRejections || !this.noiseBank?.initialized) return;
-    this.scanCycles++;
-    this.lastScanAt = Date.now();
-
-    const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
-    try {
-      const entries = await readRecentRejectionAudits(filePath, {
-        maxEntries: this.config.priorAdaptation.maxRejectionAudits,
-      });
-
-      const clusters = clusterRejections(entries, this.config.noiseLearning.minRejectionsForScan, admissionConfig.rejectThreshold);
-      const now = Date.now();
-
-      let learned = 0;
-      for (const cluster of clusters) {
-        if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
-        if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
-          this.skippedRelearnCooldown++;
-          this.debugLog(`feedback-loop: skipped previously learned rejection cluster (count=${cluster.count}, key=${cluster.key})`);
-          continue;
-        }
-        const text = cluster.representativeText.slice(0, 300);
-        if (!text.trim()) continue;
-
-        try {
-          const vector = await this.embedder.embed(text);
-          if (vector && vector.length > 0) {
-            this.noiseBank.learn(vector);
-            this.learnedRejectionClusters.markLearned(cluster, now);
-            this.learnedFromRejections++;
-            this.lastLearnedAt = Date.now();
-            learned++;
-            this.debugLog(`feedback-loop: learned noise from rejection cluster (count=${cluster.count}, avgScore=${cluster.avgScore.toFixed(3)})`);
-          }
-        } catch {
-          this.failedEmbeddings++;
-          // Skip failed embeddings
-        }
-      }
-    } catch {
-      // File doesn't exist yet
-    }
-
-    await this.drainRejectionBuffer(admissionConfig.rejectThreshold);
-    await this.drainPreventiveLessonBuffer();
-  }
-
-  private async drainRejectionBuffer(rejectThreshold: number): Promise<void> {
-    if (!this.noiseBank?.initialized || this.rejectionBuffer.length < this.config.noiseLearning.minRejectionsForScan) return;
-
-    const clusters = clusterRejections(this.rejectionBuffer, this.config.noiseLearning.minRejectionsForScan, rejectThreshold);
-    this.rejectionBuffer = [];
-    const now = Date.now();
-
-    let learned = 0;
-    for (const cluster of clusters) {
-      if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
-      if (!this.learnedRejectionClusters.shouldLearn(cluster, now, this.getRelearnCooldownMs())) {
-        this.skippedRelearnCooldown++;
-        continue;
-      }
-      const text = cluster.representativeText.slice(0, 300);
-      if (!text.trim()) continue;
-
-      try {
-        const vector = await this.embedder.embed(text);
-        if (vector && vector.length > 0) {
-          this.noiseBank.learn(vector);
-          this.learnedRejectionClusters.markLearned(cluster, now);
-          this.learnedFromRejections++;
-          this.lastLearnedAt = Date.now();
-          learned++;
-        }
-      } catch {
-        this.failedEmbeddings++;
-        // Skip
-      }
-    }
-  }
-
   // --- Prior Adaptation ---
 
   getAdaptiveTypePriors(
@@ -996,27 +665,14 @@ export class FeedbackLoop {
 
   // --- Internal Cycle Runners ---
 
-  private async runNoiseScanCycle(): Promise<void> {
+  private async runFeedbackScanCycle(): Promise<void> {
     if (this.disposed) return;
     const workspaceDir = this.runtimeContext.workspaceDir;
-    const dbPath = this.runtimeContext.dbPath;
-    const admissionConfig = this.runtimeContext.admissionConfig;
     try {
-      if (this.config.noiseLearning.fromErrors) {
-        if (workspaceDir) {
-          await this.scanErrorFile(workspaceDir);
-        } else {
-          await this.drainErrorBuffer();
-        }
+      if (workspaceDir) {
+        await this.scanErrorFile(workspaceDir);
       } else {
         await this.drainPreventiveLessonBuffer();
-      }
-      if (this.config.noiseLearning.fromRejections) {
-        if (dbPath && admissionConfig) {
-          await this.scanRejectionAudits(dbPath, admissionConfig);
-        } else {
-          await this.drainRejectionBuffer(admissionConfig?.rejectThreshold ?? 0.45);
-        }
       }
       await this.drainPreventiveLessonBuffer();
     } catch {
@@ -1084,12 +740,6 @@ export class FeedbackLoop {
     return this.admittedTimestampsByCategory[category]?.length ?? 0;
   }
 
-  private getRelearnCooldownMs(): number {
-    const cooldownMs = this.config.noiseLearning.relearnCooldownMs;
-    return Number.isFinite(cooldownMs) && cooldownMs >= 0
-      ? cooldownMs
-      : DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs;
-  }
 }
 
 // ============================================================================
@@ -1103,10 +753,6 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
 
   const obj = raw as Record<string, unknown>;
 
-  const nl = obj.noiseLearning && typeof obj.noiseLearning === "object"
-    ? obj.noiseLearning as Record<string, unknown>
-    : {};
-
   const pa = obj.priorAdaptation && typeof obj.priorAdaptation === "object"
     ? obj.priorAdaptation as Record<string, unknown>
     : {};
@@ -1116,20 +762,6 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
 
   return {
     enabled: obj.enabled !== false,
-    noiseLearning: {
-      fromErrors: nl.fromErrors !== false,
-      fromRejections: nl.fromRejections !== false,
-      minRejectionsForScan: typeof nl.minRejectionsForScan === "number" && nl.minRejectionsForScan >= 1
-        ? Math.floor(nl.minRejectionsForScan) : DEFAULT_NOISE_LEARNING_CONFIG.minRejectionsForScan,
-      scanIntervalMs: typeof nl.scanIntervalMs === "number" && nl.scanIntervalMs >= 60_000
-        ? Math.floor(nl.scanIntervalMs) : DEFAULT_NOISE_LEARNING_CONFIG.scanIntervalMs,
-      maxLearnPerScan: typeof nl.maxLearnPerScan === "number" && nl.maxLearnPerScan >= 1 && nl.maxLearnPerScan <= 10
-        ? Math.floor(nl.maxLearnPerScan) : DEFAULT_NOISE_LEARNING_CONFIG.maxLearnPerScan,
-      relearnCooldownMs: typeof nl.relearnCooldownMs === "number" && nl.relearnCooldownMs >= 0 && nl.relearnCooldownMs <= 30 * 86_400_000
-        ? Math.floor(nl.relearnCooldownMs) : DEFAULT_NOISE_LEARNING_CONFIG.relearnCooldownMs,
-      errorAreas: Array.isArray(nl.errorAreas) && nl.errorAreas.every((e: unknown) => typeof e === "string")
-        ? (nl.errorAreas as string[]) : DEFAULT_NOISE_LEARNING_CONFIG.errorAreas,
-    },
     priorAdaptation: {
       enabled: pa.enabled !== false,
       adaptationIntervalMs: typeof pa.adaptationIntervalMs === "number" && pa.adaptationIntervalMs >= 300_000
