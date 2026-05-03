@@ -26,6 +26,14 @@ import type { SmartExtractor } from "./smart-extractor.js";
 import type { ExtractionRateLimiter } from "./smart-extractor.js";
 import { preflightAutoCaptureText } from "./hook-enhancements.js";
 
+function shouldCaptureAssistantForAgent(config: PluginConfig, agentId: string): boolean {
+  if (config.captureAssistant === true) return true;
+  if (config.captureAssistant === false && config.captureAssistantAgents === undefined) return false;
+
+  const captureAssistantAgents = config.captureAssistantAgents ?? ["main"];
+  return captureAssistantAgents.includes(agentId);
+}
+
 export function registerAutoCaptureHook(params: {
   api: OpenClawPluginApi;
   config: PluginConfig;
@@ -69,9 +77,10 @@ export function registerAutoCaptureHook(params: {
           ? config.scopes?.default ?? "global"
           : scopeManager.getDefaultScope(agentId);
         const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
+        const captureAssistantForAgent = shouldCaptureAssistantForAgent(config, agentId);
 
         api.logger.debug(
-          `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
+          `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${captureAssistantForAgent}, ${summarizeAgentEndMessages(event.messages)})`,
         );
 
         const eligibleItems: Array<{ role: "user" | "assistant"; text: string }> = [];
@@ -82,8 +91,7 @@ export function registerAutoCaptureHook(params: {
           const rawRole = msgObj.role;
           if (rawRole !== "user" && rawRole !== "assistant") continue;
           const role = rawRole;
-          const captureAssistant = config.captureAssistant === true;
-          if (role !== "user" && !(captureAssistant && role === "assistant")) continue;
+          if (role !== "user" && !(captureAssistantForAgent && role === "assistant")) continue;
 
           const content = msgObj.content;
           if (typeof content === "string") {

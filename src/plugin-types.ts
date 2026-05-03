@@ -47,6 +47,8 @@ export interface PluginConfig {
   autoRecallIncludeAgents?: string[];
   reasoningStrategyRecall?: ReasoningStrategyRecallConfig;
   captureAssistant?: boolean;
+  /** Agent IDs whose assistant replies are eligible for auto-capture. Defaults to ["main"]. */
+  captureAssistantAgents?: string[];
   retrieval?: {
     mode?: "hybrid" | "vector";
     vectorWeight?: number;

@@ -66,6 +66,8 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.autoRecallMinLength, 6);
     assert.equal(parsed.autoRecallMaxItems, 6);
     assert.equal(parsed.autoRecallDegradeAfterMs, 5000);
+    assert.equal(parsed.captureAssistant, false);
+    assert.deepEqual(parsed.captureAssistantAgents, ["main"]);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
     assert.equal(parsed.extractMinMessages, 5);
     assert.equal(parsed.llm?.model, undefined);
@@ -111,6 +113,27 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.enabled, true);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.preferDistilled, true);
     assert.equal(parsed.hookEnhancements?.selfCorrectionLoop?.enabled, true);
+  });
+
+  it("preserves explicit assistant capture settings", () => {
+    const disabled = parsePluginConfig({
+      ...baseConfig(),
+      captureAssistant: false,
+    });
+    assert.deepEqual(disabled.captureAssistantAgents, []);
+
+    const scoped = parsePluginConfig({
+      ...baseConfig(),
+      captureAssistantAgents: ["main", "life", "main", ""],
+    });
+    assert.deepEqual(scoped.captureAssistantAgents, ["main", "life"]);
+
+    const global = parsePluginConfig({
+      ...baseConfig(),
+      captureAssistant: true,
+    });
+    assert.equal(global.captureAssistant, true);
+    assert.deepEqual(global.captureAssistantAgents, ["main"]);
   });
 
   it("requires embedding baseURL and model", () => {

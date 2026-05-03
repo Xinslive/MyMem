@@ -116,6 +116,14 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     ? cfg.hookEnhancements as Record<string, unknown>
     : null;
   const defaultHookEnhancements = createDefaultHookEnhancementsConfig();
+  const normalizeAgentIdList = (raw: unknown): string[] | undefined => {
+    if (!Array.isArray(raw)) return undefined;
+    const ids = raw
+      .filter((id: unknown): id is string => typeof id === "string" && id.trim() !== "")
+      .map((id) => id.trim());
+    return ids.length > 0 ? [...new Set(ids)] : [];
+  };
+  const configuredCaptureAssistantAgents = normalizeAgentIdList(cfg.captureAssistantAgents);
 
   const normalizeSessionPrimer = (raw: unknown): Required<SessionPrimerConfig> => {
     if (raw === false) {
@@ -231,6 +239,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           : 0.62,
     },
     captureAssistant: cfg.captureAssistant === true,
+    captureAssistantAgents:
+      configuredCaptureAssistantAgents ??
+      (cfg.captureAssistant === false ? [] : ["main"]),
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
         ? (() => {

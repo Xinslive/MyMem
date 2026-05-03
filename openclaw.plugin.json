@@ -293,7 +293,17 @@
         }
       },
       "captureAssistant": {
-        "type": "boolean"
+        "type": "boolean",
+        "description": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless captureAssistantAgents is explicitly set."
+      },
+      "captureAssistantAgents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default": ["main"],
+        "description": "Agent IDs whose assistant replies are eligible for auto-capture. Defaults to main so the primary agent's discovered answers and summaries can become memories."
       },
       "smartExtraction": {
         "type": "boolean",
@@ -1657,7 +1667,12 @@
     },
     "captureAssistant": {
       "label": "Capture Assistant Messages",
-      "help": "Also auto-capture assistant messages (default false to reduce memory pollution)",
+      "help": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless captureAssistantAgents is set.",
+      "advanced": true
+    },
+    "captureAssistantAgents": {
+      "label": "Assistant Capture Agents",
+      "help": "Agent IDs whose assistant replies are eligible for auto-capture. Defaults to main.",
       "advanced": true
     },
     "retrieval.mode": {

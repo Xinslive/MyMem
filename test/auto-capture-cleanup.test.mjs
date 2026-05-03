@@ -73,7 +73,6 @@ describe("auto-capture cleanup", () => {
     registerAutoCaptureHook({
       api,
       config: {
-        captureAssistant: true,
         extractMinMessages: 1,
         scopes: { default: "global" },
       },
@@ -140,6 +139,73 @@ describe("auto-capture cleanup", () => {
         "I will keep updates terse and factual.",
       ].join("\n"),
     );
+  });
+
+  it("does not keep non-main assistant text by default", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    let capturedConversationText = "";
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        extractMinMessages: 1,
+        scopes: { default: "global" },
+      },
+      store: {},
+      embedder: {},
+      smartExtractor: {
+        async filterNoiseByEmbedding(texts) {
+          return texts;
+        },
+        async extractAndPersist(conversationText) {
+          capturedConversationText = conversationText;
+          return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
+        },
+      },
+      extractionRateLimiter: {
+        isRateLimited() {
+          return false;
+        },
+        getRecentCount() {
+          return 0;
+        },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() {
+          return ["global"];
+        },
+        getDefaultScope() {
+          return "global";
+        },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    assert.ok(agentEndHook, "expected agent_end hook to be registered");
+
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "User asked for terse status updates." },
+          { role: "assistant", content: "I will keep updates terse and factual." },
+        ],
+      },
+      {
+        agentId: "life",
+        sessionKey: "agent:life:channel-1:conversation-1",
+      },
+    );
+
+    await agentEndHook.__lastRun;
+
+    assert.equal(capturedConversationText, "User asked for terse status updates.");
   });
 
   it("cleans auto-capture session state on session_end", () => {
