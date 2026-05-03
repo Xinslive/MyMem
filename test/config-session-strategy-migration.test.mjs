@@ -68,6 +68,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.autoRecallDegradeAfterMs, 5000);
     assert.equal(parsed.captureAssistant, false);
     assert.deepEqual(parsed.captureAssistantAgents, ["main"]);
+    assert.equal(parsed.captureMaxMessages, 10);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
     assert.equal(parsed.extractMinMessages, 8);
     assert.equal(parsed.llm?.model, undefined);
@@ -136,6 +137,20 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     });
     assert.equal(global.captureAssistant, true);
     assert.deepEqual(global.captureAssistantAgents, ["main"]);
+  });
+
+  it("normalizes captureMaxMessages", () => {
+    const configured = parsePluginConfig({
+      ...baseConfig(),
+      captureMaxMessages: 6,
+    });
+    assert.equal(configured.captureMaxMessages, 6);
+
+    const tooLarge = parsePluginConfig({
+      ...baseConfig(),
+      captureMaxMessages: 999,
+    });
+    assert.equal(tooLarge.captureMaxMessages, 50);
   });
 
   it("allows disabling conservative auto-capture gates explicitly", () => {

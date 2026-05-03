@@ -242,6 +242,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     captureAssistantAgents:
       configuredCaptureAssistantAgents ??
       (cfg.captureAssistant === false ? [] : ["main"]),
+    captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 10, 1, 50),
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
         ? (() => {

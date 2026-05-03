@@ -308,14 +308,21 @@
       "smartExtraction": {
         "type": "boolean",
         "default": true,
-        "description": "Enable LLM-powered memory extraction. Falls back to regex capture when false."
+        "description": "Enable LLM-powered memory extraction. Auto-capture requires this path; regex fallback is disabled by default."
+      },
+      "captureMaxMessages": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 10,
+        "description": "Recent user/assistant messages sent to the smart extraction LLM during auto-capture."
       },
       "extractMinMessages": {
         "type": "integer",
         "minimum": 1,
         "maximum": 100,
         "default": 8,
-        "description": "Minimum high-signal conversation messages required before smart extraction runs. Higher defaults reduce low-value automatic memories."
+        "description": "Legacy/advanced threshold retained for compatibility; the default auto-capture path now uses captureMaxMessages instead."
       },
       "extractMaxChars": {
         "type": "integer",
@@ -1498,7 +1505,12 @@
     },
     "smartExtraction": {
       "label": "Smart Extraction",
-      "help": "Enable LLM-powered 6-category memory extraction. Conservative defaults skip low-value conversations and fall back to regex capture only for explicit triggers."
+      "help": "Enable LLM-powered 6-category memory extraction. Auto-capture sends a recent message window to the LLM and does not use regex fallback by default."
+    },
+    "captureMaxMessages": {
+      "label": "Capture Window Messages",
+      "help": "Recent user/assistant messages sent to the smart extraction LLM during auto-capture. Default: 10.",
+      "advanced": true
     },
     "llm.apiKey": {
       "label": "LLM API Key",
@@ -1519,7 +1531,7 @@
     },
     "extractMinMessages": {
       "label": "Min Messages for Extraction",
-      "help": "Minimum high-signal conversation messages before smart extraction triggers. Default: 8.",
+      "help": "Legacy/advanced threshold retained for compatibility; auto-capture now uses Capture Window Messages instead.",
       "advanced": true
     },
     "extractMaxChars": {
@@ -1589,7 +1601,7 @@
     },
     "autoCapture": {
       "label": "Auto-Capture",
-      "help": "Automatically capture important information from conversations. Conservative quality gates are enabled by default."
+      "help": "Automatically capture important information by sending a recent user/assistant message window to the smart extraction LLM."
     },
     "autoRecall": {
       "label": "Auto-Recall",
@@ -2047,16 +2059,18 @@
     },
     "sessionCompression.enabled": {
       "label": "Session Compression",
-      "help": "Score and compress conversation texts before auto-capture to prioritize high-signal content (corrections, decisions, explicit memory intent)"
+      "help": "Legacy/advanced option retained for compatibility; default auto-capture now sends the recent message window directly to the LLM.",
+      "advanced": true
     },
     "sessionCompression.minScoreToKeep": {
       "label": "Compression Min Score",
-      "help": "Minimum text score threshold. If all texts score below this, keep at least the last few texts as fallback.",
+      "help": "Legacy compression threshold retained for compatibility.",
       "advanced": true
     },
     "extractionThrottle.skipLowValue": {
       "label": "Skip Low-Value Conversations",
-      "help": "Skip auto-capture for conversations estimated to have low memory value (< 0.2) unless they contain explicit capture triggers"
+      "help": "Legacy/advanced option retained for compatibility; default auto-capture lets the LLM decide whether the message window contains memories.",
+      "advanced": true
     },
     "extractionThrottle.maxExtractionsPerHour": {
       "label": "Max Extractions Per Hour",

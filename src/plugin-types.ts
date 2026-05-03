@@ -49,6 +49,8 @@ export interface PluginConfig {
   captureAssistant?: boolean;
   /** Agent IDs whose assistant replies are eligible for auto-capture. Defaults to ["main"]. */
   captureAssistantAgents?: string[];
+  /** Recent user/assistant messages sent to the smart extraction LLM during auto-capture. Default: 10. */
+  captureMaxMessages?: number;
   retrieval?: {
     mode?: "hybrid" | "vector";
     vectorWeight?: number;

@@ -11,13 +11,7 @@ import {
   buildAutoCaptureConversationKeyFromIngress,
   buildAutoCaptureConversationKeyFromSessionKey,
 } from "./auto-capture-utils.js";
-import { shouldCapture, detectCategory } from "./capture-detector.js";
-import { summarizeCaptureDecision } from "./capture-detection.js";
-import { isNoise } from "./noise-filter.js";
-import { isUserMdExclusiveMemory } from "./workspace-boundary.js";
-import { isExplicitRememberCommand, shouldSkipReflectionMessage, summarizeAgentEndMessages } from "./session-utils.js";
-import { buildSmartMetadata, stringifySmartMetadata, reverseMapLegacyCategory } from "./smart-metadata.js";
-import { compressTexts, estimateConversationValue } from "./session-compressor.js";
+import { shouldSkipReflectionMessage, summarizeAgentEndMessages } from "./session-utils.js";
 import type { PluginConfig } from "./plugin-types.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ScopeManager } from "./scopes.js";
@@ -41,38 +35,10 @@ function textsOf(items: CaptureItem[]): string[] {
   return items.map((item) => item.text);
 }
 
-function hasUserAssistantBundle(items: CaptureItem[]): boolean {
-  return items.some((item) => item.role === "user") && items.some((item) => item.role === "assistant");
-}
-
-function mapTextSubsetToItems(items: CaptureItem[], subsetTexts: string[]): CaptureItem[] {
-  const mapped: CaptureItem[] = [];
-  let next = 0;
-  for (const item of items) {
-    if (next >= subsetTexts.length) break;
-    if (item.text === subsetTexts[next]) {
-      mapped.push(item);
-      next++;
-    }
-  }
-  return mapped;
-}
-
 function formatConversationForSmartExtraction(items: CaptureItem[]): string {
   return items
     .map((item) => `${item.role === "user" ? "User" : "Assistant"}:\n${item.text}`)
     .join("\n\n");
-}
-
-function shouldRunSmartExtractionForItems(params: {
-  items: CaptureItem[];
-  minMessages: number;
-  hasExplicitCaptureSignal: boolean;
-  conversationValue: number;
-}): boolean {
-  if (params.items.length >= params.minMessages) return true;
-  return hasUserAssistantBundle(params.items) &&
-    (params.hasExplicitCaptureSignal || params.conversationValue >= 0.2);
 }
 
 export function registerAutoCaptureHook(params: {
@@ -190,19 +156,14 @@ export function registerAutoCaptureHook(params: {
           }
         }
         const priorRecentTexts = params.autoCaptureRecentTexts.get(sessionKey) || [];
-        if (captureItems.length === 1 && isExplicitRememberCommand(captureItems[0].text) && priorRecentTexts.length > 0) {
-          captureItems = [
-            ...priorRecentTexts.slice(-1).map((text) => ({ role: "user" as const, text })),
-            ...captureItems,
-          ];
-        }
         if (newItems.length > 0) {
           const nextRecentTexts = [...priorRecentTexts, ...newItems.map((item) => item.text)].slice(-6);
           params.autoCaptureRecentTexts.set(sessionKey, nextRecentTexts);
         }
 
+        const captureMaxMessages = Math.max(1, Math.min(50, Math.floor(config.captureMaxMessages ?? 10)));
+        captureItems = captureItems.slice(-captureMaxMessages);
         const texts = textsOf(captureItems);
-        const minMessages = config.extractMinMessages ?? 5;
         if (skippedAutoCaptureTexts > 0) {
           api.logger.debug(`mymem: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent ${agentId}`);
         }
@@ -212,142 +173,26 @@ export function registerAutoCaptureHook(params: {
         if (texts.length !== eligibleTexts.length) {
           api.logger.debug(`mymem: auto-capture narrowed ${eligibleTexts.length} eligible history text(s) to ${texts.length} new text(s) for agent ${agentId}`);
         }
-        api.logger.debug(`mymem: auto-capture collected ${texts.length} text(s) for agent ${agentId} (minMessages=${minMessages}, smartExtraction=${smartExtractor ? "on" : "off"})`);
-        if (texts.length > 0) {
-          api.logger.debug(`mymem: auto-capture text diagnostics for agent ${agentId}: ${texts.map((text, idx) => `#${idx + 1}(${summarizeCaptureDecision(text)})`).join(" | ")}`);
-        }
+        api.logger.debug(`mymem: auto-capture collected ${texts.length} text(s) for agent ${agentId} (captureMaxMessages=${captureMaxMessages}, smartExtraction=${smartExtractor ? "on" : "off"})`);
         if (texts.length === 0) {
           api.logger.debug(`mymem: auto-capture found no eligible texts after filtering for agent ${agentId}`);
           return;
         }
 
-        const hasExplicitCaptureSignal = texts.some((text) => shouldCapture(text) && !isNoise(text));
-        const conversationValue = estimateConversationValue(texts);
-        if (config.extractionThrottle?.skipLowValue === true) {
-          if (conversationValue < 0.2 && !hasExplicitCaptureSignal) {
-            api.logger.debug(
-              `mymem: auto-capture skipped low-value conversation for agent ${agentId} (value=${conversationValue.toFixed(2)})`,
-            );
-            return;
-          }
-        }
-
-        let extractionItems = captureItems;
-        if (config.sessionCompression?.enabled === true && extractionItems.length > 1) {
-          const extractionTexts = textsOf(extractionItems);
-          const compressed = compressTexts(
-            extractionTexts,
-            config.extractMaxChars ?? 8000,
-            { minScoreToKeep: config.sessionCompression.minScoreToKeep ?? 0.3 },
-          );
-          if (compressed.texts.length === 0) {
-            api.logger.debug(`mymem: auto-capture compression produced no extractable texts for agent ${agentId}`);
-            return;
-          }
-          if (compressed.dropped > 0) {
-            api.logger.debug(
-              `mymem: auto-capture compressed ${extractionTexts.length} text(s) to ${compressed.texts.length} for agent ${agentId} (${compressed.totalChars} chars)`,
-            );
-          }
-          extractionItems = mapTextSubsetToItems(extractionItems, compressed.texts);
-        }
-
-        let fallbackItems = extractionItems;
-        if (smartExtractor) {
-          const extractionTexts = textsOf(extractionItems);
-          const cleanTexts = await smartExtractor.filterNoiseByEmbedding(extractionTexts);
-          if (cleanTexts.length === 0) {
-            api.logger.debug(`mymem: all texts filtered as embedding noise for agent ${agentId}`);
-            return;
-          }
-          const cleanItems = mapTextSubsetToItems(extractionItems, cleanTexts);
-          fallbackItems = cleanItems;
-          if (shouldRunSmartExtractionForItems({ items: cleanItems, minMessages, hasExplicitCaptureSignal, conversationValue })) {
-            api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${cleanItems.length} clean text(s), minMessages=${minMessages})`);
-            const conversationText = formatConversationForSmartExtraction(cleanItems);
-            const stats = await smartExtractor.extractAndPersist(
-              conversationText, sessionKey,
-              { scope: defaultScope, scopeFilter: accessibleScopes },
-            );
-            extractionRateLimiter.recordExtraction();
-            if (stats.created > 0 || stats.merged > 0) {
-              api.logger.info(`mymem: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`);
-              return;
-            }
-
-            if ((stats.boundarySkipped ?? 0) > 0) {
-              api.logger.debug(`mymem: smart extraction skipped ${stats.boundarySkipped} USER.md-exclusive candidate(s) for agent ${agentId}; continuing to regex fallback for non-boundary texts`);
-            }
-          }
-        }
-
-        api.logger.debug(`mymem: auto-capture running regex fallback for agent ${agentId}`);
-
-        const fallbackTexts = textsOf(fallbackItems);
-        const toCapture = fallbackTexts.filter((text) => text && shouldCapture(text) && !isNoise(text));
-        if (toCapture.length === 0) {
-          api.logger.debug(`mymem: regex fallback found 0 capturable texts for agent ${agentId}`);
+        if (!smartExtractor) {
+          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (smart extraction unavailable; regex fallback disabled)`);
           return;
         }
 
-        api.logger.debug(`mymem: regex fallback found ${toCapture.length} capturable text(s) for agent ${agentId}`);
-
-        let stored = 0;
-        for (const text of toCapture.slice(0, 2)) {
-          if (isUserMdExclusiveMemory({ text }, config.workspaceBoundary)) {
-            api.logger.debug(`mymem: skipped USER.md-exclusive auto-capture text for agent ${agentId}`);
-            continue;
-          }
-
-          const category = detectCategory(text);
-          const vector = await embedder.embedPassage(text);
-
-          let existing: Awaited<ReturnType<typeof store.vectorSearch>> = [];
-          try {
-            existing = await store.vectorSearch(vector, 1, 0.1, [defaultScope]);
-          } catch (err) {
-            api.logger.warn(`mymem: auto-capture duplicate pre-check failed: ${String(err)}`);
-          }
-
-          if (existing.length > 0 && existing[0].score > 0.90) continue;
-
-          await store.store({
-            text,
-            vector,
-            importance: 0.7,
-            category,
-            scope: defaultScope,
-            metadata: stringifySmartMetadata(
-              buildSmartMetadata(
-                { text, category, importance: 0.7 },
-                {
-                  l0_abstract: text,
-                  l1_overview: `- ${text}`,
-                  l2_content: text,
-                  memory_category: reverseMapLegacyCategory(category, text),
-                  source_session: (event as any).sessionKey || "unknown",
-                  source: "auto-capture",
-                  state: "confirmed",
-                  memory_layer: "working",
-                  injected_count: 0,
-                  bad_recall_count: 0,
-                  suppressed_until_turn: 0,
-                },
-              ),
-            ),
-          });
-          stored++;
-
-          if (params.mdMirror) {
-            await params.mdMirror(
-              { text, category, scope: defaultScope, timestamp: Date.now() },
-              { source: "auto-capture", agentId },
-            );
-          }
-        }
-
-        if (stored > 0) {
-          api.logger.info(`mymem: auto-captured ${stored} memories for agent ${agentId} in scope ${defaultScope}`);
+        api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${captureItems.length} message(s))`);
+        const stats = await smartExtractor.extractAndPersist(
+          formatConversationForSmartExtraction(captureItems),
+          sessionKey,
+          { scope: defaultScope, scopeFilter: accessibleScopes },
+        );
+        extractionRateLimiter.recordExtraction();
+        if (stats.created > 0 || stats.merged > 0) {
+          api.logger.info(`mymem: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`);
         }
       } catch (err) {
         api.logger.warn(`mymem: capture failed: ${String(err)}`);

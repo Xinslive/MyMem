@@ -73,7 +73,6 @@ describe("auto-capture cleanup", () => {
     registerAutoCaptureHook({
       api,
       config: {
-        extractMinMessages: 1,
         captureAssistantAgents: ["main"],
         scopes: { default: "global" },
       },
@@ -121,7 +120,7 @@ describe("auto-capture cleanup", () => {
       {
         success: true,
         messages: [
-          { role: "user", content: "User asked for terse status updates." },
+          { role: "user", content: "User asked for terse status updates in future sessions." },
           { role: "assistant", content: "I will keep updates terse and factual." },
         ],
       },
@@ -149,7 +148,6 @@ describe("auto-capture cleanup", () => {
     registerAutoCaptureHook({
       api,
       config: {
-        extractMinMessages: 1,
         scopes: { default: "global" },
       },
       store: {},
@@ -194,7 +192,7 @@ describe("auto-capture cleanup", () => {
       {
         success: true,
         messages: [
-          { role: "user", content: "User asked for terse status updates." },
+          { role: "user", content: "User asked for terse status updates in future sessions." },
           { role: "assistant", content: "I will keep updates terse and factual." },
         ],
       },
@@ -206,7 +204,7 @@ describe("auto-capture cleanup", () => {
 
     await agentEndHook.__lastRun;
 
-    assert.equal(capturedConversationText, "User:\nUser asked for terse status updates.");
+    assert.equal(capturedConversationText, "User:\nUser asked for terse status updates in future sessions.");
   });
 
   it("keeps main assistant text by default", async () => {
@@ -216,7 +214,6 @@ describe("auto-capture cleanup", () => {
     registerAutoCaptureHook({
       api,
       config: {
-        extractMinMessages: 1,
         scopes: { default: "global" },
       },
       store: {},
@@ -290,10 +287,7 @@ describe("auto-capture cleanup", () => {
     registerAutoCaptureHook({
       api,
       config: {
-        extractMinMessages: 8,
         captureAssistantAgents: ["main"],
-        sessionCompression: { enabled: true, minScoreToKeep: 0.3 },
-        extractionThrottle: { skipLowValue: true, maxExtractionsPerHour: 0 },
         scopes: { default: "global" },
       },
       store: {},
@@ -360,16 +354,13 @@ describe("auto-capture cleanup", () => {
     assert.match(capturedConversationText, /Assistant:\n反爬网站：scrapling extract stealthy-fetch/);
   });
 
-  it("skips low-value conversations before smart extraction by default", async () => {
+  it("still sends ordinary short conversations to smart extraction and lets the LLM return no memories", async () => {
     const { api, eventHandlers } = createAutoCaptureHarness();
     let extractionRuns = 0;
 
     registerAutoCaptureHook({
       api,
       config: {
-        extractMinMessages: 1,
-        sessionCompression: { enabled: true, minScoreToKeep: 0.3 },
-        extractionThrottle: { skipLowValue: true, maxExtractionsPerHour: 0 },
         scopes: { default: "global" },
       },
       store: {},
@@ -380,7 +371,7 @@ describe("auto-capture cleanup", () => {
         },
         async extractAndPersist() {
           extractionRuns++;
-          return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
+          return { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };
         },
       },
       extractionRateLimiter: {
@@ -427,7 +418,147 @@ describe("auto-capture cleanup", () => {
 
     await agentEndHook.__lastRun;
 
-    assert.equal(extractionRuns, 0);
+    assert.equal(extractionRuns, 1);
+  });
+
+  it("uses captureMaxMessages as the recent message window", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    let capturedConversationText = "";
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        captureMaxMessages: 3,
+        captureAssistantAgents: ["main"],
+        scopes: { default: "global" },
+      },
+      store: {},
+      embedder: {},
+      smartExtractor: {
+        async filterNoiseByEmbedding(texts) {
+          return texts;
+        },
+        async extractAndPersist(conversationText) {
+          capturedConversationText = conversationText;
+          return { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };
+        },
+      },
+      extractionRateLimiter: {
+        isRateLimited() {
+          return false;
+        },
+        getRecentCount() {
+          return 0;
+        },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() {
+          return ["global"];
+        },
+        getDefaultScope() {
+          return "global";
+        },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    assert.ok(agentEndHook, "expected agent_end hook to be registered");
+
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "first" },
+          { role: "assistant", content: "second" },
+          { role: "user", content: "third" },
+          { role: "assistant", content: "fourth" },
+          { role: "user", content: "fifth" },
+        ],
+      },
+      {
+        agentId: "main",
+        sessionKey: "agent:main:channel-1:conversation-window",
+      },
+    );
+
+    await agentEndHook.__lastRun;
+
+    assert.doesNotMatch(capturedConversationText, /first|second/);
+    assert.match(capturedConversationText, /^User:\nthird/);
+    assert.match(capturedConversationText, /Assistant:\nfourth/);
+    assert.match(capturedConversationText, /User:\nfifth$/);
+  });
+
+  it("does not run regex fallback when smart extraction is unavailable", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    const stored = [];
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        scopes: { default: "global" },
+      },
+      store: {
+        async store(entry) {
+          stored.push(entry);
+          return entry;
+        },
+      },
+      embedder: {
+        async embedPassage() {
+          throw new Error("regex fallback should not embed");
+        },
+      },
+      smartExtractor: null,
+      extractionRateLimiter: {
+        isRateLimited() {
+          return false;
+        },
+        getRecentCount() {
+          return 0;
+        },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() {
+          return ["global"];
+        },
+        getDefaultScope() {
+          return "global";
+        },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    assert.ok(agentEndHook, "expected agent_end hook to be registered");
+
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "请记住我的饮品偏好是乌龙茶。" },
+        ],
+      },
+      {
+        agentId: "main",
+        sessionKey: "agent:main:channel-1:no-smart-extractor",
+      },
+    );
+
+    await agentEndHook.__lastRun;
+
+    assert.equal(stored.length, 0);
   });
 
   it("cleans auto-capture session state on session_end", () => {

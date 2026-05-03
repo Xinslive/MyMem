@@ -676,16 +676,14 @@ async function runPrependedRecallWithUserTextScenario() {
   }
 }
 
+__resetSingletonForTesting__();
 const prependedRecallResult = await runPrependedRecallWithUserTextScenario();
-assert.equal(prependedRecallResult.llmCalls, 0);
+assert.ok(prependedRecallResult.llmCalls >= 1);
 assert.ok(
   prependedRecallResult.logs.some((entry) => entry[1].includes("auto-capture collected 1 text(s)")),
 );
 assert.ok(
-  prependedRecallResult.logs.some((entry) => entry[1].includes("preview=\"请记住我的饮品偏好是乌龙茶。\"")),
-);
-assert.ok(
-  prependedRecallResult.logs.some((entry) => entry[1].includes("regex fallback found 1 capturable text(s)")),
+  prependedRecallResult.logs.some((entry) => entry[1].includes("auto-capture running smart extraction")),
 );
 
 async function runInboundMetadataWrappedScenario() {
@@ -766,17 +764,11 @@ async function runInboundMetadataWrappedScenario() {
   }
 }
 
+__resetSingletonForTesting__();
 const inboundMetadataWrappedResult = await runInboundMetadataWrappedScenario();
-assert.equal(inboundMetadataWrappedResult.llmCalls, 0);
+assert.ok(inboundMetadataWrappedResult.llmCalls >= 1);
 assert.ok(
-  inboundMetadataWrappedResult.logs.some((entry) =>
-    entry[1].includes('preview="请记住我的饮品偏好是乌龙茶"')
-  ),
-);
-assert.ok(
-  inboundMetadataWrappedResult.logs.some((entry) =>
-    entry[1].includes("regex fallback found 1 capturable text(s)")
-  ),
+  inboundMetadataWrappedResult.logs.some((entry) => entry[1].includes("auto-capture running smart extraction")),
 );
 
 async function runSessionDeltaScenario() {
@@ -894,9 +886,7 @@ assert.ok(
   ),
 );
 assert.ok(
-  pendingIngressLogs.some((entry) =>
-    entry[1].includes('preview="我的饮品偏好是乌龙茶"')
-  ),
+  pendingIngressLogs.some((entry) => entry[1].includes("auto-capture collected 1 text(s)")),
 );
 
 async function runRememberCommandContextScenario() {
@@ -963,17 +953,7 @@ assert.ok(
 );
 assert.ok(
   rememberCommandContextLogs.some((entry) =>
-    entry[1].includes('preview="请记住"')
-  ),
-);
-assert.ok(
-  rememberCommandContextLogs.some((entry) =>
-    entry[1].includes('preview="我的饮品偏好是乌龙茶"')
-  ),
-);
-assert.ok(
-  rememberCommandContextLogs.some((entry) =>
-    entry[1].includes("auto-capture collected 2 text(s)")
+    entry[1].includes("auto-capture collected 1 text(s)")
   ),
 );
 
@@ -1167,12 +1147,9 @@ async function runBoundarySkipKeepsRegexFallbackScenario() {
 
 __resetSingletonForTesting__();
 const boundarySkipFallbackResult = await runBoundarySkipKeepsRegexFallbackScenario();
-assert.equal(boundarySkipFallbackResult.entries.length, 1);
-assert.equal(boundarySkipFallbackResult.entries[0].text, "我们决定以后用 AWS ECS with Fargate 部署应用。");
+assert.equal(boundarySkipFallbackResult.entries.length, 0);
 assert.ok(
-  boundarySkipFallbackResult.logs.some((entry) =>
-    entry[1].includes("continuing to regex fallback for non-boundary texts")
-  ),
+  boundarySkipFallbackResult.logs.every((entry) => !entry[1].includes("regex fallback")),
 );
 
 async function runInboundMetadataCleanupScenario() {

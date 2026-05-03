@@ -218,6 +218,11 @@ function extractCorrection(text: string): { oldText: string; newText: string } |
   const m3 = p3.exec(text);
   if (m3) return { oldText: m3[1].trim(), newText: m3[2].trim() };
 
+  // Pattern 3b: "use/try Y, don't X" — common Chinese correction order.
+  const p3b = /(?:用|使用|优先用|優先用|use|try)\s+(.{2,120}?)\s*[，,]\s*(?:不要|别|別|do not|don't)\s*(?:用|使用)?\s+(.{2,80})/i;
+  const m3b = p3b.exec(text);
+  if (m3b) return { oldText: m3b[2].trim(), newText: m3b[1].trim() };
+
   // Pattern 4: "don't X" — require correction context keywords to avoid false positives
   const p4 = /(?:以后不要|do not|don't)\s+(.{2,120})/i;
   const m4 = p4.exec(text);
@@ -725,41 +730,25 @@ export function registerHookEnhancements(params: {
         }
 
         const selfCorrectionLoop = getSelfCorrectionLoopConfig(config);
-        if (selfCorrectionLoop.enabled) {
-          const correctionRules = extractGovernanceRulesFromText(userText || text)
-            .filter((rule) => rule.confidence >= selfCorrectionLoop.minConfidence);
-          for (const rule of correctionRules) {
-            feedbackLoop?.onPreventiveLessonEvidence({
-              summary: rule.text,
-              details: userText || text,
-              source: "user_correction",
-              sessionKey,
-              scopeFilter,
-              prevention: "Preserve this correction as a preventive rule and suppress or supersede conflicting memories before relying on them again.",
-            });
-            await applySelfCorrectionRule({
-              api,
-              store,
-              embedder,
-              sessionKey,
-              scopeFilter,
-              selfCorrectionLoop,
-              ruleText: rule.text,
-            });
-          }
-        }
 
         if (enhancementEnabled(config, "correctionDiff")) {
           const correction = extractCorrection(userText || text);
           if (correction) {
-            feedbackLoop?.onPreventiveLessonEvidence({
-              summary: `User corrected '${correction.oldText}' to '${correction.newText}'.`,
-              details: userText || text,
-              source: "user_correction",
-              sessionKey,
-              scopeFilter,
-              prevention: `Use '${correction.newText}' instead of '${correction.oldText}' and archive conflicting recall before using it again.`,
-            });
+            if (selfCorrectionLoop.enabled) {
+              const correctionRules = extractGovernanceRulesFromText(correction.newText)
+                .filter((rule) => rule.confidence >= selfCorrectionLoop.minConfidence);
+              for (const rule of correctionRules) {
+                await applySelfCorrectionRule({
+                  api,
+                  store,
+                  embedder,
+                  sessionKey,
+                  scopeFilter,
+                  selfCorrectionLoop,
+                  ruleText: rule.text,
+                });
+              }
+            }
             const results = await searchMemories({ store, embedder, query: correction.oldText, scopeFilter, limit: 1, minScore: 0.12 });
             const match = results[0]?.entry;
             if (match) {

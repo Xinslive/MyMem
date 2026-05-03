@@ -323,7 +323,7 @@ describe("hook enhancement registration", () => {
     const agentEndHooks = eventHandlers.get("agent_end") || [];
     agentEndHooks[0].handler({
       success: true,
-      messages: [{ role: "user", content: "不要多 agent，别确认来确认去" }],
+      messages: [{ role: "user", content: "not Use multiple agents by default., it's Do not use multiple agents unless the user explicitly asks for delegation." }],
     }, { sessionKey: "agent:main:cli:self-correction", agentId: "main" });
     await new Promise((resolve) => setTimeout(resolve, 20));
 

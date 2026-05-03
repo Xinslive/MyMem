@@ -93,6 +93,7 @@ for (const key of [
   "tuningPreset",
   "telemetry",
   "smartExtraction",
+  "captureMaxMessages",
   "extractMinMessages",
   "extractMaxChars",
   "llm",
@@ -135,6 +136,7 @@ assertSchemaDefault("feedbackLoop.preventiveLessons.confirmedConfidence", 0.72);
 assertSchemaDefault("feedbackLoop.preventiveLessons.maxLearnPerScan", 3);
 assertSchemaDefault("autoCapture", true);
 assertSchemaDefault("captureAssistantAgents", ["main"]);
+assertSchemaDefault("captureMaxMessages", 10);
 assertSchemaDefault("sessionCompression.enabled", true);
 assertSchemaDefault("extractionThrottle.skipLowValue", true);
 assertSchemaDefault("embedding.chunking", true);
