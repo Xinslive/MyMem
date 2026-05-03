@@ -17,7 +17,8 @@ import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
 // ============================================================================
 
 export const SIMILARITY_THRESHOLD = 0.7;
-export const MAX_SIMILAR_FOR_PROMPT = 3;
+export const MAX_SIMILAR_FOR_PROMPT = 7;
+export const VECTOR_SEARCH_LIMIT = 10;
 
 /** Per-category similarity thresholds for dedup vector pre-filter. */
 export const CATEGORY_SIMILARITY_THRESHOLDS: Record<string, number> = {
@@ -68,11 +69,10 @@ export async function deduplicate(
   // Stage 1: Vector pre-filter — find similar active memories.
   // excludeInactive ensures the store over-fetches to fill N active slots,
   // preventing superseded history from crowding out the current fact.
-  const threshold = getSimilarityThreshold(candidate.category);
   const activeSimilar = await ctx.store.vectorSearch(
     candidateVector,
-    5,
-    threshold,
+    VECTOR_SEARCH_LIMIT,
+    SIMILARITY_THRESHOLD,
     scopeFilter,
     { excludeInactive: true },
   );
