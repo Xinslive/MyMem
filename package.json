@@ -1,6 +1,6 @@
 {
   "name": "mymem",
-  "version": "2026.5.1",
+  "version": "2026.5.3",
   "description": "OpenClaw enhanced LanceDB memory plugin with hybrid retrieval (Vector + BM25), cross-encoder rerank, multi-scope isolation, long-context chunking, and management CLI",
   "type": "module",
   "main": "index.ts",

@@ -2,7 +2,7 @@
   "id": "mymem",
   "name": "MyMem",
   "description": "Enhanced LanceDB-backed long-term memory with hybrid retrieval, multi-scope isolation, long-context chunking, and management CLI",
-  "version": "2026.5.1",
+  "version": "2026.5.3",
   "kind": "memory",
   "skills": [
     "./lesson"
