@@ -314,8 +314,8 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 100,
-        "default": 5,
-        "description": "Minimum conversation messages required before smart extraction runs."
+        "default": 8,
+        "description": "Minimum high-signal conversation messages required before smart extraction runs. Higher defaults reduce low-value automatic memories."
       },
       "extractMaxChars": {
         "type": "integer",
@@ -1188,7 +1188,7 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "Enable session compression before auto-capture extraction"
           },
           "minScoreToKeep": {
@@ -1207,8 +1207,8 @@
         "properties": {
           "skipLowValue": {
             "type": "boolean",
-            "default": false,
-            "description": "Skip extraction for conversations with estimated value < 0.2"
+            "default": true,
+            "description": "Skip extraction for conversations with estimated value < 0.2 unless they contain explicit capture triggers"
           },
           "maxExtractionsPerHour": {
             "type": "integer",
@@ -1498,7 +1498,7 @@
     },
     "smartExtraction": {
       "label": "Smart Extraction",
-      "help": "Enable LLM-powered 6-category memory extraction. Falls back to regex capture when off."
+      "help": "Enable LLM-powered 6-category memory extraction. Conservative defaults skip low-value conversations and fall back to regex capture only for explicit triggers."
     },
     "llm.apiKey": {
       "label": "LLM API Key",
@@ -1519,7 +1519,7 @@
     },
     "extractMinMessages": {
       "label": "Min Messages for Extraction",
-      "help": "Minimum conversation messages before smart extraction triggers",
+      "help": "Minimum high-signal conversation messages before smart extraction triggers. Default: 8.",
       "advanced": true
     },
     "extractMaxChars": {
@@ -1589,7 +1589,7 @@
     },
     "autoCapture": {
       "label": "Auto-Capture",
-      "help": "Automatically capture important information from conversations (enabled by default)"
+      "help": "Automatically capture important information from conversations. Conservative quality gates are enabled by default."
     },
     "autoRecall": {
       "label": "Auto-Recall",
@@ -1667,7 +1667,7 @@
     },
     "captureAssistant": {
       "label": "Capture Assistant Messages",
-      "help": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless captureAssistantAgents is set.",
+      "help": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless Assistant Capture Agents is set.",
       "advanced": true
     },
     "captureAssistantAgents": {
@@ -2047,7 +2047,7 @@
     },
     "sessionCompression.enabled": {
       "label": "Session Compression",
-      "help": "Score and compress conversation texts before auto-capture to prioritize high-signal content (corrections, decisions, tool calls)"
+      "help": "Score and compress conversation texts before auto-capture to prioritize high-signal content (corrections, decisions, explicit memory intent)"
     },
     "sessionCompression.minScoreToKeep": {
       "label": "Compression Min Score",
@@ -2056,7 +2056,7 @@
     },
     "extractionThrottle.skipLowValue": {
       "label": "Skip Low-Value Conversations",
-      "help": "Skip auto-capture for conversations estimated to have low memory value (< 0.2)"
+      "help": "Skip auto-capture for conversations estimated to have low memory value (< 0.2) unless they contain explicit capture triggers"
     },
     "extractionThrottle.maxExtractionsPerHour": {
       "label": "Max Extractions Per Hour",

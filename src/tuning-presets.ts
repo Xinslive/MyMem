@@ -33,7 +33,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     autoRecallMaxChars: 800,
     autoRecallPerItemMaxChars: 200,
     autoRecallCandidatePoolSize: 12,
-    extractMinMessages: 5,
+    extractMinMessages: 8,
     extractMaxChars: 8000,
     retrieval: {
       mode: "hybrid",
@@ -98,7 +98,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     autoRecallMaxChars: 420,
     autoRecallPerItemMaxChars: 140,
     autoRecallCandidatePoolSize: 6,
-    extractMinMessages: 3,
+    extractMinMessages: 8,
     extractMaxChars: 5000,
     retrieval: {
       mode: "hybrid",
@@ -228,7 +228,7 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     autoRecallMaxChars: 520,
     autoRecallPerItemMaxChars: 150,
     autoRecallCandidatePoolSize: 8,
-    extractMinMessages: 3,
+    extractMinMessages: 10,
     extractMaxChars: 7000,
     retrieval: {
       mode: "hybrid",

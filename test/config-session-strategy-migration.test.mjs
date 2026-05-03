@@ -69,7 +69,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.captureAssistant, false);
     assert.deepEqual(parsed.captureAssistantAgents, ["main"]);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
-    assert.equal(parsed.extractMinMessages, 5);
+    assert.equal(parsed.extractMinMessages, 8);
     assert.equal(parsed.llm?.model, undefined);
     assert.equal(parsed.llm?.baseURL, undefined);
     assert.equal(parsed.llm?.timeoutMs, 90000);
@@ -108,7 +108,9 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.minEvidenceToConfirm, 2);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.pendingConfidence, 0.45);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.confirmedConfidence, 0.72);
-    assert.equal(parsed.extractionThrottle?.skipLowValue, false);
+    assert.equal(parsed.sessionCompression?.enabled, true);
+    assert.equal(parsed.sessionCompression?.minScoreToKeep, 0.3);
+    assert.equal(parsed.extractionThrottle?.skipLowValue, true);
     assert.equal(parsed.extractionThrottle?.maxExtractionsPerHour, 0);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.enabled, true);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.preferDistilled, true);
@@ -134,6 +136,17 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     });
     assert.equal(global.captureAssistant, true);
     assert.deepEqual(global.captureAssistantAgents, ["main"]);
+  });
+
+  it("allows disabling conservative auto-capture gates explicitly", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      sessionCompression: { enabled: false },
+      extractionThrottle: { skipLowValue: false },
+    });
+
+    assert.equal(parsed.sessionCompression?.enabled, false);
+    assert.equal(parsed.extractionThrottle?.skipLowValue, false);
   });
 
   it("requires embedding baseURL and model", () => {
@@ -216,6 +229,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     });
     assert.equal(presetParsed.tuningPreset, "low-latency");
     assert.equal(presetParsed.autoRecallMaxItems, 4);
+    assert.equal(presetParsed.extractMinMessages, 8);
     assert.equal(presetParsed.retrieval?.candidatePoolSize, 8);
     assert.equal(presetParsed.memoryCompaction?.mergeMode, "deterministic");
 

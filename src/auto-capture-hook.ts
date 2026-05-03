@@ -17,6 +17,7 @@ import { isNoise } from "./noise-filter.js";
 import { isUserMdExclusiveMemory } from "./workspace-boundary.js";
 import { isExplicitRememberCommand, shouldSkipReflectionMessage, summarizeAgentEndMessages } from "./session-utils.js";
 import { buildSmartMetadata, stringifySmartMetadata, reverseMapLegacyCategory } from "./smart-metadata.js";
+import { compressTexts, estimateConversationValue } from "./session-compressor.js";
 import type { PluginConfig } from "./plugin-types.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ScopeManager } from "./scopes.js";
@@ -176,9 +177,39 @@ export function registerAutoCaptureHook(params: {
           return;
         }
 
-        let fallbackTexts = texts;
+        const hasExplicitCaptureSignal = texts.some((text) => shouldCapture(text) && !isNoise(text));
+        if (config.extractionThrottle?.skipLowValue === true) {
+          const estimatedValue = estimateConversationValue(texts);
+          if (estimatedValue < 0.2 && !hasExplicitCaptureSignal) {
+            api.logger.debug(
+              `mymem: auto-capture skipped low-value conversation for agent ${agentId} (value=${estimatedValue.toFixed(2)})`,
+            );
+            return;
+          }
+        }
+
+        let extractionTexts = texts;
+        if (config.sessionCompression?.enabled === true && extractionTexts.length > 1) {
+          const compressed = compressTexts(
+            extractionTexts,
+            config.extractMaxChars ?? 8000,
+            { minScoreToKeep: config.sessionCompression.minScoreToKeep ?? 0.3 },
+          );
+          if (compressed.texts.length === 0) {
+            api.logger.debug(`mymem: auto-capture compression produced no extractable texts for agent ${agentId}`);
+            return;
+          }
+          if (compressed.dropped > 0) {
+            api.logger.debug(
+              `mymem: auto-capture compressed ${extractionTexts.length} text(s) to ${compressed.texts.length} for agent ${agentId} (${compressed.totalChars} chars)`,
+            );
+          }
+          extractionTexts = compressed.texts;
+        }
+
+        let fallbackTexts = extractionTexts;
         if (smartExtractor) {
-          const cleanTexts = await smartExtractor.filterNoiseByEmbedding(texts);
+          const cleanTexts = await smartExtractor.filterNoiseByEmbedding(extractionTexts);
           if (cleanTexts.length === 0) {
             api.logger.debug(`mymem: all texts filtered as embedding noise for agent ${agentId}`);
             return;

@@ -293,7 +293,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         timeoutMs: parsePositiveInt(raw.timeoutMs) ?? 90000,
       } as PluginConfig["llm"];
     })(),
-    extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 5,
+    extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 8,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as PluginConfig["scopes"] : undefined,
     enableManagementTools: cfg.enableManagementTools !== false,
@@ -459,24 +459,24 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       typeof cfg.sessionCompression === "object" && cfg.sessionCompression !== null
         ? {
             enabled:
-              (cfg.sessionCompression as Record<string, unknown>).enabled === true,
+              (cfg.sessionCompression as Record<string, unknown>).enabled !== false,
             minScoreToKeep:
               typeof (cfg.sessionCompression as Record<string, unknown>).minScoreToKeep === "number"
                 ? ((cfg.sessionCompression as Record<string, unknown>).minScoreToKeep as number)
                 : 0.3,
           }
-        : { enabled: false, minScoreToKeep: 0.3 },
+        : { enabled: true, minScoreToKeep: 0.3 },
     extractionThrottle:
       typeof cfg.extractionThrottle === "object" && cfg.extractionThrottle !== null
         ? {
             skipLowValue:
-              (cfg.extractionThrottle as Record<string, unknown>).skipLowValue === true,
+              (cfg.extractionThrottle as Record<string, unknown>).skipLowValue !== false,
             maxExtractionsPerHour:
               typeof (cfg.extractionThrottle as Record<string, unknown>).maxExtractionsPerHour === "number"
                 ? ((cfg.extractionThrottle as Record<string, unknown>).maxExtractionsPerHour as number)
                 : 0,
           }
-        : { skipLowValue: false, maxExtractionsPerHour: 0 },
+        : { skipLowValue: true, maxExtractionsPerHour: 0 },
     feedbackLoop: normalizeFeedbackLoopConfig(cfg.feedbackLoop),
     recallPrefix:
       typeof cfg.recallPrefix === "object" && cfg.recallPrefix !== null

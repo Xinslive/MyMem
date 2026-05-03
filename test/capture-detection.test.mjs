@@ -19,6 +19,17 @@ describe("shouldCapture", () => {
     assert.ok(shouldCapture("记住我的邮箱是 test@example.com"));
   });
 
+  it("skips broad request phrases that are not durable memories", () => {
+    assert.ok(!shouldCapture("帮我看一下这个报错"));
+    assert.ok(!shouldCapture("I need help debugging this test"));
+    assert.ok(!shouldCapture("This is important for the current task"));
+  });
+
+  it("skips recall questions with remember wording", () => {
+    assert.ok(!shouldCapture("Do you remember what I like?"));
+    assert.ok(!shouldCapture("你还记得我喜欢什么吗？"));
+  });
+
   it("skips short messages", () => {
     assert.ok(!shouldCapture("hi"));
     assert.ok(!shouldCapture("ok"));

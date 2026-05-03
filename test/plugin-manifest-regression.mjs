@@ -108,7 +108,7 @@ for (const pathExpression of ["llm.auth", "llm.oauthPath", "llm.oauthProvider"])
 }
 
 assertSchemaDefault("autoRecallMinRepeated", 8);
-assertSchemaDefault("extractMinMessages", 5);
+assertSchemaDefault("extractMinMessages", 8);
 assertSchemaDefault("sessionStrategy", "memoryReflection");
 assertSchemaDefault("autoRecall", true);
 assertSchemaDefault("autoRecallMinLength", 6);
@@ -134,6 +134,9 @@ assertSchemaDefault("feedbackLoop.preventiveLessons.pendingConfidence", 0.45);
 assertSchemaDefault("feedbackLoop.preventiveLessons.confirmedConfidence", 0.72);
 assertSchemaDefault("feedbackLoop.preventiveLessons.maxLearnPerScan", 3);
 assertSchemaDefault("autoCapture", true);
+assertSchemaDefault("captureAssistantAgents", ["main"]);
+assertSchemaDefault("sessionCompression.enabled", true);
+assertSchemaDefault("extractionThrottle.skipLowValue", true);
 assertSchemaDefault("embedding.chunking", true);
 assert.equal(schemaAt("embedding.omitDimensions").type, "boolean", "embedding.omitDimensions should be declared in the plugin schema");
 assertSchemaDefault("sessionMemory.enabled", false);

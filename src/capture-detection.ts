@@ -11,7 +11,9 @@ import { isNoise } from "./noise-filter.js";
  * Patterns that indicate a message should be captured as memory.
  */
 const MEMORY_TRIGGERS = [
-  /zapamatuj si|pamatuj|remember/i,
+  /zapamatuj si|pamatuj/i,
+  /\b(?:please\s+)?remember\s+(?:that|this|my|our|to)\b/i,
+  /\b(?:don'?t forget|note that|keep in mind)\b/i,
   /preferuji|radši|nechci|prefer/i,
   /rozhodli jsme|budeme používat/i,
   /\b(we )?decided\b|we'?ll use|we will use|switch(ed)? to|migrate(d)? to|going forward|from now on/i,
@@ -19,8 +21,7 @@ const MEMORY_TRIGGERS = [
   /[\w.-]+@[\w.-]+\.\w+/,
   /můj\s+\w+\s+je|je\s+můj/i,
   /my\s+\w+\s+is|is\s+my/i,
-  /i (like|prefer|hate|love|want|need|care)/i,
-  /always|never|important/i,
+  /i (like|prefer|hate|love)\b/i,
   // Chinese triggers (Traditional & Simplified)
   /記住|记住|記一下|记一下|別忘了|别忘了|備註|备注/,
   /偏好|喜好|喜歡|喜欢|討厭|讨厌|不喜歡|不喜欢|愛用|爱用|習慣|习惯/,
@@ -28,7 +29,7 @@ const MEMORY_TRIGGERS = [
   /我的\S+是|叫我|稱呼|称呼/,
   /老是|講不聽|總是|总是|從不|从不|一直|每次都/,
   /重要|關鍵|关键|注意|千萬別|千万别/,
-  /幫我|筆記|存檔|存起來|存一下|重點|原則|底線/,
+  /筆記|笔记|存檔|存档|存起來|存起来|存一下|重點|重点|原則|原则|底線|底线/,
 ];
 
 /**
@@ -84,6 +85,15 @@ export function shouldCapture(text: string): boolean {
 
   // Exclude obvious memory-management prompts
   if (CAPTURE_EXCLUDE_PATTERNS.some((r) => r.test(s))) return false;
+
+  // Exclude recall questions that contain words like "remember" but are asking
+  // for retrieval rather than adding new information.
+  if (
+    /\b(?:do you|can you|could you)\s+remember\b/i.test(s) ||
+    /(?:你|妳|还|還).{0,6}(记得|記得|知道).{0,20}[吗嗎么嘛?？]/.test(s)
+  ) {
+    return false;
+  }
 
   return MEMORY_TRIGGERS.some((r) => r.test(s));
 }
