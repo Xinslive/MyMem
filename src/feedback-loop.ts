@@ -104,7 +104,6 @@ export interface FeedbackLoopStatus {
 }
 
 const FEEDBACK_SCAN_INTERVAL_MS = 300_000; // 5 minutes
-const PREVENTIVE_LESSON_ERROR_AREAS = ["extraction", "admission"];
 
 export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
   enabled: true,
@@ -442,6 +441,7 @@ export class FeedbackLoop {
   onAdmissionRejected(entry: AdmissionRejectionAuditEntry): void {
     void entry;
     if (this.disposed || !this.config.enabled) return;
+    this.debugLog("feedback-loop: onAdmissionRejected called (intentional no-op; prior adaptation uses timer-based audit scan)");
   }
 
   /** Record an admitted memory by category for prior adaptation. */
@@ -456,7 +456,7 @@ export class FeedbackLoop {
 
   onSelfImprovementError(params: { summary: string; details?: string; area?: string }): void {
     if (this.disposed || !this.config.enabled) return;
-    if (this.config.preventiveLessons.fromErrors && PREVENTIVE_LESSON_ERROR_AREAS.includes(params.area ?? "")) {
+    if (this.config.preventiveLessons.fromErrors) {
       this.onPreventiveLessonEvidence({
         summary: params.summary,
         details: params.details,
@@ -502,7 +502,6 @@ export class FeedbackLoop {
         if (processed >= maxPerScan) break;
         const lessonProcessed = this.processedPreventiveLessonErrors.has(entry.id);
         if (lessonProcessed) continue;
-        if (!PREVENTIVE_LESSON_ERROR_AREAS.some((a) => entry.area.toLowerCase().includes(a))) continue;
 
         this.onPreventiveLessonEvidence({
           summary: entry.summary,
@@ -758,7 +757,6 @@ export class FeedbackLoop {
       } else {
         await this.drainPreventiveLessonBuffer();
       }
-      await this.drainPreventiveLessonBuffer();
     } catch {
       // Non-critical: swallow
     }

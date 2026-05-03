@@ -49,6 +49,12 @@ function createStore(rows) {
     async list() {
       return rows;
     },
+    async store(entry) {
+      const id = `created-${stored.length + 1}`;
+      const full = { ...entry, id, timestamp: Date.now() };
+      stored.push(full);
+      return full;
+    },
     async update(id, patch) {
       updates.push({ id, patch });
       return { id, ...patch };
@@ -56,8 +62,16 @@ function createStore(rows) {
   };
 }
 
+function makeEmbedder() {
+  return {
+    async embedPassage(text) {
+      return [0.1, 0.2, 0.3];
+    },
+  };
+}
+
 describe("experience compiler", () => {
-  it("skips new strategy memories when no existing compiled strategy exists", async () => {
+  it("skips new strategy when no embedder is provided", async () => {
     const now = Date.now();
     const rows = [
       makeEntry({
@@ -170,5 +184,49 @@ describe("experience compiler", () => {
 
     assert.equal(result.created, 0);
     assert.equal(store.stored.length, 0);
+  });
+
+  it("creates new strategy entry when embedder is provided and no existing compiled strategy exists", async () => {
+    const now = Date.now();
+    const rows = [
+      makeEntry({
+        id: "case-1",
+        text: "Run the failing test first, then patch the parser, then verify with the focused suite.",
+        memoryCategory: "cases",
+        timestamp: now - 10_000,
+        metadata: { source_session: "sess-create" },
+      }),
+      makeEntry({
+        id: "event-1",
+        text: "The fix is working and the targeted regression test passed.",
+        memoryCategory: "events",
+        timestamp: now - 5_000,
+        metadata: { source_session: "sess-create" },
+      }),
+    ];
+    const store = createStore(rows);
+    const embedder = makeEmbedder();
+
+    const result = await runExperienceCompiler(
+      { store, embedder },
+      { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
+      {
+        sessionKey: "sess-create",
+        conversation: "assistant: Run the failing test first. assistant: Patch the parser. assistant: Verify the focused suite. assistant: The fix is working and passed.",
+      },
+    );
+
+    assert.equal(result.created, 1);
+    assert.equal(result.skipped, 0);
+    assert.equal(store.stored.length, 1);
+    assert.equal(store.updates.length, 0);
+
+    const created = store.stored[0];
+    assert.equal(created.category, "other");
+    assert.equal(created.scope, "global");
+    const meta = JSON.parse(created.metadata);
+    assert.equal(meta.compiled_strategy, true);
+    assert.equal(meta.memory_category, "patterns");
+    assert.equal(meta.state, "confirmed");
   });
 });

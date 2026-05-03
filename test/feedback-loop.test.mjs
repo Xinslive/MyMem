@@ -698,7 +698,7 @@ Test
   }
 });
 
-it("scanErrorFile: skips non-matching area", async () => {
+it("scanErrorFile: processes errors regardless of area", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     admissionController: null,
@@ -718,6 +718,7 @@ UI related error
     await loop.scanErrorFile(dir);
     assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
     assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
+    assert.ok(lessonStore.entries.size > 0, "lesson should be created for any area");
   } finally {
     rmSync(dir, { recursive: true, force: true });
     loop.dispose();

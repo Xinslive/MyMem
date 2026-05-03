@@ -479,12 +479,13 @@ async function applySelfCorrectionRule(params: {
     }
   }
 
-  if (results[0]?.entry) {
-    const topMeta = parseSmartMetadata(results[0].entry.metadata, results[0].entry);
-    await params.store.patchMetadata(results[0].entry.id, {
-      bad_recall_count: Number(topMeta.bad_recall_count || 0) + 1,
+  const targetEntry = conflicting?.entry ?? results[0]?.entry;
+  if (targetEntry) {
+    const targetMeta = parseSmartMetadata(targetEntry.metadata, targetEntry);
+    await params.store.patchMetadata(targetEntry.id, {
+      bad_recall_count: Number(targetMeta.bad_recall_count || 0) + 1,
       ...buildRecallSuppressionPatch({
-        metadata: topMeta,
+        metadata: targetMeta,
         sessionKey: params.sessionKey,
         currentTurn: 0,
         suppressTurns: params.selfCorrectionLoop.suppressTurns,

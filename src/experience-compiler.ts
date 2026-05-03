@@ -21,11 +21,11 @@ import {
 type CompilerStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
   update(id: string, updates: { metadata?: string }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
+  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
 };
 
 export interface ExperienceCompilerDeps {
   store: CompilerStore;
-  /** Kept for call-site compatibility; compilation is update-only and does not embed new records. */
   embedder?: Pick<Embedder, "embedPassage">;
   logger?: Pick<Logger, "info" | "warn" | "debug">;
 }
@@ -302,7 +302,47 @@ export async function runExperienceCompiler(
       continue;
     }
 
-    result.skipped++;
+    // Create new strategy entry
+    if (deps.embedder) {
+      const now = Date.now();
+      const vector = await deps.embedder.embedPassage(strategy.content);
+      const strategyFields = buildReasoningStrategyFields({
+        kind: strategy.strategyKind,
+        outcome: strategy.outcome,
+        title: strategy.strategyTitle,
+        steps: strategy.strategySteps,
+        description: strategy.strategyDescription,
+        failureMode: strategy.failureMode,
+        prevention: strategy.outcome !== "success" ? strategy.strategySteps.join(" ") : undefined,
+        successSignal: strategy.successSignal,
+      });
+      await deps.store.store({
+        text: strategy.content,
+        vector,
+        category: "other",
+        scope: strategy.scope,
+        importance: strategy.confidence,
+        metadata: stringifySmartMetadata(buildSmartMetadata(
+          { text: strategy.content, category: "other", importance: strategy.confidence, timestamp: now } as MemoryEntry,
+          {
+            ...strategyFields,
+            compiled_strategy: true,
+            memory_category: "patterns",
+            canonical_id: strategy.canonicalId,
+            compiled_from_case_ids: strategy.caseIds,
+            source_reason: "experience_compiler",
+            evidence_count: 1,
+            last_evidence_at: now,
+            confidence: strategy.confidence,
+            state: "confirmed",
+            memory_layer: "working",
+          },
+        )),
+      });
+      result.created++;
+    } else {
+      result.skipped++;
+    }
   }
 
   deps.logger?.info?.(
