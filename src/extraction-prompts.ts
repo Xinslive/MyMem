@@ -34,10 +34,13 @@ ${conversationText}
 - System/platform metadata: message IDs, sender IDs, timestamps, channel info, JSON envelopes (e.g. "System: [timestamp] Feishu...", "message_id", "sender_id", "ou_xxx") — these are infrastructure noise, NEVER extract them
 - Temporary information: One-time questions or conversations
 - Vague information: "User has questions about a feature" (no specific details)
-- Tool output, error logs, or boilerplate
+- Tool output, error logs, or boilerplate — including raw error messages, stack traces, API responses, JSON payloads, or log lines that appear in the conversation
 - Runtime scaffolding or orchestration wrappers such as "[Subagent Context]", "[Subagent Task]", bootstrap wrappers, task envelopes, or agent instructions — these are execution metadata, NEVER store them as memories
 - Recall queries / meta-questions: "Do you remember X?", "你还记得X吗?", "你知道我喜欢什么吗" — these are retrieval requests, NOT new information to store
 - Degraded or incomplete references: If the user mentions something vaguely ("that thing I said"), do NOT invent details or create a hollow memory
+- Code snippets or file content that happened to appear in the conversation (e.g. from a failed Read tool call) — these are NOT memories, they are transient tool artifacts
+- Error-failure pairs where the "solution" is generic advice (e.g. "retry the step", "check the error") rather than a specific, reusable fix
+- Raw error messages or stack traces without added insight — the error itself is ephemeral; only a genuine lesson about WHY it happened and HOW to prevent it is worth storing
 
 # Memory Classification
 
@@ -130,7 +133,9 @@ For each candidate memory, judge whether it is truly worth long-term storage.
 - Vague generalizations without specific details (e.g., "user asked about a feature")
 - Information that will be obsolete within days (temporary schedules, fleeting context)
 - Low-signal restatements of things already clearly implied by the conversation
-- Tool output, error logs, boilerplate, or system metadata
+- Tool output, error logs, boilerplate, system metadata, or raw code snippets that appeared in the conversation
+- Content that is just a truncated file snippet, stack trace, or API response — even if it contains words like "error" or "failed"
+- Problem-solution pairs where the "solution" is generic boilerplate advice rather than a specific reusable fix
 
 Be strict: when in doubt, set worth_storing to false. Only extract memories that a personal assistant would genuinely need to recall in a future session weeks later.
 
@@ -271,11 +276,19 @@ A preventive lesson is worth creating when:
 - The failure pattern is likely to recur in future sessions
 - The lesson contains concrete, actionable prevention steps
 - It captures a non-obvious pitfall that would otherwise be forgotten
+- The summary describes a real error or failure (not just unexpected tool output)
+- The details explain WHY the failure happened (root cause, not raw content)
+- The prevention is specific to this failure mode (not generic advice)
 
 A preventive lesson is NOT worth creating when:
 - It is a one-off transient issue unlikely to recur
 - The evidence is too vague or generic to be actionable
 - An existing lesson already covers this pattern adequately
+- The details contain raw code fragments, file content, or tool output snippets instead of an actual error description
+- The summary is just a truncated snippet of tool output (e.g. code lines, JSON, log lines) rather than a meaningful error summary
+- The prevention is boilerplate/template text (e.g. "inspect the exact error text, retry only the narrow failing step") that applies to any error and provides no specific guidance
+- The "error" is actually the tool returning unexpected but valid content (e.g. a Read tool returning file content that happens to contain the word "error")
+- The evidence is just a raw error message or stack trace with no added analysis or lesson
 
 Return JSON only:
 {
