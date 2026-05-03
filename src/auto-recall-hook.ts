@@ -27,6 +27,7 @@ import type { ScopeManager } from "./scopes.js";
 import type { MemoryStore } from "./store.js";
 import type { MemoryRetriever, RetrievalContext, RetrievalResult } from "./retriever.js";
 import { recordInjectedMemoriesForEnhancements, type HookEnhancementState } from "./hook-enhancements.js";
+import { isRecallSuppressedForSession } from "./recall-suppression.js";
 
 interface RecallResult {
   entry: {
@@ -514,7 +515,7 @@ export function registerAutoRecallHook(params: {
           api.logger.debug("mymem: governance: filtered id=" + r.entry.id + " reason=layer(" + meta.memory_layer + ") score=" + (r.score ? r.score.toFixed(3) : "?") + " text=" + r.entry.text.slice(0, 50));
           return false;
         }
-        if (meta.suppressed_until_turn > 0 && currentTurn <= meta.suppressed_until_turn) {
+        if (isRecallSuppressedForSession(meta, { sessionKey, currentTurn })) {
           suppressedFilteredCount++;
           return false;
         }

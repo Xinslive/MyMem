@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./smart-metadata.js";
+import { hasActiveRecallSuppression } from "./recall-suppression.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -1299,7 +1300,7 @@ export class MemoryStore {
       const tier = String(meta.memory_tier || meta.memory_layer || "unknown");
       tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
       if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
-      if (Number(meta.suppressed_until_turn || 0) > 0) suppressed++;
+      if (hasActiveRecallSuppression(meta)) suppressed++;
       if (typeof meta.confidence === "number" && meta.confidence < 0.4) lowConfidence++;
     }
 

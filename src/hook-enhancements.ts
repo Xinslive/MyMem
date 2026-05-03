@@ -24,6 +24,10 @@ import {
   inferGovernanceRuleFromMemory,
   rulesConflict,
 } from "./governance-rules.js";
+import {
+  buildRecallSuppressionPatch,
+  isRecallSuppressedForSession,
+} from "./recall-suppression.js";
 
 const MAX_TRACKED_SESSIONS = 200;
 const DEFAULT_CONTEXT_BUDGET_CHARS = 3_200;
@@ -48,6 +52,8 @@ type InjectedMemory = {
   category: string;
   injectedAt: number;
   source: InjectedSource;
+  sessionKey: string;
+  turn: number;
   ignoreCount?: number;
 };
 
@@ -292,8 +298,15 @@ function budgetBlock(block: string, maxChars: number): string {
   return kept.join("\n");
 }
 
-function isSuppressedForTurn(metadata: ReturnType<typeof parseSmartMetadata>, currentTurn: number): boolean {
-  return Number(metadata.suppressed_until_turn || 0) > 0 && currentTurn <= Number(metadata.suppressed_until_turn || 0);
+function isSuppressedForTurn(
+  metadata: ReturnType<typeof parseSmartMetadata>,
+  sessionKey: string,
+  currentTurn: number,
+): boolean {
+  return isRecallSuppressedForSession(metadata, {
+    sessionKey,
+    currentTurn,
+  });
 }
 
 function isPrimerPreferredMemory(result: MemorySearchResult): boolean {
@@ -307,14 +320,14 @@ function isPrimerPreferredMemory(result: MemorySearchResult): boolean {
     meta.memory_category === "patterns";
 }
 
-function sortPrimerResults(results: MemorySearchResult[], currentTurn: number): MemorySearchResult[] {
+function sortPrimerResults(results: MemorySearchResult[], sessionKey: string, currentTurn: number): MemorySearchResult[] {
   return [...results]
     .filter((result) => {
       const meta = parseSmartMetadata(result.entry.metadata, result.entry);
       return meta.state === "confirmed" &&
         meta.memory_layer !== "archive" &&
         meta.memory_layer !== "reflection" &&
-        !isSuppressedForTurn(meta, currentTurn);
+        !isSuppressedForTurn(meta, sessionKey, currentTurn);
     })
     .sort((a, b) => {
       const aPreferred = isPrimerPreferredMemory(a) ? 1 : 0;
@@ -359,15 +372,25 @@ async function patchBadRecall(params: {
   injected: InjectedMemory[];
   scopeFilter?: string[];
   reason: string;
+  currentTurn?: number;
+  suppressTurns?: number;
 }): Promise<void> {
   await Promise.allSettled(params.injected.slice(-8).map(async (item) => {
     const entry = await params.store.getById(item.id, params.scopeFilter);
     if (!entry) return;
     const meta = parseSmartMetadata(entry.metadata, entry);
     const badRecallCount = Number(meta.bad_recall_count || 0) + 1;
+    const suppressionPatch = badRecallCount >= 2 && item.source === "auto-recall"
+      ? buildRecallSuppressionPatch({
+          metadata: meta,
+          sessionKey: item.sessionKey,
+          currentTurn: params.currentTurn ?? item.turn,
+          suppressTurns: params.suppressTurns ?? 12,
+        })
+      : {};
     await params.store.patchMetadata(item.id, {
       bad_recall_count: badRecallCount,
-      suppressed_until_turn: Math.max(Number(meta.suppressed_until_turn || 0), badRecallCount >= 2 ? 12 : Number(meta.suppressed_until_turn || 0)),
+      ...suppressionPatch,
       last_bad_recall_at: Date.now(),
       last_bad_recall_reason: params.reason,
     }, params.scopeFilter);
@@ -460,7 +483,12 @@ async function applySelfCorrectionRule(params: {
     const topMeta = parseSmartMetadata(results[0].entry.metadata, results[0].entry);
     await params.store.patchMetadata(results[0].entry.id, {
       bad_recall_count: Number(topMeta.bad_recall_count || 0) + 1,
-      suppressed_until_turn: Math.max(Number(topMeta.suppressed_until_turn || 0), params.selfCorrectionLoop.suppressTurns),
+      ...buildRecallSuppressionPatch({
+        metadata: topMeta,
+        sessionKey: params.sessionKey,
+        currentTurn: 0,
+        suppressTurns: params.selfCorrectionLoop.suppressTurns,
+      }),
       last_bad_recall_at: Date.now(),
       last_bad_recall_reason: "self_correction_ambiguous",
     }, params.scopeFilter);
@@ -539,7 +567,14 @@ export function registerHookEnhancements(params: {
         const toSuppress = recentInjected.filter((m) => (m.ignoreCount || 0) >= 3);
         if (toSuppress.length > 0) {
           try {
-            await patchBadRecall({ store, injected: toSuppress, scopeFilter, reason: "recall_ignored" });
+            await patchBadRecall({
+              store,
+              injected: toSuppress,
+              scopeFilter,
+              reason: "recall_ignored",
+              currentTurn,
+              suppressTurns: getSelfCorrectionLoopConfig(config).suppressTurns,
+            });
           } catch (err) {
             api.logger.debug?.(`mymem: silent bad-recall patch failed: ${String(err)}`);
           }
@@ -564,7 +599,7 @@ export function registerHookEnhancements(params: {
       try {
         const primerQuery = `${SESSION_PRIMER_QUERY}; agent ${agentId}`;
         const searchResults = await searchMemories({ store, embedder, query: primerQuery, scopeFilter, limit: 8, minScore: 0.1 });
-        const sorted = sortPrimerResults(searchResults, currentTurn);
+        const sorted = sortPrimerResults(searchResults, sessionKey, currentTurn);
         const distilledResults = primerConfig.preferDistilled
           ? sorted.filter(isPrimerPreferredMemory).slice(0, 4)
           : sorted.slice(0, 4);
@@ -667,7 +702,14 @@ export function registerHookEnhancements(params: {
     void (async () => {
       try {
         if (enhancementEnabled(config, "badRecallFeedback") && session.injected.length > 0 && hasNegativeRecallSignal(`${userText}\n${text}`)) {
-          await patchBadRecall({ store, injected: session.injected, scopeFilter, reason: "negative_recall_signal" });
+          await patchBadRecall({
+            store,
+            injected: session.injected,
+            scopeFilter,
+            reason: "negative_recall_signal",
+            currentTurn: session.turnCount,
+            suppressTurns: getSelfCorrectionLoopConfig(config).suppressTurns,
+          });
         }
 
         const selfCorrectionLoop = getSelfCorrectionLoopConfig(config);
@@ -759,6 +801,8 @@ export function recordInjectedMemoriesForEnhancements(params: {
       category: entry.category,
       injectedAt,
       source: params.source ?? "auto-recall",
+      sessionKey: params.sessionKey,
+      turn: session.turnCount,
     })),
   ].slice(-24);
 }

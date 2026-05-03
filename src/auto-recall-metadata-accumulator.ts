@@ -16,14 +16,10 @@ type WarnLogger = {
 type PendingAutoRecallPatch = {
   baseInjectedCount: number;
   baseAccessCount: number;
-  baseBadRecallCount: number;
-  baseSuppressedUntilTurn: number;
   injectedDelta: number;
   accessDelta: number;
-  badRecallDelta: number;
   lastInjectedAt: number;
   lastAccessedAt: number;
-  suppressedUntilTurn: number;
   scopeFilter?: string[];
 };
 
@@ -41,12 +37,6 @@ export type AutoRecallMetadataAccumulatorOptions = {
 function countValue(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.floor(n);
-}
-
-function optionalTimestamp(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
   return Math.floor(n);
 }
 
@@ -75,8 +65,8 @@ export class AutoRecallMetadataAccumulator {
     items: AutoRecallMetadataItem[],
     options: {
       injectedAt: number;
-      currentTurn: number;
-      minRepeated: number;
+      currentTurn?: number;
+      minRepeated?: number;
       scopeFilter?: string[];
     },
   ): void {
@@ -88,44 +78,22 @@ export class AutoRecallMetadataAccumulator {
       const meta = item.meta;
       const baseInjectedCount = countValue(meta.injected_count);
       const baseAccessCount = countValue(meta.access_count);
-      const baseBadRecallCount = countValue(meta.bad_recall_count);
-      const baseSuppressedUntilTurn = countValue(meta.suppressed_until_turn);
-      const lastConfirmedUseAt = optionalTimestamp(meta.last_confirmed_use_at);
 
       const existing = this.pending.get(item.id);
       const record: PendingAutoRecallPatch = existing ?? {
         baseInjectedCount,
         baseAccessCount,
-        baseBadRecallCount,
-        baseSuppressedUntilTurn,
         injectedDelta: 0,
         accessDelta: 0,
-        badRecallDelta: 0,
         lastInjectedAt: options.injectedAt,
         lastAccessedAt: options.injectedAt,
-        suppressedUntilTurn: baseSuppressedUntilTurn,
         scopeFilter: cloneScopeFilter(options.scopeFilter),
       };
-      const priorInjectedAt = existing
-        ? record.lastInjectedAt
-        : optionalTimestamp(meta.last_injected_at);
-      const staleInjected = priorInjectedAt !== undefined &&
-        (lastConfirmedUseAt === undefined || lastConfirmedUseAt < priorInjectedAt);
-      const badRecallDelta = staleInjected ? 1 : 0;
 
       record.injectedDelta += 1;
       record.accessDelta += 1;
-      record.badRecallDelta += badRecallDelta;
       record.lastInjectedAt = Math.max(record.lastInjectedAt, options.injectedAt);
       record.lastAccessedAt = Math.max(record.lastAccessedAt, options.injectedAt);
-
-      const nextBadRecallCount = record.baseBadRecallCount + record.badRecallDelta;
-      if (nextBadRecallCount >= 3 && options.minRepeated > 0) {
-        record.suppressedUntilTurn = Math.max(
-          record.suppressedUntilTurn,
-          options.currentTurn + options.minRepeated,
-        );
-      }
 
       this.pending.set(item.id, record);
     }
@@ -160,8 +128,6 @@ export class AutoRecallMetadataAccumulator {
         patch: {
           injected_count: record.baseInjectedCount + record.injectedDelta,
           last_injected_at: record.lastInjectedAt,
-          bad_recall_count: record.baseBadRecallCount + record.badRecallDelta,
-          suppressed_until_turn: Math.max(record.baseSuppressedUntilTurn, record.suppressedUntilTurn),
           access_count: record.baseAccessCount + record.accessDelta,
           last_accessed_at: record.lastAccessedAt,
         },

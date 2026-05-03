@@ -110,7 +110,7 @@ function createContext() {
         memoryCategoryCounts: { preferences: 1, profile: 1 },
         recentActivity: { last24h: 2, last7d: 2, last30d: 2 },
         tierDistribution: { durable: 1, working: 1 },
-        healthSignals: { badRecall: 1, suppressed: 1, lowConfidence: 1 },
+        healthSignals: { badRecall: 1, suppressed: 0, lowConfidence: 1 },
       }),
       list: async (_scopeFilter, category, limit = 20, offset = 0) => {
         const filtered = category ? entries.filter((item) => item.category === category) : entries;
@@ -266,7 +266,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(lowConfidenceMemories.statusCode, 200);
     assert.equal(lowConfidenceMemories.body.filters.qualityLabel, "低置信");
     assert.deepEqual(lowConfidenceMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
-    assert.deepEqual(lowConfidenceMemories.body.memories[0].qualityFlags.sort(), ["bad_recall", "low_confidence", "suppressed"]);
+    assert.deepEqual(lowConfidenceMemories.body.memories[0].qualityFlags.sort(), ["bad_recall", "low_confidence"]);
 
     const explain = await requestJson(server.url + "/api/explain?query=dashboard&limit=3");
     assert.equal(explain.statusCode, 200);

@@ -11,6 +11,7 @@ import {
   reverseMapLegacyCategory,
   type SmartMemoryMetadata,
 } from "./smart-metadata.js";
+import { hasActiveRecallSuppression } from "./recall-suppression.js";
 import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 import type { FeedbackLoopStatus } from "./feedback-loop.js";
@@ -486,7 +487,7 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
   const memoryType = String(meta.memory_type || "knowledge");
   const qualityFlags: DashboardQualityFilter[] = [];
   if (Number(meta.bad_recall_count || 0) > 0) qualityFlags.push("bad_recall");
-  if (Number(meta.suppressed_until_turn || 0) > 0) qualityFlags.push("suppressed");
+  if (hasActiveRecallSuppression(meta)) qualityFlags.push("suppressed");
   if (typeof meta.confidence === "number" && meta.confidence < 0.4) qualityFlags.push("low_confidence");
   if (status !== "active") qualityFlags.push("inactive");
   return {
@@ -1273,16 +1274,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     body[data-view="dashboard"] .memory-filter {
       display: none;
     }
-    .quality-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 14px;
-    }
-    .quality-filter {
-      min-width: 126px;
-    }
     .masonry-list {
       column-count: 3;
       column-gap: 12px;
@@ -1311,6 +1302,9 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     .memory-head-actions .memory-filter {
       min-width: 112px;
       max-width: 140px;
+    }
+    .memory-head-actions .quality-filter {
+      min-width: 126px;
     }
     .memory-item {
       position: relative;
@@ -1618,9 +1612,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         flex: 1 1 130px;
         max-width: none;
       }
-      .quality-filter {
-        flex: 1 1 140px;
-      }
       .memory-head-actions #memoryCount {
         flex: 1 1 100%;
       }
@@ -1765,11 +1756,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
                 <option value="cases">案例经验</option>
                 <option value="patterns">行为模式</option>
               </select>
-              <span class="subtle" id="memoryCount">--</span>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="quality-strip" aria-label="质量筛选">
               <select class="memory-filter quality-filter" id="qualityFilter" aria-label="质量筛选">
                 <option value="">全部质量</option>
                 <option value="bad_recall">差召回</option>
@@ -1777,7 +1763,10 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
                 <option value="low_confidence">低置信</option>
                 <option value="inactive">非有效</option>
               </select>
+              <span class="subtle" id="memoryCount">--</span>
             </div>
+          </div>
+          <div class="panel-body">
             <div class="masonry-list" id="masonryMemories"></div>
             <div class="memories-controls">
               <span class="subtle" id="memoryLoadHint">按当前筛选加载</span>
@@ -1840,7 +1829,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
 
     function retrievalModeLabel(mode) {
       return ({
-        hybrid: "混合",
+        hybrid: "混合检索",
         vector: "向量",
         bm25: "关键词",
         keyword: "关键词",

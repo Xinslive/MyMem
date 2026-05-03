@@ -201,15 +201,13 @@ describe("auto-recall metadata write-behind", () => {
       patch: {
         injected_count: 4,
         last_injected_at: 1_500,
-        bad_recall_count: 3,
-        suppressed_until_turn: 19,
         access_count: 7,
         last_accessed_at: 1_500,
       },
     }]);
   });
 
-  it("treats a pending unconfirmed injection as stale within the debounce window", async () => {
+  it("does not mark repeated unconfirmed injections as bad recall", async () => {
     const patches = [];
     const accumulator = new AutoRecallMetadataAccumulator({
       store: {
@@ -243,7 +241,8 @@ describe("auto-recall metadata write-behind", () => {
     await accumulator.flushNow();
 
     assert.equal(patches[0][0].patch.injected_count, 2);
-    assert.equal(patches[0][0].patch.bad_recall_count, 1);
+    assert.equal(Object.hasOwn(patches[0][0].patch, "bad_recall_count"), false);
+    assert.equal(Object.hasOwn(patches[0][0].patch, "suppressed_until_turn"), false);
   });
 
   it("session_end flushes pending auto-recall metadata", async () => {
@@ -701,11 +700,11 @@ describe("real before_prompt_build hook", () => {
 
   it("passes the auto-recall candidate pool cap to retrieval", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-candidate-pool-"));
-    let retrieveParams;
+    const retrieveParams = [];
 
     const retriever = {
       async retrieve(params) {
-        retrieveParams = params;
+        retrieveParams.push(params);
         return [];
       },
       getLastDiagnostics() {
@@ -754,10 +753,11 @@ describe("real before_prompt_build hook", () => {
         { sessionId: "test-pool", sessionKey: "agent:main:session:test-pool" },
       );
 
-      assert.equal(retrieveParams.limit, 6);
-      assert.equal(retrieveParams.candidatePoolSize, 6);
-      assert.equal(retrieveParams.overFetchMultiplier, 4);
-      assert.equal(retrieveParams.source, "auto-recall");
+      const generalRetrieve = retrieveParams.find((params) => params.overFetchMultiplier === 4);
+      assert.ok(generalRetrieve, "expected general auto-recall retrieval");
+      assert.equal(generalRetrieve.limit, 6);
+      assert.equal(generalRetrieve.candidatePoolSize, 6);
+      assert.equal(generalRetrieve.source, "auto-recall");
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;
@@ -819,7 +819,7 @@ describe("real before_prompt_build hook", () => {
         { sessionId: "test-empty", sessionKey: "agent:main:session:test-empty" },
       );
 
-      assert.equal(retrieveCalls, 1);
+      assert.equal(retrieveCalls, 2);
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;
@@ -882,7 +882,7 @@ describe("real before_prompt_build hook", () => {
         { sessionId: "test-retry", sessionKey: "agent:main:session:test-retry" },
       );
 
-      assert.equal(retrieveCalls, 2);
+      assert.equal(retrieveCalls, 3);
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;
@@ -1059,7 +1059,7 @@ describe("real before_prompt_build hook", () => {
 
       assert.ok(first?.prependContext?.includes("shared memory should be available"));
       assert.ok(second?.prependContext?.includes("shared memory should be available"));
-      assert.equal(retrieveCalls, 2);
+      assert.equal(retrieveCalls, 4);
       assert.equal(turnCounter.get("sessionKey:agent:main:session:one"), 1);
       assert.equal(turnCounter.get("sessionKey:agent:main:session:two"), 1);
       assert.ok(recallHistory.get("sessionKey:agent:main:session:one")?.has("shared-memory-1"));
@@ -1067,6 +1067,89 @@ describe("real before_prompt_build hook", () => {
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores legacy turn-only suppression metadata during auto-recall", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-legacy-suppression-"));
+    const memoryResult = {
+      entry: {
+        id: "legacy-suppressed-memory",
+        text: "legacy turn-only suppression should not hide this memory",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          l0_abstract: "legacy turn-only suppression should not hide this memory",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          injected_count: 0,
+          bad_recall_count: 1,
+          suppressed_until_turn: 12,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+    const store = {
+      async patchMetadataBatch() {
+        return 0;
+      },
+    };
+    const retriever = {
+      async retrieve() {
+        return [memoryResult];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMinRepeated: 8,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store,
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+
+      const [{ handler: autoRecallHook }] = harness.eventHandlers.get("before_prompt_build") || [];
+      const output = await autoRecallHook(
+        { prompt: "Please recall legacy suppression behavior.", sessionKey: "agent:main:session:legacy-suppressed" },
+        { sessionKey: "agent:main:session:legacy-suppressed", agentId: "main" },
+      );
+
+      assert.match(output.prependContext, /legacy turn-only suppression should not hide this memory/);
+    } finally {
       rmSync(workspaceDir, { recursive: true, force: true });
     }
   });

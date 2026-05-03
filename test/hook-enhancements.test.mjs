@@ -296,6 +296,53 @@ describe("hook enhancement registration", () => {
 
     assert.equal(store.patches[0].id, "mem-1");
     assert.equal(store.patches[0].patch.bad_recall_count, 1);
+    assert.equal(Object.hasOwn(store.patches[0].patch, "suppressed_until_turn"), false);
+  });
+
+  it("suppresses auto-recalled memories only after repeated negative feedback", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const mem = makeMemoryEntry({
+      id: "mem-1",
+      text: "old memory",
+      category: "decision",
+      memoryCategory: "patterns",
+      metadata: { bad_recall_count: 1 },
+    });
+    const store = createStore({ byId: { "mem-1": mem } });
+    const state = createHookEnhancementState();
+    registerHookEnhancements({
+      api,
+      config: baseConfig(),
+      store,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+      state,
+    });
+
+    const promptHooks = eventHandlers.get("before_prompt_build") || [];
+    await promptHooks[0].handler(
+      { prompt: "work on the active task" },
+      { sessionKey: "agent:main:cli:session-2b", agentId: "main" },
+    );
+    recordInjectedMemoriesForEnhancements({
+      state,
+      sessionKey: "agent:main:cli:session-2b",
+      source: "auto-recall",
+      memories: [{ id: "mem-1", text: "old memory", scope: "global", category: "decision" }],
+    });
+
+    const agentEndHooks = eventHandlers.get("agent_end") || [];
+    agentEndHooks[0].handler({
+      success: true,
+      messages: [{ role: "user", content: "that recall was wrong and irrelevant" }],
+    }, { sessionKey: "agent:main:cli:session-2b", agentId: "main" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(store.patches[0].id, "mem-1");
+    assert.equal(store.patches[0].patch.bad_recall_count, 2);
+    assert.equal(store.patches[0].patch.suppressed_session_key, "agent:main:cli:session-2b");
+    assert.equal(store.patches[0].patch.suppressed_until_turn, 13);
+    assert.ok(store.patches[0].patch.suppressed_until_at > Date.now());
   });
 
   it("updates self-correction rules in place for conflicting workflow guidance", async () => {

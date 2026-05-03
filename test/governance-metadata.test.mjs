@@ -10,6 +10,11 @@ const {
 const {
   extractGovernanceRulesFromText,
 } = jiti("../src/governance-rules.ts");
+const {
+  buildRecallSuppressionPatch,
+  hasActiveRecallSuppression,
+  isRecallSuppressedForSession,
+} = jiti("../src/recall-suppression.ts");
 
 describe("governance metadata compatibility", () => {
   it("fills governance defaults for legacy metadata", () => {
@@ -71,6 +76,49 @@ describe("governance metadata compatibility", () => {
     assert.equal(patched.injected_count, 3);
     assert.equal(patched.bad_recall_count, 0);
     assert.equal(patched.last_confirmed_use_at, 1710000001234);
+  });
+});
+
+describe("recall suppression metadata", () => {
+  it("does not treat legacy turn-only suppression as active", () => {
+    const meta = {
+      suppressed_until_turn: 12,
+    };
+
+    assert.equal(hasActiveRecallSuppression(meta, 1_000), false);
+    assert.equal(isRecallSuppressedForSession(meta, {
+      sessionKey: "agent:main:session:test",
+      currentTurn: 1,
+      now: 1_000,
+    }), false);
+  });
+
+  it("requires matching session and a live expiry window", () => {
+    const patch = buildRecallSuppressionPatch({
+      metadata: {},
+      sessionKey: "agent:main:session:test",
+      currentTurn: 3,
+      suppressTurns: 8,
+      now: 1_000,
+    });
+
+    assert.equal(hasActiveRecallSuppression(patch, 1_500), true);
+    assert.equal(isRecallSuppressedForSession(patch, {
+      sessionKey: "agent:main:session:test",
+      currentTurn: 11,
+      now: 1_500,
+    }), true);
+    assert.equal(isRecallSuppressedForSession(patch, {
+      sessionKey: "agent:main:session:other",
+      currentTurn: 4,
+      now: 1_500,
+    }), false);
+    assert.equal(isRecallSuppressedForSession(patch, {
+      sessionKey: "agent:main:session:test",
+      currentTurn: 12,
+      now: 1_500,
+    }), false);
+    assert.equal(hasActiveRecallSuppression(patch, Number(patch.suppressed_until_at) + 1), false);
   });
 });
 
