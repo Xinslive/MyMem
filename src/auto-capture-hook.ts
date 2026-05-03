@@ -27,12 +27,52 @@ import type { SmartExtractor } from "./smart-extractor.js";
 import type { ExtractionRateLimiter } from "./smart-extractor.js";
 import { preflightAutoCaptureText } from "./hook-enhancements.js";
 
+type CaptureItem = { role: "user" | "assistant"; text: string };
+
 function shouldCaptureAssistantForAgent(config: PluginConfig, agentId: string): boolean {
   if (config.captureAssistant === true) return true;
   if (config.captureAssistant === false && config.captureAssistantAgents === undefined) return false;
 
   const captureAssistantAgents = config.captureAssistantAgents ?? ["main"];
   return captureAssistantAgents.includes(agentId);
+}
+
+function textsOf(items: CaptureItem[]): string[] {
+  return items.map((item) => item.text);
+}
+
+function hasUserAssistantBundle(items: CaptureItem[]): boolean {
+  return items.some((item) => item.role === "user") && items.some((item) => item.role === "assistant");
+}
+
+function mapTextSubsetToItems(items: CaptureItem[], subsetTexts: string[]): CaptureItem[] {
+  const mapped: CaptureItem[] = [];
+  let next = 0;
+  for (const item of items) {
+    if (next >= subsetTexts.length) break;
+    if (item.text === subsetTexts[next]) {
+      mapped.push(item);
+      next++;
+    }
+  }
+  return mapped;
+}
+
+function formatConversationForSmartExtraction(items: CaptureItem[]): string {
+  return items
+    .map((item) => `${item.role === "user" ? "User" : "Assistant"}:\n${item.text}`)
+    .join("\n\n");
+}
+
+function shouldRunSmartExtractionForItems(params: {
+  items: CaptureItem[];
+  minMessages: number;
+  hasExplicitCaptureSignal: boolean;
+  conversationValue: number;
+}): boolean {
+  if (params.items.length >= params.minMessages) return true;
+  return hasUserAssistantBundle(params.items) &&
+    (params.hasExplicitCaptureSignal || params.conversationValue >= 0.2);
 }
 
 export function registerAutoCaptureHook(params: {
@@ -143,21 +183,25 @@ export function registerAutoCaptureHook(params: {
         }
         params.autoCaptureSeenTextCount.set(sessionKey, eligibleTexts.length);
 
-        let texts: string[] = [];
+        let captureItems: CaptureItem[] = [];
         for (const item of newItems) {
           if (await preflightAutoCaptureText({ config, text: item.text, api, source: `agent_end:${item.role}` })) {
-            texts.push(item.text);
+            captureItems.push(item);
           }
         }
         const priorRecentTexts = params.autoCaptureRecentTexts.get(sessionKey) || [];
-        if (texts.length === 1 && isExplicitRememberCommand(texts[0]) && priorRecentTexts.length > 0) {
-          texts = [...priorRecentTexts.slice(-1), ...texts];
+        if (captureItems.length === 1 && isExplicitRememberCommand(captureItems[0].text) && priorRecentTexts.length > 0) {
+          captureItems = [
+            ...priorRecentTexts.slice(-1).map((text) => ({ role: "user" as const, text })),
+            ...captureItems,
+          ];
         }
         if (newItems.length > 0) {
           const nextRecentTexts = [...priorRecentTexts, ...newItems.map((item) => item.text)].slice(-6);
           params.autoCaptureRecentTexts.set(sessionKey, nextRecentTexts);
         }
 
+        const texts = textsOf(captureItems);
         const minMessages = config.extractMinMessages ?? 5;
         if (skippedAutoCaptureTexts > 0) {
           api.logger.debug(`mymem: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent ${agentId}`);
@@ -178,18 +222,19 @@ export function registerAutoCaptureHook(params: {
         }
 
         const hasExplicitCaptureSignal = texts.some((text) => shouldCapture(text) && !isNoise(text));
+        const conversationValue = estimateConversationValue(texts);
         if (config.extractionThrottle?.skipLowValue === true) {
-          const estimatedValue = estimateConversationValue(texts);
-          if (estimatedValue < 0.2 && !hasExplicitCaptureSignal) {
+          if (conversationValue < 0.2 && !hasExplicitCaptureSignal) {
             api.logger.debug(
-              `mymem: auto-capture skipped low-value conversation for agent ${agentId} (value=${estimatedValue.toFixed(2)})`,
+              `mymem: auto-capture skipped low-value conversation for agent ${agentId} (value=${conversationValue.toFixed(2)})`,
             );
             return;
           }
         }
 
-        let extractionTexts = texts;
-        if (config.sessionCompression?.enabled === true && extractionTexts.length > 1) {
+        let extractionItems = captureItems;
+        if (config.sessionCompression?.enabled === true && extractionItems.length > 1) {
+          const extractionTexts = textsOf(extractionItems);
           const compressed = compressTexts(
             extractionTexts,
             config.extractMaxChars ?? 8000,
@@ -204,20 +249,22 @@ export function registerAutoCaptureHook(params: {
               `mymem: auto-capture compressed ${extractionTexts.length} text(s) to ${compressed.texts.length} for agent ${agentId} (${compressed.totalChars} chars)`,
             );
           }
-          extractionTexts = compressed.texts;
+          extractionItems = mapTextSubsetToItems(extractionItems, compressed.texts);
         }
 
-        let fallbackTexts = extractionTexts;
+        let fallbackItems = extractionItems;
         if (smartExtractor) {
+          const extractionTexts = textsOf(extractionItems);
           const cleanTexts = await smartExtractor.filterNoiseByEmbedding(extractionTexts);
           if (cleanTexts.length === 0) {
             api.logger.debug(`mymem: all texts filtered as embedding noise for agent ${agentId}`);
             return;
           }
-          fallbackTexts = cleanTexts;
-          if (cleanTexts.length >= minMessages) {
-            api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${cleanTexts.length} clean texts >= ${minMessages})`);
-            const conversationText = cleanTexts.join("\n");
+          const cleanItems = mapTextSubsetToItems(extractionItems, cleanTexts);
+          fallbackItems = cleanItems;
+          if (shouldRunSmartExtractionForItems({ items: cleanItems, minMessages, hasExplicitCaptureSignal, conversationValue })) {
+            api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${cleanItems.length} clean text(s), minMessages=${minMessages})`);
+            const conversationText = formatConversationForSmartExtraction(cleanItems);
             const stats = await smartExtractor.extractAndPersist(
               conversationText, sessionKey,
               { scope: defaultScope, scopeFilter: accessibleScopes },
@@ -236,6 +283,7 @@ export function registerAutoCaptureHook(params: {
 
         api.logger.debug(`mymem: auto-capture running regex fallback for agent ${agentId}`);
 
+        const fallbackTexts = textsOf(fallbackItems);
         const toCapture = fallbackTexts.filter((text) => text && shouldCapture(text) && !isNoise(text));
         if (toCapture.length === 0) {
           api.logger.debug(`mymem: regex fallback found 0 capturable texts for agent ${agentId}`);

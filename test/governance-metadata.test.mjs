@@ -7,6 +7,9 @@ const {
   parseSmartMetadata,
   buildSmartMetadata,
 } = jiti("../src/smart-metadata.ts");
+const {
+  extractGovernanceRulesFromText,
+} = jiti("../src/governance-rules.ts");
 
 describe("governance metadata compatibility", () => {
   it("fills governance defaults for legacy metadata", () => {
@@ -68,5 +71,19 @@ describe("governance metadata compatibility", () => {
     assert.equal(patched.injected_count, 3);
     assert.equal(patched.bad_recall_count, 0);
     assert.equal(patched.last_confirmed_use_at, 1710000001234);
+  });
+});
+
+describe("governance rule extraction", () => {
+  it("does not treat ordinary questions as durable governance rules", () => {
+    assert.deepEqual(extractGovernanceRulesFromText("抓取网页内容用哪个工具？"), []);
+    assert.deepEqual(extractGovernanceRulesFromText("Which tool should I use to scrape web pages?"), []);
+  });
+
+  it("still extracts explicit preferences and instructions", () => {
+    const rules = extractGovernanceRulesFromText("以后抓取网页内容优先用 scrapling");
+    assert.equal(rules.length, 1);
+    assert.match(rules[0].text, /scrapling/);
+    assert.equal(rules[0].memoryCategory, "patterns");
   });
 });

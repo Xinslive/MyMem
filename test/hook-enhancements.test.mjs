@@ -331,4 +331,45 @@ describe("hook enhancement registration", () => {
     assert.match(store.stored[0].text, /Do not use multiple agents|Avoid repeated confirmation loops/);
     assert.equal(store.patches.some((patch) => patch.id === "old-1" && patch.patch.state === "archived"), true);
   });
+
+  it("does not turn ordinary Chinese questions into preventive lessons", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const store = createStore();
+    const evidence = [];
+
+    registerHookEnhancements({
+      api,
+      config: baseConfig(),
+      store,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+      feedbackLoop: {
+        onPreventiveLessonEvidence(item) {
+          evidence.push(item);
+        },
+        async drainPreventiveLessonBuffer() {},
+      },
+    });
+
+    const agentEndHooks = eventHandlers.get("agent_end") || [];
+    agentEndHooks[0].handler({
+      success: true,
+      messages: [
+        { role: "user", content: "抓取网页内容用哪个工具？" },
+        {
+          role: "assistant",
+          content: [
+            "根据 TOOLS.md 里的记录，主人偏好用 scrapling 提取网页内容：",
+            "简单网页：scrapling extract get URL output.md --ai-targeted",
+            "动态内容：scrapling extract fetch URL output.md --ai-targeted --network-idle",
+            "反爬网站：scrapling extract stealthy-fetch URL output.md --ai-targeted",
+          ].join("\n"),
+        },
+      ],
+    }, { sessionKey: "agent:main:cli:question-only", agentId: "main" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(evidence.length, 0);
+    assert.equal(store.stored.length, 0);
+  });
 });

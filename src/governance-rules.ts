@@ -134,6 +134,21 @@ const REUSABLE_STEP_PATTERNS = [
   /(?:运行|检查|验证|排查|修复|更新|比较|复现|测试|记录|归档|蒸馏|裁剪|压缩)/,
 ];
 
+const QUESTION_LIKE_PATTERN = /[?？]|(?:^|\b)(?:what|which|how|why|when|where|who|whom|whose)\b/i;
+const CJK_QUESTION_LIKE_PATTERN = /(?:哪个|哪個|哪种|哪種|什么|什麼|如何|怎么|怎麼|怎样|怎樣|吗|嗎|嘛|么|是否|能不能|可不可以|是不是|啥)/;
+
+const FALLBACK_GOVERNANCE_SIGNAL_PATTERNS = [
+  /(?:记住|記住|记一下|記一下|别忘了|別忘了|备注|備註|存一下|存起来|存起來)/,
+  /\b(?:please\s+)?remember\s+(?:that|this|to|my|our)\b/i,
+  /\b(?:note that|keep in mind)\b/i,
+  /\b(?:i|we|user)\s+(?:prefer|like|want|need|hate|avoid)\b/i,
+  /(?:我|用户|使用者).{0,12}(?:偏好|喜欢|喜歡|希望|需要|讨厌|討厭|不喜欢|不喜歡|习惯|習慣)/,
+  /(?:以后|以後|今后|往后|之后|下次|将来|日后).{0,40}(?:用|使用|优先|優先|不要|别|別|避免|先|保持|采用|採用)/,
+  /(?:优先|優先|默认|默認|一律|务必|務必|必须|必須|应该|應該|不要|别|別|避免|保持|先|改用|换成|換成)/,
+  /\b(?:going forward|from now on|always|never|must|prefer|use|avoid|don'?t|do not|keep|default to|switch to)\b/i,
+  /(?:规则|規則|原则|原則|底线|底線|流程|SOP|约定|約定)/i,
+];
+
 function clip(text: string, maxChars: number): string {
   const trimmed = text.trim();
   if (trimmed.length <= maxChars) return trimmed;
@@ -162,6 +177,14 @@ function dedupeRules(rules: GovernanceRule[]): GovernanceRule[] {
   return out;
 }
 
+function isQuestionLike(text: string): boolean {
+  return QUESTION_LIKE_PATTERN.test(text) || CJK_QUESTION_LIKE_PATTERN.test(text);
+}
+
+function hasFallbackGovernanceSignal(text: string): boolean {
+  return FALLBACK_GOVERNANCE_SIGNAL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 function buildFallbackRule(
   text: string,
   categoryHint?: GovernanceMemoryCategory,
@@ -175,6 +198,8 @@ function buildFallbackRule(
   );
   const normalized = normalizeGovernanceText(cleaned);
   if (normalized.length < 8) return null;
+  if (isQuestionLike(cleaned)) return null;
+  if (!hasFallbackGovernanceSignal(cleaned)) return null;
 
   const inferredCategory = categoryHint ?? (
     /(concise|brief|short|direct|factual|tone|style|prefer|希望|喜欢|简洁|直接|语气|回复)/i.test(cleaned)

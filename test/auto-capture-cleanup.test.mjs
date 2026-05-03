@@ -136,9 +136,9 @@ describe("auto-capture cleanup", () => {
     assert.equal(
       capturedConversationText,
       [
-        "User asked for terse status updates.",
-        "I will keep updates terse and factual.",
-      ].join("\n"),
+        "User:\nUser asked for terse status updates.",
+        "Assistant:\nI will keep updates terse and factual.",
+      ].join("\n\n"),
     );
   });
 
@@ -206,7 +206,7 @@ describe("auto-capture cleanup", () => {
 
     await agentEndHook.__lastRun;
 
-    assert.equal(capturedConversationText, "User asked for terse status updates.");
+    assert.equal(capturedConversationText, "User:\nUser asked for terse status updates.");
   });
 
   it("keeps main assistant text by default", async () => {
@@ -276,10 +276,88 @@ describe("auto-capture cleanup", () => {
     assert.equal(
       capturedConversationText,
       [
-        "User prefers terse status updates.",
-        "I will keep updates terse and factual.",
-      ].join("\n"),
+        "User:\nUser prefers terse status updates.",
+        "Assistant:\nI will keep updates terse and factual.",
+      ].join("\n\n"),
     );
+  });
+
+  it("runs smart extraction for one user question followed by multiple assistant messages", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    let capturedConversationText = "";
+    let extractionRuns = 0;
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        extractMinMessages: 8,
+        captureAssistantAgents: ["main"],
+        sessionCompression: { enabled: true, minScoreToKeep: 0.3 },
+        extractionThrottle: { skipLowValue: true, maxExtractionsPerHour: 0 },
+        scopes: { default: "global" },
+      },
+      store: {},
+      embedder: {},
+      smartExtractor: {
+        async filterNoiseByEmbedding(texts) {
+          return texts;
+        },
+        async extractAndPersist(conversationText) {
+          extractionRuns++;
+          capturedConversationText = conversationText;
+          return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
+        },
+      },
+      extractionRateLimiter: {
+        isRateLimited() {
+          return false;
+        },
+        getRecentCount() {
+          return 0;
+        },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() {
+          return ["global"];
+        },
+        getDefaultScope() {
+          return "global";
+        },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    assert.ok(agentEndHook, "expected agent_end hook to be registered");
+
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "抓取网页内容用哪个工具？" },
+          { role: "assistant", content: "根据 TOOLS.md，用户偏好用 scrapling 提取网页内容。" },
+          { role: "assistant", content: "简单网页：scrapling extract get URL output.md --ai-targeted" },
+          { role: "assistant", content: "动态内容：scrapling extract fetch URL output.md --ai-targeted --network-idle" },
+          { role: "assistant", content: "反爬网站：scrapling extract stealthy-fetch URL output.md --ai-targeted" },
+        ],
+      },
+      {
+        agentId: "main",
+        sessionKey: "agent:main:channel-1:conversation-1",
+      },
+    );
+
+    await agentEndHook.__lastRun;
+
+    assert.equal(extractionRuns, 1);
+    assert.match(capturedConversationText, /^User:\n抓取网页内容用哪个工具？/);
+    assert.match(capturedConversationText, /Assistant:\n根据 TOOLS\.md，用户偏好用 scrapling/);
+    assert.match(capturedConversationText, /Assistant:\n反爬网站：scrapling extract stealthy-fetch/);
   });
 
   it("skips low-value conversations before smart extraction by default", async () => {
