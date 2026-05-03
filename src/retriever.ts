@@ -347,6 +347,7 @@ export class MemoryRetriever {
       trace?: TraceCollector;
       diagnostics?: RetrievalDiagnostics;
       preserveWhenHardFiltered?: boolean;
+      rerank?: (results: RetrievalResult[]) => Promise<RetrievalResult[]>;
     } = {},
   ): Promise<RetrievalResult[]> {
     const {
@@ -354,6 +355,7 @@ export class MemoryRetriever {
       trace,
       diagnostics,
       preserveWhenHardFiltered = false,
+      rerank,
     } = options;
 
     // 1. Temporal scoring (mutually exclusive engines)
@@ -380,17 +382,34 @@ export class MemoryRetriever {
     if (trace) trace.endStage(lengthNormalized.map((r) => r.entry.id), lengthNormalized.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterLengthNorm = lengthNormalized.length;
 
-    // 3. Hard min-score filter
-    if (trace) trace.startStage("hard_cutoff", lengthNormalized.map((r) => r.entry.id));
-    const strictHardFiltered = lengthNormalized.filter((r) => r.score >= this.config.hardMinScore);
+    // 3. Noise filter (moved before rerank — cheap filters first to reduce rerank candidates)
+    if (trace) trace.startStage("noise_filter", lengthNormalized.map((r) => r.entry.id));
+    let denoised: RetrievalResult[];
+    if (this.config.filterNoise) {
+      denoised = filterNoise(lengthNormalized, (r) => r.entry.text);
+    } else {
+      denoised = lengthNormalized;
+    }
+    if (trace) trace.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
+
+    // 4. Rerank (optional, via callback — runs after cheap filters to save API tokens)
+    if (trace) trace.startStage("rerank", denoised.map((r) => r.entry.id));
+    const reranked = rerank ? await rerank(denoised) : denoised;
+    if (trace) trace.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterRerank = reranked.length;
+
+    // 5. Hard min-score filter
+    if (trace) trace.startStage("hard_cutoff", reranked.map((r) => r.entry.id));
+    const strictHardFiltered = reranked.filter((r) => r.score >= this.config.hardMinScore);
     const hardFiltered =
-      preserveWhenHardFiltered && strictHardFiltered.length === 0 && lengthNormalized.length > 0
-        ? lengthNormalized
+      preserveWhenHardFiltered && strictHardFiltered.length === 0 && reranked.length > 0
+        ? reranked
         : strictHardFiltered;
     if (trace) trace.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
-    // 4. Lifecycle scoring. DecayEngine replaces ordinary time decay, but it still
+    // 6. Lifecycle scoring. DecayEngine replaces ordinary time decay, but it still
     // needs to run here because the first temporal stage intentionally leaves
     // decay-aware scoring untouched.
     let lifecycleRanked: RetrievalResult[];
@@ -407,24 +426,13 @@ export class MemoryRetriever {
     }
     if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
 
-    // 5. Noise filter
-    if (trace) trace.startStage("noise_filter", lifecycleRanked.map((r) => r.entry.id));
-    let denoised: RetrievalResult[];
-    if (this.config.filterNoise) {
-      denoised = filterNoise(lifecycleRanked, (r) => r.entry.text);
-    } else {
-      denoised = lifecycleRanked;
-    }
-    if (trace) trace.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
-
-    // 6. Sort once after all scoring
-    if (trace) trace.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-    denoised.sort((a, b) => b.score - a.score);
-    const deduplicated = applyMMRDiversity(denoised);
+    // 7. Sort once after all scoring
+    if (trace) trace.startStage("mmr_diversity", lifecycleRanked.map((r) => r.entry.id));
+    lifecycleRanked.sort((a, b) => b.score - a.score);
+    const deduplicated = applyMMRDiversity(lifecycleRanked);
     const finalResults = deduplicated.slice(0, limit);
 
-    // 7. Confidence scores
+    // 8. Confidence scores
     for (const result of finalResults) {
       result.confidence = this.computeConfidence(result);
     }
@@ -832,47 +840,49 @@ export class MemoryRetriever {
       trace?.endStage(scoreFiltered.map((r) => r.entry.id), scoreFiltered.map((r) => r.score));
 
       // Filter expired memories early — before rerank/scoring
-      const filtered = scoreFiltered.filter((r) => {
+      const unexpired = scoreFiltered.filter((r) => {
         return !isMemoryExpired(r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, r.entry));
       });
-      if (diagnostics) diagnostics.stageCounts.afterMinScore = filtered.length;
+      if (diagnostics) {
+        diagnostics.stageCounts.afterMinScore = unexpired.length;
+        diagnostics.stageCounts.rerankInput = this.config.rerank !== "none"
+          ? Math.min(unexpired.length, limit * 2)
+          : unexpired.length;
+      }
 
-      const rerankInput =
-        this.config.rerank !== "none" ? filtered.slice(0, limit * 2) : filtered;
-      if (diagnostics) diagnostics.stageCounts.rerankInput = rerankInput.length;
-
-      let reranked: RetrievalResult[];
-      markStage("hybrid.rerank");
-      if (this.config.rerank !== "none") {
-        if (hasSoftDegraded() || diagnostics?.degraded === true) {
-          markDegraded("skip_rerank_after_degrade");
-          trace?.startStage("rerank", filtered.map((r) => r.entry.id));
-          reranked = filtered;
-          if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = 0;
-          trace?.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
-        } else if (!queryVector) {
-          throw attachFailureStage(
-            new Error("query embedding unavailable for rerank"),
-            "hybrid.embedQuery",
-          );
-        } else {
-          trace?.startStage("rerank", filtered.map((r) => r.entry.id));
-          const t3 = Date.now();
-          const rerankPromise = rerankResults(
-            query,
-            queryVector,
-            rerankInput,
-            this.config,
-            async (ids: string[]) => this.store.hasIds?.(ids) ?? new Set<string>(),
-            this.logger,
-            signal,
-          );
-          if (softDegradeAt) {
-            const remainingMs = softDegradeAt - Date.now();
-            if (remainingMs <= 0) {
+      // Build rerank callback — cheap filters (noise, length norm) run first in the
+      // shared pipeline, then this callback is invoked on the reduced candidate set.
+      const rerankCallback = this.config.rerank !== "none"
+        ? async (candidates: RetrievalResult[]): Promise<RetrievalResult[]> => {
+            const capped = candidates.slice(0, limit * 2);
+            markStage("hybrid.rerank");
+            if (hasSoftDegraded() || diagnostics?.degraded === true) {
               markDegraded("skip_rerank_after_degrade");
-              reranked = filtered;
-            } else {
+              if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = 0;
+              return capped;
+            }
+            if (!queryVector) {
+              throw attachFailureStage(
+                new Error("query embedding unavailable for rerank"),
+                "hybrid.embedQuery",
+              );
+            }
+            const t3 = Date.now();
+            const rerankPromise = rerankResults(
+              query,
+              queryVector,
+              capped,
+              this.config,
+              async (ids: string[]) => this.store.hasIds?.(ids) ?? new Set<string>(),
+              this.logger,
+              signal,
+            );
+            if (softDegradeAt) {
+              const remainingMs = softDegradeAt - Date.now();
+              if (remainingMs <= 0) {
+                markDegraded("skip_rerank_after_degrade");
+                return capped;
+              }
               const rerankOutcome = await resolveUnlessAborted(
                 Promise.race([
                   rerankPromise.then((value) => ({ kind: "reranked" as const, value })),
@@ -882,31 +892,28 @@ export class MemoryRetriever {
               );
               if (rerankOutcome.kind === "degrade") {
                 markDegraded("skip_rerank_after_degrade");
-                reranked = filtered;
-              } else {
-                reranked = rerankOutcome.value;
+                return capped;
               }
+              if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = Date.now() - t3;
+              return rerankOutcome.value;
             }
-          } else {
-            reranked = await rerankPromise;
+            const result = await rerankPromise;
+            if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = Date.now() - t3;
+            return result;
           }
-          if (diagnostics?.latencyMs) diagnostics.latencyMs.rerank = Date.now() - t3;
-          trace?.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
-        }
-      } else {
-        reranked = filtered;
-      }
-      if (diagnostics) diagnostics.stageCounts.afterRerank = reranked.length;
+        : undefined;
 
       markStage("hybrid.postProcess");
       const t4 = Date.now();
       const skipTimeDecay = !!(this.decayEngine || this.recencyEngine);
-      const finalResults = await this.applyPostProcessingPipeline(reranked, limit, {
+      const finalResults = await this.applyPostProcessingPipeline(unexpired, limit, {
         skipTimeDecay,
         trace,
         diagnostics,
         preserveWhenHardFiltered: degraded,
+        rerank: rerankCallback,
       });
+      if (diagnostics) diagnostics.stageCounts.afterRerank = finalResults.length;
       if (diagnostics?.latencyMs) diagnostics.latencyMs.postProcess = Date.now() - t4;
       return finalResults;
     } catch (error) {
