@@ -13,6 +13,7 @@ const allowedRuntimeStoreFiles = new Set([
   "src/smart-extractor-handlers.ts",
   "src/reflection-hook.ts",
   "src/reflection-store.ts",
+  "src/feedback-loop.ts",
 ]);
 
 const allowedAdminStoreFiles = new Set([
@@ -31,7 +32,6 @@ describe("runtime memory write policy", () => {
       "src/reflection-store.ts",
       "src/session-memory-hook.ts",
       "src/preference-distiller.ts",
-      "src/experience-compiler.ts",
       "src/feedback-loop.ts",
       "src/hook-enhancements.ts",
       "src/memory-compactor.ts",

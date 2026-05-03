@@ -47,9 +47,6 @@ describe("gateway maintenance", () => {
       shouldRunPreferenceDistiller: async () => false,
       runPreferenceDistiller: async () => ({ created: 0, updated: 0 }),
       recordPreferenceDistillerRun: async () => {},
-      shouldRunExperienceCompiler: async () => false,
-      runExperienceCompiler: async () => ({ created: 0, updated: 0 }),
-      recordExperienceCompilerRun: async () => {},
       shouldRunLifecycleMaintenance: async () => true,
       runLifecycleMaintenance: async (_deps, cfg) => {
         calls.push({ type: "lifecycle", phase: cfg.phase });

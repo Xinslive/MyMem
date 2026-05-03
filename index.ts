@@ -4,7 +4,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { DEFAULT_REFLECTION_MESSAGE_COUNT, DIAG_BUILD_TAG } from "./src/plugin-constants.js";
+import { DIAG_BUILD_TAG } from "./src/plugin-constants.js";
 
 // Detect CLI mode: when running as a CLI subcommand (e.g. `openclaw mymem stats`),
 // OpenClaw sets OPENCLAW_CLI=1 in the process environment. Registration and
@@ -15,12 +15,11 @@ const isCliMode = () => process.env.OPENCLAW_CLI === "1";
 // Import extracted utilities
 import { extractTextContent, shouldSkipReflectionMessage } from "./src/session-utils.js";
 import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, pruneMapIfOver, resolveLlmTimeoutMs } from "./src/config-utils.js";
-import { getDefaultWorkspaceDir, getDefaultMdMirrorDir, resolveWorkspaceDirFromContext } from "./src/path-utils.js";
+import { getDefaultWorkspaceDir, getDefaultMdMirrorDir } from "./src/path-utils.js";
 import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress } from "./src/auto-capture-utils.js";
 import { parsePluginConfig } from "./src/plugin-config-parser.js";
 import { getPluginVersion } from "./src/version-utils.js";
-import { findPreviousSessionFile, createMdMirrorWriter } from "./src/workspace-utils.js";
-import { readSessionConversationWithResetFallback } from "./src/session-recovery-utils.js";
+import { createMdMirrorWriter } from "./src/workspace-utils.js";
 
 // Import core components
 import { registerAllMemoryTools } from "./src/tools.js";
@@ -28,10 +27,6 @@ import { resolveScopeFilter, parseAgentIdFromSessionKey } from "./src/scopes.js"
 import {
   runPreferenceDistiller,
 } from "./src/preference-distiller.js";
-import {
-  runExperienceCompiler,
-} from "./src/experience-compiler.js";
-import { resolveReflectionSessionSearchDirs } from "./src/session-recovery.js";
 import { createMemoryCLI } from "./cli.js";
 import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
 import { summarizeTextPreview, summarizeMessageContent } from "./src/capture-detection.js";
@@ -134,79 +129,29 @@ const myMemPlugin = {
     } = getSingletonState()!;
 
     const resolveGovernanceCommandContext = async (event: any): Promise<{
-      sessionKey: string;
-      sessionId: string;
-      conversation: string | null;
       scopeFilter: string[] | undefined;
     } | null> => {
       const sessionKey = typeof event?.sessionKey === "string" ? event.sessionKey.trim() : "";
       if (!sessionKey) return null;
 
-      const context = (event?.context || {}) as Record<string, unknown>;
-      const cfg = context.cfg ?? (api as any).config ?? {};
-      const workspaceDir = resolveWorkspaceDirFromContext(context);
       const sourceAgentId = parseAgentIdFromSessionKey(sessionKey) || "main";
       const scopeFilter = resolveScopeFilter(scopeManager, sourceAgentId);
-      const sessionEntry = (context.previousSessionEntry || context.sessionEntry || {}) as Record<string, unknown>;
-      const sessionId = typeof sessionEntry.sessionId === "string" ? sessionEntry.sessionId : "unknown";
-      let currentSessionFile = typeof sessionEntry.sessionFile === "string" ? sessionEntry.sessionFile : undefined;
-
-      if (!currentSessionFile || currentSessionFile.includes(".reset.")) {
-        const searchDirs = resolveReflectionSessionSearchDirs({
-          context,
-          cfg,
-          workspaceDir,
-          currentSessionFile,
-          sourceAgentId,
-        });
-        for (const sessionsDir of searchDirs) {
-          const recovered = await findPreviousSessionFile(sessionsDir, currentSessionFile, sessionId);
-          if (recovered) {
-            currentSessionFile = recovered;
-            break;
-          }
-        }
-      }
-
-      const conversation = currentSessionFile
-        ? await readSessionConversationWithResetFallback(
-            currentSessionFile,
-            config.memoryReflection?.messageCount ?? DEFAULT_REFLECTION_MESSAGE_COUNT,
-          )
-        : null;
 
       return {
-        sessionKey,
-        sessionId,
-        conversation,
         scopeFilter,
       };
     };
 
     const runCommandGovernanceAutomation = async (event: any) => {
-      if (config.preferenceDistiller?.enabled !== true && config.experienceCompiler?.enabled !== true) return;
+      if (config.preferenceDistiller?.enabled !== true) return;
       const resolved = await resolveGovernanceCommandContext(event);
       if (!resolved) return;
 
-      if (config.preferenceDistiller?.enabled === true) {
-        await runPreferenceDistiller(
-          { store, embedder, logger: api.logger },
-          config.preferenceDistiller,
-          resolved.scopeFilter,
-        );
-      }
-
-      if (config.experienceCompiler?.enabled === true) {
-        await runExperienceCompiler(
-          { store, embedder, logger: api.logger },
-          config.experienceCompiler,
-          {
-            scopeFilter: resolved.scopeFilter,
-            sessionKey: resolved.sessionKey,
-            conversation: resolved.conversation || undefined,
-          },
-        );
-      }
+      await runPreferenceDistiller(
+        { store, embedder, logger: api.logger },
+        config.preferenceDistiller,
+        resolved.scopeFilter,
+      );
     };
 
     const logReg = isCliMode() ? api.logger.debug : api.logger.info;
@@ -452,7 +397,7 @@ const myMemPlugin = {
       isCliMode,
     });
 
-    if (config.preferenceDistiller?.enabled === true || config.experienceCompiler?.enabled === true) {
+    if (config.preferenceDistiller?.enabled === true) {
       const runGovernanceAutomationOnCommand = async (event: any) => {
         try {
           await runCommandGovernanceAutomation(event);
@@ -463,11 +408,11 @@ const myMemPlugin = {
 
       api.registerHook?.("command:new", runGovernanceAutomationOnCommand, {
         name: "mymem.memory-governance.command-new",
-        description: "Run preference distillation and experience compilation before /new",
+        description: "Run preference distillation before /new",
       });
       api.registerHook?.("command:reset", runGovernanceAutomationOnCommand, {
         name: "mymem.memory-governance.command-reset",
-        description: "Run preference distillation and experience compilation before /reset",
+        description: "Run preference distillation before /reset",
       });
       (isCliMode() ? api.logger.debug : api.logger.info)(
         "memory-governance: integrated hooks registered (command:new, command:reset)"

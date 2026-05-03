@@ -913,7 +913,6 @@ export class MemoryRetriever {
         preserveWhenHardFiltered: degraded,
         rerank: rerankCallback,
       });
-      if (diagnostics) diagnostics.stageCounts.afterRerank = finalResults.length;
       if (diagnostics?.latencyMs) diagnostics.latencyMs.postProcess = Date.now() - t4;
       return finalResults;
     } catch (error) {

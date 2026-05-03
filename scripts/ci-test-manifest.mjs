@@ -29,7 +29,6 @@ export const CI_TEST_MANIFEST = [
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-ollama-abort.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/embedder-ollama-batch-routing.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/extraction-prompts.test.mjs", args: ["--test"] },
-  { group: "core-regression", runner: "node", file: "test/experience-compiler.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/feedback-loop.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/file-lock-timeout.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/flush-batch.test.mjs", args: ["--test"] },

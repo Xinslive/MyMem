@@ -66,8 +66,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.autoRecallMinLength, 6);
     assert.equal(parsed.autoRecallMaxItems, 6);
     assert.equal(parsed.autoRecallDegradeAfterMs, 5000);
-    assert.equal(parsed.captureAssistant, false);
-    assert.deepEqual(parsed.captureAssistantAgents, ["main"]);
+    assert.deepEqual(parsed.captureAgents, ["main"]);
     assert.equal(parsed.captureMaxMessages, 10);
     assert.equal(parsed.retrieval?.rerank, "cross-encoder");
     assert.equal(parsed.extractMinMessages, 8);
@@ -96,9 +95,6 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.preferenceDistiller?.minEvidenceCount, 2);
     assert.equal(parsed.preferenceDistiller?.minStabilityScore, 0.6);
     assert.equal(parsed.preferenceDistiller?.maxRulesPerRun, 5);
-    assert.equal(parsed.experienceCompiler?.enabled, true);
-    assert.equal(parsed.experienceCompiler?.cooldownHours, 4);
-    assert.equal(parsed.experienceCompiler?.maxStrategiesPerRun, 3);
     assert.equal(parsed.reasoningStrategyRecall?.enabled, true);
     assert.equal(parsed.reasoningStrategyRecall?.maxItems, 2);
     assert.equal(parsed.reasoningStrategyRecall?.maxChars, 600);
@@ -124,20 +120,19 @@ describe("sessionStrategy legacy compatibility mapping", () => {
       ...baseConfig(),
       captureAssistant: false,
     });
-    assert.deepEqual(disabled.captureAssistantAgents, []);
+    assert.deepEqual(disabled.captureAgents, []);
 
     const scoped = parsePluginConfig({
       ...baseConfig(),
       captureAssistantAgents: ["main", "life", "main", ""],
     });
-    assert.deepEqual(scoped.captureAssistantAgents, ["main", "life"]);
+    assert.deepEqual(scoped.captureAgents, ["main", "life"]);
 
     const global = parsePluginConfig({
       ...baseConfig(),
       captureAssistant: true,
     });
-    assert.equal(global.captureAssistant, true);
-    assert.deepEqual(global.captureAssistantAgents, ["main"]);
+    assert.deepEqual(global.captureAgents, ["main"]);
   });
 
   it("normalizes captureMaxMessages", () => {

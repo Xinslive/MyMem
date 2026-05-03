@@ -1167,31 +1167,6 @@
           }
         }
       },
-      "experienceCompiler": {
-        "type": "object",
-        "additionalProperties": false,
-        "description": "Compile successful recent cases/events into reusable strategy-pattern memories on command:new/reset and optional gateway backfill.",
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "gatewayBackfill": {
-            "type": "boolean",
-            "default": true
-          },
-          "cooldownHours": {
-            "type": "integer",
-            "minimum": 1,
-            "default": 4
-          },
-          "maxStrategiesPerRun": {
-            "type": "integer",
-            "minimum": 1,
-            "default": 3
-          }
-        }
-      },
       "sessionCompression": {
         "type": "object",
         "additionalProperties": false,
@@ -2000,15 +1975,6 @@
     "preferenceDistiller.gatewayBackfill": {
       "label": "Distiller Backfill",
       "help": "Also run preference distillation from recent memory state at gateway startup.",
-      "advanced": true
-    },
-    "experienceCompiler.enabled": {
-      "label": "Experience Compiler",
-      "help": "Compile successful recent work into reusable strategy-pattern memories."
-    },
-    "experienceCompiler.gatewayBackfill": {
-      "label": "Compiler Backfill",
-      "help": "Also run recent experience compilation at gateway startup.",
       "advanced": true
     },
     "sessionCompression.enabled": {

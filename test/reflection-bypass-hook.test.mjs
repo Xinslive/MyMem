@@ -69,8 +69,12 @@ function createPluginApiHarness({ pluginConfig, resolveRoot }) {
 }
 
 function makePluginConfig(workDir) {
+  const reflectionDbPath = path.join(workDir, "reflection-db");
   return {
     dbPath: path.join(workDir, "db"),
+    memoryReflection: {
+      dbPath: reflectionDbPath,
+    },
     embedding: {
       apiKey: "test-api-key",
       baseURL: "https://embedding.example/v1",
@@ -110,7 +114,7 @@ async function seedReflection(dbPath, agentId, runAt = Date.now() - 2 * DAY_MS) 
 
 async function invokeReflectionHooks({ workDir, agentId, explicitAgentId = agentId }) {
   const pluginConfig = makePluginConfig(workDir);
-  await seedReflection(pluginConfig.dbPath, agentId);
+  await seedReflection(pluginConfig.memoryReflection.dbPath, agentId);
 
   const harness = createPluginApiHarness({
     resolveRoot: workDir,

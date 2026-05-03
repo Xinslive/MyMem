@@ -3,7 +3,6 @@
  *
  * Contains the `runGatewayMaintenance()` function that runs on `gateway_start`:
  * - Preference distillation
- * - Experience compilation
  * - Lifecycle maintenance
  * - Memory compaction
  */
@@ -33,11 +32,6 @@ import {
   shouldRunPreferenceDistiller,
   recordPreferenceDistillerRun,
 } from "./preference-distiller.js";
-import {
-  runExperienceCompiler,
-  shouldRunExperienceCompiler,
-  recordExperienceCompilerRun,
-} from "./experience-compiler.js";
 
 /** Context object passed to extracted registration functions. */
 export interface PluginRegistrationContext {
@@ -56,9 +50,6 @@ type GatewayMaintenanceDeps = {
   runPreferenceDistiller: typeof runPreferenceDistiller;
   shouldRunPreferenceDistiller: typeof shouldRunPreferenceDistiller;
   recordPreferenceDistillerRun: typeof recordPreferenceDistillerRun;
-  runExperienceCompiler: typeof runExperienceCompiler;
-  shouldRunExperienceCompiler: typeof shouldRunExperienceCompiler;
-  recordExperienceCompilerRun: typeof recordExperienceCompilerRun;
   runLifecycleMaintenance: typeof runLifecycleMaintenance;
   shouldRunLifecycleMaintenance: typeof shouldRunLifecycleMaintenance;
   recordLifecycleMaintenanceRun: typeof recordLifecycleMaintenanceRun;
@@ -71,9 +62,6 @@ const defaultGatewayMaintenanceDeps: GatewayMaintenanceDeps = {
   runPreferenceDistiller,
   shouldRunPreferenceDistiller,
   recordPreferenceDistillerRun,
-  runExperienceCompiler,
-  shouldRunExperienceCompiler,
-  recordExperienceCompilerRun,
   runLifecycleMaintenance,
   shouldRunLifecycleMaintenance,
   recordLifecycleMaintenanceRun,
@@ -90,7 +78,6 @@ async function runGatewayMaintenanceOnce(
   const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
   const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
   const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
-  const compilerStateFile = join(dirname(resolvedDbPath), ".experience-compiler-state.json");
 
   const compactionCfg: CompactionConfig | null = config.memoryCompaction?.enabled ? {
     enabled: true,
@@ -131,19 +118,15 @@ async function runGatewayMaintenanceOnce(
     },
   };
 
-  const [runDistiller, runCompiler, runLifecycle, runCompact] = await Promise.all([
+  const [runDistiller, runLifecycle, runCompact] = await Promise.all([
     config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
       ? deps.shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
-      : Promise.resolve(false),
-    config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill
-      ? deps.shouldRunExperienceCompiler(compilerStateFile, config.experienceCompiler.cooldownHours ?? 4)
       : Promise.resolve(false),
     lifecycleCfg.enabled ? deps.shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
     compactionCfg ? deps.shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),
   ]);
 
   let distillResult: Awaited<ReturnType<typeof runPreferenceDistiller>> | null = null;
-  let compilerResult: Awaited<ReturnType<typeof runExperienceCompiler>> | null = null;
   let lifecycleResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
   let compactionResult: Awaited<ReturnType<typeof runCompaction>> | null = null;
 
@@ -153,14 +136,6 @@ async function runGatewayMaintenanceOnce(
       config.preferenceDistiller,
     );
     await deps.recordPreferenceDistillerRun(distillerStateFile);
-  }
-
-  if (runCompiler) {
-    compilerResult = await deps.runExperienceCompiler(
-      { store, embedder, llm: smartExtractionLlmClient ?? undefined, logger: api.logger },
-      config.experienceCompiler,
-    );
-    await deps.recordExperienceCompilerRun(compilerStateFile);
   }
 
   if (runLifecycle) {
@@ -184,11 +159,10 @@ async function runGatewayMaintenanceOnce(
     await deps.recordCompactionRun(compactionStateFile);
   }
 
-  if (distillResult || compilerResult || lifecycleResult || compactionResult) {
+  if (distillResult || lifecycleResult || compactionResult) {
     api.logger.info(
       `memory-maintenance [auto]: ` +
       `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
-      `compiled=${compilerResult?.created ?? 0}/${compilerResult?.updated ?? 0} ` +
       `lifecycleScanned=${lifecycleResult?.scanned ?? 0} ` +
       `compactionScanned=${compactionResult?.scanned ?? 0} ` +
       `clusters=${compactionResult?.clustersFound ?? 0} ` +
@@ -206,7 +180,7 @@ async function runGatewayMaintenanceOnce(
 
 /**
  * Register the `gateway_start` hook that runs periodic maintenance tasks:
- * preference distillation, experience compilation, lifecycle maintenance, and compaction.
+ * preference distillation, lifecycle maintenance, and compaction.
  */
 export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void {
   const { api, config } = ctx;
@@ -214,8 +188,7 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
   if (
     !config.memoryCompaction?.enabled &&
     !config.lifecycleMaintenance?.enabled &&
-    !(config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill) &&
-    !(config.experienceCompiler?.enabled && config.experienceCompiler?.gatewayBackfill)
+    !(config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill)
   ) {
     return;
   }

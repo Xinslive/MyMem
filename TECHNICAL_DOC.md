@@ -808,7 +808,7 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 
 ---
 
-## 13. 偏好蒸馏与经验编译
+## 13. 偏好蒸馏
 
 ### 13.1 偏好蒸馏器 (Preference Distiller)
 
@@ -822,16 +822,6 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 - `minEvidenceCount`：最少 2 次独立证据
 - `minStabilityScore`：最低稳定性分数 0.6
 - `maxRulesPerRun`：每次最多蒸馏 5 条规则
-
-### 13.2 经验编译器 (Experience Compiler)
-
-`src/experience-compiler.ts` 将重复成功的经验编译为可复用策略：
-
-```
-扫描事件/案例记忆 → 识别任务闭合信号 → 提取可复用步骤 → 生成 pattern 记忆
-```
-
-这实现了从 experience（事件/案例）到 patterns（可复用模式）的自动升级。
 
 ---
 
@@ -1094,7 +1084,6 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `lifecycle-maintainer.ts` | 生命周期维护（升降级、清理） |
 | `memory-compactor.ts` | 渐进式摘要压缩 |
 | `preference-distiller.ts` | 偏好蒸馏器 |
-| `experience-compiler.ts` | 经验编译器 |
 | `memory-upgrader.ts` | 记忆格式升级 |
 | `governance-rules.ts` | 治理规则推断与冲突检测 |
 

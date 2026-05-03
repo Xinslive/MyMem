@@ -24,7 +24,6 @@ type PresetOverlay = Pick<
   memoryCompaction?: NonNullable<PluginConfig["memoryCompaction"]>;
   lifecycleMaintenance?: NonNullable<PluginConfig["lifecycleMaintenance"]>;
   preferenceDistiller?: NonNullable<PluginConfig["preferenceDistiller"]>;
-  experienceCompiler?: NonNullable<PluginConfig["experienceCompiler"]>;
 };
 
 const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
@@ -86,12 +85,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.6,
       maxRulesPerRun: 5,
     },
-    experienceCompiler: {
-      enabled: true,
-      gatewayBackfill: true,
-      cooldownHours: 4,
-      maxStrategiesPerRun: 3,
-    },
   },
   "low-latency": {
     autoRecallMaxItems: 4,
@@ -150,12 +143,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minEvidenceCount: 2,
       minStabilityScore: 0.65,
       maxRulesPerRun: 4,
-    },
-    experienceCompiler: {
-      enabled: true,
-      gatewayBackfill: true,
-      cooldownHours: 12,
-      maxStrategiesPerRun: 2,
     },
   },
   "high-recall": {
@@ -216,12 +203,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.55,
       maxRulesPerRun: 6,
     },
-    experienceCompiler: {
-      enabled: true,
-      gatewayBackfill: true,
-      cooldownHours: 4,
-      maxStrategiesPerRun: 5,
-    },
   },
   "high-precision": {
     autoRecallMaxItems: 4,
@@ -281,12 +262,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.7,
       maxRulesPerRun: 4,
     },
-    experienceCompiler: {
-      enabled: true,
-      gatewayBackfill: true,
-      cooldownHours: 8,
-      maxStrategiesPerRun: 3,
-    },
   },
 };
 
@@ -295,7 +270,6 @@ const PRESET_OBJECT_KEYS = [
   "memoryCompaction",
   "lifecycleMaintenance",
   "preferenceDistiller",
-  "experienceCompiler",
 ] as const;
 
 export function isTuningPreset(value: unknown): value is TuningPreset {

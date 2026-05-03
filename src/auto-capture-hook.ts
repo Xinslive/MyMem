@@ -72,10 +72,11 @@ export function registerAutoCaptureHook(params: {
 
         const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
 
-        const captureAgents = config.captureAgents ?? ["main"];
-        if (!captureAgents.includes(agentId)) {
-          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
-          return;
+        const legacyCaptureAgents = (config as { captureAssistantAgents?: string[] }).captureAssistantAgents;
+        const captureAgents = config.captureAgents ?? legacyCaptureAgents ?? ["main"];
+        const captureAssistantForAgent = captureAgents.includes(agentId);
+        if (!captureAssistantForAgent) {
+          api.logger.debug(`mymem: assistant auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
         }
 
         const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
@@ -96,6 +97,7 @@ export function registerAutoCaptureHook(params: {
           const rawRole = msgObj.role;
           if (rawRole !== "user" && rawRole !== "assistant") continue;
           const role = rawRole;
+          if (role === "assistant" && !captureAssistantForAgent) continue;
 
           const content = msgObj.content;
           if (typeof content === "string") {

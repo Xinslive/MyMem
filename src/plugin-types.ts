@@ -46,7 +46,7 @@ export interface PluginConfig {
   /** Agent IDs included in auto-recall injection (whitelist mode). */
   autoRecallIncludeAgents?: string[];
   reasoningStrategyRecall?: ReasoningStrategyRecallConfig;
-  /** Agent IDs allowed to participate in auto-capture (whitelist). Defaults to ["main"]. Non-listed agents skip auto-capture entirely. */
+  /** Agent IDs whose assistant replies are eligible for auto-capture. User text remains eligible for all agents. */
   captureAgents?: string[];
   /** Recent user/assistant messages sent to the smart extraction LLM during auto-capture. Default: 10. */
   captureMaxMessages?: number;
@@ -171,7 +171,6 @@ export interface PluginConfig {
     hardDeleteReasons?: string[];
   };
   preferenceDistiller?: PreferenceDistillerConfig;
-  experienceCompiler?: ExperienceCompilerConfig;
   sessionCompression?: {
     enabled?: boolean;
     minScoreToKeep?: number;
@@ -248,14 +247,6 @@ export interface PreferenceDistillerConfig {
   minEvidenceCount?: number;
   minStabilityScore?: number;
   maxRulesPerRun?: number;
-}
-
-export interface ExperienceCompilerConfig {
-  enabled?: boolean;
-  gatewayBackfill?: boolean;
-  cooldownHours?: number;
-  maxStrategiesPerRun?: number;
-  useLlm?: boolean;
 }
 
 export interface ReasoningStrategyRecallConfig {

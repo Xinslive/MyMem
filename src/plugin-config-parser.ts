@@ -124,6 +124,11 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     return ids.length > 0 ? [...new Set(ids)] : [];
   };
   const configuredCaptureAgents = normalizeAgentIdList(cfg.captureAgents);
+  const configuredLegacyCaptureAssistantAgents = normalizeAgentIdList(cfg.captureAssistantAgents);
+  const resolvedCaptureAgents =
+    configuredCaptureAgents ??
+    configuredLegacyCaptureAssistantAgents ??
+    (cfg.captureAssistant === false ? [] : ["main"]);
 
   const normalizeSessionPrimer = (raw: unknown): Required<SessionPrimerConfig> => {
     if (raw === false) {
@@ -238,8 +243,8 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           ? Math.max(0, Math.min(1, reasoningStrategyRecallRaw.minScore))
           : 0.62,
     },
-    captureAgents: configuredCaptureAgents ?? ["main"],
-    captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 32, 1, 50),
+    captureAgents: resolvedCaptureAgents,
+    captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 10, 1, 50),
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
         ? (() => {
@@ -441,18 +446,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
             ? Math.max(0, Math.min(1, raw.minStabilityScore))
             : 0.6,
         maxRulesPerRun: clampInt(parsePositiveInt(raw?.maxRulesPerRun) ?? 5, 1, 20),
-      };
-    })(),
-    experienceCompiler: (() => {
-      const raw =
-        typeof cfg.experienceCompiler === "object" && cfg.experienceCompiler !== null
-          ? (cfg.experienceCompiler as Record<string, unknown>)
-          : null;
-      return {
-        enabled: raw?.enabled !== false,
-        gatewayBackfill: raw?.gatewayBackfill !== false,
-        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
-        maxStrategiesPerRun: clampInt(parsePositiveInt(raw?.maxStrategiesPerRun) ?? 3, 1, 12),
       };
     })(),
     sessionCompression:
