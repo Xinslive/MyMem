@@ -127,7 +127,7 @@ async function refineStepsWithLlm(
   }
 }
 
-function collectStrategies(
+async function collectStrategies(
   rows: MemoryEntry[],
   maxStrategiesPerRun: number,
   conversationBySession: Map<string, string>,
