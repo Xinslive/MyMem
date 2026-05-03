@@ -49,11 +49,6 @@ function createStore(rows) {
     async list() {
       return rows;
     },
-    async store(entry) {
-      const created = { id: `new-${stored.length + 1}`, timestamp: Date.now(), ...entry };
-      stored.push(created);
-      return created;
-    },
     async update(id, patch) {
       updates.push({ id, patch });
       return { id, ...patch };
@@ -81,7 +76,7 @@ describe("preference distiller", () => {
     const store = createStore(rows);
 
     const result = await runPreferenceDistiller(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, maxRulesPerRun: 5, minEvidenceCount: 2, minStabilityScore: 0.6, maxSessions: 12, gatewayBackfill: true, cooldownHours: 6 },
     );
 
@@ -125,12 +120,13 @@ describe("preference distiller", () => {
     const store = createStore(rows);
 
     const result = await runPreferenceDistiller(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, maxRulesPerRun: 5, minEvidenceCount: 2, minStabilityScore: 0.6, maxSessions: 12, gatewayBackfill: true, cooldownHours: 6 },
     );
 
     assert.equal(result.updated, 1);
     assert.equal(result.superseded, 1);
+    assert.equal(store.stored.length, 0);
     assert.equal(store.updates.some((item) => item.id === "old-1"), true);
   });
 });

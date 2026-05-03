@@ -14,7 +14,10 @@ export function buildExtractionPrompt(
 
 User: ${user}
 
-Target Output Language: auto (detect from recent messages)
+Target Output Language: Simplified Chinese by default.
+默认使用简体中文输出记忆文本。
+Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.
+代码标识符、API 名、文件路径、命令、URL、配置键、模型名和其它专有名词必须保留原文。
 
 ## Recent Conversation
 ${conversationText}
@@ -83,9 +86,9 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "profile",
-  "abstract": "User basic info: AI development engineer, 3 years LLM experience",
-  "overview": "## Background\\n- Occupation: AI development engineer\\n- Experience: 3 years LLM development\\n- Tech stack: Python, LangChain",
-  "content": "User is an AI development engineer with 3 years of LLM application development experience."
+  "abstract": "用户基本信息：AI 开发工程师，有 3 年 LLM 经验",
+  "overview": "## 背景\\n- 职业：AI 开发工程师\\n- 经验：3 年 LLM 应用开发\\n- 技术栈：Python、LangChain",
+  "content": "用户是 AI 开发工程师，有 3 年 LLM 应用开发经验。"
 }
 \`\`\`
 
@@ -93,9 +96,9 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "preferences",
-  "abstract": "Python code style: No type hints, concise and direct",
-  "overview": "## Preference Domain\\n- Language: Python\\n- Topic: Code style\\n\\n## Details\\n- No type hints\\n- Concise function comments\\n- Direct implementation",
-  "content": "User prefers Python code without type hints, with concise function comments."
+  "abstract": "Python 代码风格：不要类型提示，简洁直接",
+  "overview": "## 偏好领域\\n- 语言：Python\\n- 主题：代码风格\\n\\n## 细节\\n- 不写类型提示\\n- 函数注释保持简洁\\n- 实现方式直接",
+  "content": "用户偏好 Python 代码不写类型提示，函数注释简洁，实现方式直接。"
 }
 \`\`\`
 
@@ -103,9 +106,9 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "cases",
-  "abstract": "LanceDB BigInt numeric handling issue",
-  "overview": "## Problem\\nLanceDB 0.26+ returns BigInt for numeric columns\\n\\n## Solution\\nCoerce values with Number(...) before arithmetic",
-  "content": "When LanceDB returns BigInt values, wrap them with Number() before doing arithmetic operations."
+  "abstract": "LanceDB BigInt 数值处理问题",
+  "overview": "## 问题\\nLanceDB 0.26+ 会把数值列返回为 BigInt\\n\\n## 解决办法\\n做算术前用 Number(...) 转换",
+  "content": "当 LanceDB 返回 BigInt 数值时，做算术运算前要先用 Number(...) 包裹转换。"
 }
 \`\`\`
 
@@ -116,15 +119,18 @@ Return JSON:
   "memories": [
     {
       "category": "profile|preferences|entities|events|cases|patterns",
-      "abstract": "One-line index",
-      "overview": "Structured Markdown summary",
-      "content": "Full narrative"
+      "abstract": "中文单行索引",
+      "overview": "中文结构化 Markdown 摘要",
+      "content": "中文完整叙述"
     }
   ]
 }
 
 Notes:
-- Output language should match the dominant language in the conversation
+- Output abstract, overview, and content in Simplified Chinese by default, even when the conversation contains English.
+- 默认用简体中文生成 abstract、overview、content；即使对话是英文，也把普通叙述翻译成中文。
+- Preserve code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns exactly.
+- 代码标识符、API 名、路径、命令、URL、配置键、模型名等保持原文。
 - Only extract truly valuable personalized information
 - If nothing worth recording, return {"memories": []}
 - Maximum 5 memories per extraction
@@ -202,16 +208,21 @@ ${newOverview}
   Content:
 ${newContent}
 
-  Requirements:
-  - Remove duplicate information
-    - Keep the most up - to - date details
-      - Maintain a coherent narrative
-        - Keep code identifiers / URIs / model names unchanged when they are proper nouns
+Requirements:
+- Output abstract, overview, and content in Simplified Chinese by default.
+- 默认用简体中文输出 abstract、overview、content。
+- If existing or new memory text is English, translate ordinary prose to Simplified Chinese.
+- 如果旧记忆或新信息是英文，普通叙述翻译成简体中文。
+- Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.
+- 代码标识符、API 名、文件路径、命令、URL、配置键、模型名和其它专有名词保留原文。
+- Remove duplicate information.
+- Keep the most up-to-date details.
+- Maintain a coherent narrative.
 
 Return JSON:
   {
-    "abstract": "Merged one-line abstract",
-      "overview": "Merged structured Markdown overview",
-        "content": "Merged full content"
+    "abstract": "合并后的中文单行摘要",
+      "overview": "合并后的中文结构化 Markdown 概览",
+        "content": "合并后的中文完整内容"
   } `;
 }

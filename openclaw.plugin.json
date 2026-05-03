@@ -826,6 +826,10 @@
             "type": "boolean",
             "default": true
           },
+          "dbPath": {
+            "type": "string",
+            "description": "Optional LanceDB directory for reflection-only memory. Defaults to a sibling of dbPath named mymem-reflection."
+          },
           "writeLegacyCombined": {
             "type": "boolean",
             "default": true
@@ -1858,7 +1862,12 @@
     },
     "memoryReflection.storeToLanceDB": {
       "label": "Store Reflection To LanceDB",
-      "help": "Persist reflection event + item rows to LanceDB (effective only under memoryReflection strategy)",
+      "help": "Persist reflection event + item rows to the separate reflection LanceDB (effective only under memoryReflection strategy)",
+      "advanced": true
+    },
+    "memoryReflection.dbPath": {
+      "label": "Reflection DB Path",
+      "help": "Optional separate LanceDB path for reflection-only memory. Defaults beside the main dbPath.",
       "advanced": true
     },
     "memoryReflection.writeLegacyCombined": {

@@ -166,11 +166,8 @@ export const DEFAULT_FEEDBACK_LOOP_CONFIG: FeedbackLoopConfig = {
 
 type LessonStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
-  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
   update(id: string, updates: { metadata?: string }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
 };
-
-const DEFAULT_LESSON_SCOPE = "global";
 const MAX_LESSON_TEXT_CHARS = 900;
 
 function clip(text: string, maxChars: number): string {
@@ -838,54 +835,7 @@ export class FeedbackLoop {
       return;
     }
 
-    const vector = await this.embedLessonText(text);
-    if (!vector.length) {
-      this.skippedPreventiveLessons++;
-      return;
-    }
-    const scope = evidence.scope || scopeFilter?.[0] || DEFAULT_LESSON_SCOPE;
-    await this.lessonStore.store({
-      text,
-      vector,
-      importance: 0.72,
-      category: "other",
-      scope,
-      metadata: stringifySmartMetadata(buildSmartMetadata(
-        {
-          text,
-          category: "other",
-          importance: 0.72,
-          timestamp: now,
-        },
-        {
-          l0_abstract: text,
-          l1_overview: `- ${text}`,
-          l2_content: text,
-          memory_category: "patterns",
-          memory_type: "experience",
-          tier: "working",
-          confidence: this.config.preventiveLessons.pendingConfidence,
-          source: "auto-capture",
-          source_reason: "feedback_loop_preventive_lesson",
-          source_session: evidence.sessionKey,
-          evidence_count: 1,
-          first_evidence_at: now,
-          last_evidence_at: now,
-          last_evidence_source: evidence.source,
-          canonical_id: canonicalId,
-          state: "pending",
-          memory_layer: "working",
-          ...strategyFields,
-        },
-      )),
-    });
-    this.learnedPreventiveLessons++;
-  }
-
-  private async embedLessonText(text: string): Promise<number[]> {
-    const embedder = this.embedder as Pick<Embedder, "embed" | "embedPassage">;
-    if (typeof embedder.embedPassage === "function") return embedder.embedPassage(text);
-    return embedder.embed(text);
+    this.skippedPreventiveLessons++;
   }
 
   // --- Rejection Audit Scanning ---

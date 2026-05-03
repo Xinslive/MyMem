@@ -429,7 +429,7 @@ it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled
   assert.ok(adaptationCount >= 1, `expected periodic prior adaptation, got ${adaptationCount}`);
 });
 
-it("FeedbackLoop: preventive lesson evidence writes pending low-confidence strategy", async () => {
+it("FeedbackLoop: preventive lesson evidence without an existing lesson is skipped", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     noiseBank: null,
@@ -454,22 +454,32 @@ it("FeedbackLoop: preventive lesson evidence writes pending low-confidence strat
   });
   await loop.drainPreventiveLessonBuffer();
 
-  assert.equal(lessonStore.entries.size, 1);
-  const entry = [...lessonStore.entries.values()][0];
-  const meta = parseSmartMetadata(entry.metadata, entry);
-  assert.equal(meta.reasoning_strategy, true);
-  assert.equal(meta.strategy_kind, "preventive");
-  assert.equal(meta.outcome, "failure");
-  assert.equal(meta.state, "pending");
-  assert.equal(meta.confidence, DEFAULT_PREVENTIVE_LESSON_CONFIG.pendingConfidence);
-  assert.equal(meta.evidence_count, 1);
-  assert.match(meta.prevention, /rerun the focused failing check/i);
-  assert.equal(meta.source_reason, "feedback_loop_preventive_lesson");
+  assert.equal(lessonStore.entries.size, 0);
+  assert.equal(loop.getStatus().preventiveLessons.skipped, 1);
   loop.dispose();
 });
 
 it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", async () => {
   const lessonStore = makeLessonStore();
+  const existing = await lessonStore.store({
+    text: "Prevent timeout while reading large logs",
+    vector: [0.1, 0.2],
+    importance: 0.72,
+    category: "other",
+    scope: "global",
+    metadata: JSON.stringify({
+      l0_abstract: "Prevent timeout while reading large logs",
+      l1_overview: "- Prevent timeout while reading large logs",
+      l2_content: "Prevent timeout while reading large logs",
+      memory_category: "patterns",
+      reasoning_strategy: true,
+      strategy_kind: "preventive",
+      canonical_id: "preventive:tool_error:timeout-large-logs",
+      state: "pending",
+      evidence_count: 1,
+      confidence: 0.4,
+    }),
+  });
   const loop = new FeedbackLoop({
     noiseBank: null,
     embedder: { embed: async () => [0.1, 0.2], embedPassage: async () => [0.1, 0.2] },
@@ -499,11 +509,9 @@ it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", as
   };
   loop.onPreventiveLessonEvidence(evidence);
   await loop.drainPreventiveLessonBuffer();
-  loop.onPreventiveLessonEvidence(evidence);
-  await loop.drainPreventiveLessonBuffer();
 
   assert.equal(lessonStore.entries.size, 1, "repeated evidence should update the same canonical lesson");
-  const entry = [...lessonStore.entries.values()][0];
+  const entry = lessonStore.entries.get(existing.id);
   const meta = parseSmartMetadata(entry.metadata, entry);
   assert.equal(meta.state, "confirmed");
   assert.equal(meta.evidence_count, 2);

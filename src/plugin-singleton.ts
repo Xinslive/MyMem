@@ -9,6 +9,7 @@ import type { ReflectionErrorState } from "./plugin-types.js";
 import { DIAG_BUILD_TAG } from "./plugin-constants.js";
 import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs, pruneMapIfOver } from "./config-utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir } from "./path-utils.js";
+import { dirname, join } from "node:path";
 import { parsePluginConfig } from "./plugin-config-parser.js";
 import { getPluginVersion } from "./version-utils.js";
 
@@ -51,6 +52,8 @@ export interface PluginSingletonState {
   config: ReturnType<typeof parsePluginConfig>;
   resolvedDbPath: string;
   store: MemoryStore;
+  reflectionStore: MemoryStore;
+  resolvedReflectionDbPath: string;
   embedder: ReturnType<typeof createEmbedder>;
   decayEngine: ReturnType<typeof createDecayEngine>;
   recencyEngine: RecencyEngine;
@@ -98,10 +101,22 @@ export function __resetSingletonForTesting__(): void {
 export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const config = parsePluginConfig(api.pluginConfig);
   const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
+  const resolvedReflectionDbPath = api.resolvePath(
+    config.memoryReflection?.dbPath || join(dirname(resolvedDbPath), "mymem-reflection"),
+  );
   const telemetryStore = new TelemetryStore(
     config.telemetry ?? { persist: true, maxRecords: 1000, sampleRate: 1 },
     api.resolvePath(resolveTelemetryDir(resolvedDbPath, config.telemetry?.dir)),
   );
+
+  try {
+    validateStoragePath(resolvedReflectionDbPath);
+  } catch (err) {
+    api.logger.warn(
+      `mymem: reflection storage path issue — ${String(err)}\n` +
+      `  Reflection writes may fail, but main memory writes are unaffected.`,
+    );
+  }
 
   try {
     validateStoragePath(resolvedDbPath);
@@ -117,6 +132,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     config.embedding.dimensions,
   );
   const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim });
+  const reflectionStore = new MemoryStore({ dbPath: resolvedReflectionDbPath, vectorDim });
   const embedder = createEmbedder({
     provider: config.embedding.provider,
     apiVersion: config.embedding.apiVersion,
@@ -342,7 +358,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const logReg = isCliMode() ? api.logger.debug : api.logger.info;
   logReg(
     `mymem@${pluginVersion}: plugin registered [singleton init] `
-    + `(db: ${resolvedDbPath}, model: ${config.embedding.model || "text-embedding-3-small"})`,
+    + `(db: ${resolvedDbPath}, reflectionDb: ${resolvedReflectionDbPath}, model: ${config.embedding.model || "text-embedding-3-small"})`,
   );
   logReg(`mymem: diagnostic build tag loaded (${DIAG_BUILD_TAG})`);
 
@@ -350,6 +366,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     config,
     resolvedDbPath,
     store,
+    reflectionStore,
+    resolvedReflectionDbPath,
     embedder,
     decayEngine,
     recencyEngine,

@@ -55,6 +55,7 @@ export interface ReflectionHookParams {
   api: OpenClawPluginApi;
   config: PluginConfig;
   store: MemoryStore;
+  reflectionStore: MemoryStore;
   embedder: Embedder;
   scopeManager: ScopeManager;
   mdMirror: MdMirrorWriter | null;
@@ -161,7 +162,7 @@ function createReflectionSessionHelpers(state: {
 // ============================================================================
 
 export function registerMemoryReflectionHook(params: ReflectionHookParams): void {
-  const { api, config, store, embedder, scopeManager, mdMirror, smartExtractionLlmClient: _smartExtractionLlmClient, resolvedDbPath, singletonState, isCliMode } = params;
+  const { api, config, reflectionStore, embedder, scopeManager, smartExtractionLlmClient: _smartExtractionLlmClient, resolvedDbPath, singletonState, isCliMode } = params;
   const {
     reflectionErrorStateBySession,
     reflectionDerivedBySession,
@@ -260,7 +261,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       helpers.pruneReflectionSessionState();
       const agentId = resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey);
       const scopes = resolveScopeFilter(scopeManager, agentId);
-      const slices = await helpers.loadAgentReflectionSlices(agentId, store, scopes);
+      const slices = await helpers.loadAgentReflectionSlices(agentId, reflectionStore, scopes);
       if (slices.invariants.length === 0) return;
       const body = slices.invariants.slice(0, 6).map((line, i) => `${i + 1}. ${line}`).join("\n");
       return { prependContext: ["<inherited-rules>", "Stable rules inherited from mymem reflections. Treat as long-term behavioral constraints unless user overrides.", body, "</inherited-rules>"].join("\n") };
@@ -282,7 +283,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       try {
         const scopes = resolveScopeFilter(scopeManager, agentId);
         const derivedCache = sessionKey ? reflectionDerivedBySession.get(sessionKey) : null;
-        const derivedLines = derivedCache?.derived?.length ? derivedCache.derived : (await helpers.loadAgentReflectionSlices(agentId, store, scopes)).derived;
+        const derivedLines = derivedCache?.derived?.length ? derivedCache.derived : (await helpers.loadAgentReflectionSlices(agentId, reflectionStore, scopes)).derived;
         if (derivedLines.length > 0) {
           blocks.push(["<derived-focus>", "Weighted recent derived execution deltas from reflection memory:", ...derivedLines.slice(0, 6).map((line, i) => `${i + 1}. ${line}`), "</derived-focus>"].join("\n"));
         }
@@ -457,8 +458,8 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       const mappedReflectionMemories = extractInjectableReflectionMappedMemoryItems(reflectionText);
       for (const mapped of mappedReflectionMemories) {
         const vector = await embedder.embedPassage(mapped.text);
-        let existing: Awaited<ReturnType<typeof store.vectorSearch>> = [];
-        try { existing = await store.vectorSearch(vector, 1, 0.1, [targetScope]); } catch (err) { api.logger.warn(`memory-reflection: mapped memory duplicate pre-check failed, continue store: ${String(err)}`); }
+        let existing: Awaited<ReturnType<typeof reflectionStore.vectorSearch>> = [];
+        try { existing = await reflectionStore.vectorSearch(vector, 1, 0.1, [targetScope]); } catch (err) { api.logger.warn(`memory-reflection: mapped memory duplicate pre-check failed, continue store: ${String(err)}`); }
         if (existing.length > 0 && existing[0].score > 0.95) continue;
 
         const importance = mapped.category === "decision" ? 0.85 : 0.8;
@@ -468,10 +469,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
           toolErrorSignals, sourceReflectionPath: relPath,
         }));
 
-        const storedEntry = await store.store({ text: mapped.text, vector, importance, category: mapped.category, scope: targetScope, metadata });
-        if (mdMirror) {
-          await mdMirror({ text: mapped.text, category: mapped.category, scope: targetScope, timestamp: storedEntry.timestamp }, { source: `reflection:${mapped.heading}`, agentId: sourceAgentId });
-        }
+        await reflectionStore.store({ text: mapped.text, vector, importance, category: mapped.category, scope: targetScope, metadata });
       }
 
       if (reflectionStoreToLanceDB) {
@@ -481,8 +479,8 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
           usedFallback: reflectionGenerated.usedFallback, eventId: reflectionEventId, sourceReflectionPath: relPath,
           writeLegacyCombined: reflectionWriteLegacyCombined,
           embedPassage: (text) => embedder.embedPassage(text),
-          vectorSearch: (vector, limit, minScore, scopeFilter) => store.vectorSearch(vector, limit, minScore, scopeFilter),
-          store: (entry) => store.store(entry),
+          vectorSearch: (vector, limit, minScore, scopeFilter) => reflectionStore.vectorSearch(vector, limit, minScore, scopeFilter),
+          store: (entry) => reflectionStore.store(entry),
         });
         if (sessionKey && stored.slices.derived.length > 0) {
           reflectionDerivedBySession.set(sessionKey, { updatedAt: nowTs, derived: stored.slices.derived });

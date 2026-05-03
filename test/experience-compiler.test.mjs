@@ -49,11 +49,6 @@ function createStore(rows) {
     async list() {
       return rows;
     },
-    async store(entry) {
-      const created = { id: `compiled-${stored.length + 1}`, timestamp: Date.now(), ...entry };
-      stored.push(created);
-      return created;
-    },
     async update(id, patch) {
       updates.push({ id, patch });
       return { id, ...patch };
@@ -62,7 +57,7 @@ function createStore(rows) {
 }
 
 describe("experience compiler", () => {
-  it("creates strategy-pattern memories only for successful closed loops", async () => {
+  it("skips new strategy memories when no existing compiled strategy exists", async () => {
     const now = Date.now();
     const rows = [
       makeEntry({
@@ -83,7 +78,7 @@ describe("experience compiler", () => {
     const store = createStore(rows);
 
     const result = await runExperienceCompiler(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
       {
         sessionKey: "sess-compiler",
@@ -91,23 +86,13 @@ describe("experience compiler", () => {
       },
     );
 
-    assert.equal(result.created, 1);
-    const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
-    assert.equal(meta.compiled_strategy, true);
-    assert.equal(meta.reasoning_strategy, true);
-    assert.equal(meta.strategy_kind, "validated");
-    assert.equal(meta.outcome, "success");
-    assert.match(meta.strategy_summary, /Reusable strategy/);
-    assert.deepEqual(meta.strategy_steps.slice(0, 3), [
-      "Run the failing test first",
-      "Patch the parser",
-      "Verify the focused suite",
-    ]);
-    assert.equal(meta.memory_category, "patterns");
-    assert.deepEqual(meta.compiled_from_case_ids, ["case-1", "event-1"]);
+    assert.equal(result.created, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(store.stored.length, 0);
+    assert.equal(store.updates.length, 0);
   });
 
-  it("creates contrastive strategies when failure is recovered in the same session", async () => {
+  it("does not create contrastive strategies when failure is recovered in the same session", async () => {
     const now = Date.now();
     const rows = [
       makeEntry({
@@ -121,7 +106,7 @@ describe("experience compiler", () => {
     const store = createStore(rows);
 
     const result = await runExperienceCompiler(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
       {
         sessionKey: "sess-mixed",
@@ -129,16 +114,12 @@ describe("experience compiler", () => {
       },
     );
 
-    assert.equal(result.created, 1);
-    const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
-    assert.equal(meta.strategy_kind, "contrastive");
-    assert.equal(meta.outcome, "mixed");
-    assert.match(meta.failure_mode, /first test failed/i);
-    assert.match(meta.success_signal, /focused suite passed/i);
-    assert.match(meta.l2_content, /failure and recovery/i);
+    assert.equal(result.created, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(store.stored.length, 0);
   });
 
-  it("creates preventive reasoning strategies from failure experiences", async () => {
+  it("does not create preventive reasoning strategies from failure experiences", async () => {
     const now = Date.now();
     const rows = [
       makeEntry({
@@ -152,7 +133,7 @@ describe("experience compiler", () => {
     const store = createStore(rows);
 
     const result = await runExperienceCompiler(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
       {
         sessionKey: "sess-failure",
@@ -160,14 +141,9 @@ describe("experience compiler", () => {
       },
     );
 
-    assert.equal(result.created, 1);
-    const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
-    assert.equal(meta.compiled_strategy, true);
-    assert.equal(meta.reasoning_strategy, true);
-    assert.equal(meta.strategy_kind, "preventive");
-    assert.equal(meta.outcome, "failure");
-    assert.match(meta.failure_mode, /test failed/i);
-    assert.match(meta.l2_content, /Preventive strategy/);
+    assert.equal(result.created, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(store.stored.length, 0);
   });
 
   it("skips compilation when the session ends with strong negative feedback", async () => {
@@ -184,7 +160,7 @@ describe("experience compiler", () => {
     const store = createStore(rows);
 
     const result = await runExperienceCompiler(
-      { store, embedder: { embedPassage: async () => [0.1] } },
+      { store },
       { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
       {
         sessionKey: "sess-negative",

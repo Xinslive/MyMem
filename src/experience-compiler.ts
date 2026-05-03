@@ -1,8 +1,8 @@
 import { dirname } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import type { Embedder } from "./embedder.js";
 import type { Logger } from "./logger.js";
 import type { ExperienceCompilerConfig } from "./plugin-types.js";
+import type { Embedder } from "./embedder.js";
 import type { MemoryEntry } from "./store.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import {
@@ -20,13 +20,13 @@ import {
 
 type CompilerStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
-  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
   update(id: string, updates: { metadata?: string }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
 };
 
 export interface ExperienceCompilerDeps {
   store: CompilerStore;
-  embedder: Pick<Embedder, "embedPassage">;
+  /** Kept for call-site compatibility; compilation is update-only and does not embed new records. */
+  embedder?: Pick<Embedder, "embedPassage">;
   logger?: Pick<Logger, "info" | "warn" | "debug">;
 }
 
@@ -302,53 +302,7 @@ export async function runExperienceCompiler(
       continue;
     }
 
-    const now = Date.now();
-    const vector = await deps.embedder.embedPassage(strategy.summary);
-    const strategyFields = buildReasoningStrategyFields({
-      kind: strategy.strategyKind,
-      outcome: strategy.outcome,
-      title: strategy.strategyTitle,
-      steps: strategy.strategySteps,
-      description: strategy.strategyDescription,
-      failureMode: strategy.failureMode,
-      prevention: strategy.outcome !== "success" ? strategy.strategySteps.join(" ") : undefined,
-      successSignal: strategy.successSignal,
-    });
-    await deps.store.store({
-      text: strategy.summary,
-      vector,
-      importance: 0.8,
-      category: "other",
-      scope: strategy.scope,
-      metadata: stringifySmartMetadata(
-        buildSmartMetadata(
-          {
-            text: strategy.summary,
-            category: "other",
-            importance: 0.8,
-            timestamp: now,
-          },
-          {
-            l0_abstract: strategy.summary,
-            l1_overview: strategy.overview,
-            l2_content: strategy.content,
-            memory_category: "patterns",
-            confidence: strategy.confidence,
-            source: "auto-capture",
-            source_reason: "experience_compiler",
-            source_session: strategy.sessionMarker,
-            compiled_strategy: true,
-            ...strategyFields,
-            compiled_from_case_ids: strategy.caseIds,
-            canonical_id: strategy.canonicalId,
-            state: "confirmed",
-            memory_layer: "working",
-            last_confirmed_use_at: now,
-          },
-        ),
-      ),
-    });
-    result.created++;
+    result.skipped++;
   }
 
   deps.logger?.info?.(

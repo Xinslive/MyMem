@@ -1,21 +1,21 @@
 import { dirname } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import type { Embedder } from "./embedder.js";
 import type { Logger } from "./logger.js";
 import type { PreferenceDistillerConfig } from "./plugin-types.js";
+import type { Embedder } from "./embedder.js";
 import type { MemoryEntry } from "./store.js";
-import { appendRelation, buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { inferGovernanceRuleFromMemory, rulesConflict, type GovernanceRule } from "./governance-rules.js";
 
 type DistillStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
-  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
   update(id: string, updates: { metadata?: string; text?: string; vector?: number[]; importance?: number; category?: MemoryEntry["category"] }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
 };
 
 export interface PreferenceDistillerDeps {
   store: DistillStore;
-  embedder: Pick<Embedder, "embedPassage">;
+  /** Kept for call-site compatibility; distillation is update-only and does not embed new records. */
+  embedder?: Pick<Embedder, "embedPassage">;
   logger?: Pick<Logger, "info" | "warn" | "debug">;
 }
 
@@ -316,94 +316,33 @@ export async function runPreferenceDistiller(
       }
 
       const now = Date.now();
-      const vector = await deps.embedder.embedPassage(candidate.rule.text);
-      const created = await deps.store.store({
+      const next = buildSmartMetadata(conflicting, {
+        l0_abstract: candidate.rule.text,
+        l1_overview: `- ${candidate.rule.text}`,
+        l2_content: candidate.rule.text,
+        memory_category: candidate.rule.memoryCategory,
+        confidence: candidate.confidence,
+        source_reason: "preference_distiller",
+        source_session: candidate.latestSessionMarker,
+        stability_score: candidate.stabilityScore,
+        evidence_count: candidate.evidenceCount,
+        distilled_from: Array.from(new Set([...(Array.isArray(conflictingMeta.distilled_from) ? conflictingMeta.distilled_from : []), ...candidate.evidenceIds])).slice(-12),
+        canonical_id: candidate.rule.canonicalId,
+        state: "confirmed",
+        memory_layer: candidate.rule.memoryCategory === "preferences" ? "durable" : "working",
+        last_confirmed_use_at: now,
+      });
+      await deps.store.update(conflicting.id, {
         text: candidate.rule.text,
-        vector,
-        importance: candidate.rule.memoryCategory === "preferences" ? 0.85 : 0.8,
+        importance: Math.max(conflicting.importance, candidate.rule.memoryCategory === "preferences" ? 0.85 : 0.8),
         category: candidate.rule.storeCategory,
-        scope: candidate.latestScope || conflicting.scope,
-        metadata: stringifySmartMetadata(
-          buildSmartMetadata(
-            {
-              text: candidate.rule.text,
-              category: candidate.rule.storeCategory,
-              importance: candidate.rule.memoryCategory === "preferences" ? 0.85 : 0.8,
-              timestamp: now,
-            },
-            {
-              l0_abstract: candidate.rule.text,
-              l1_overview: `- ${candidate.rule.text}`,
-              l2_content: candidate.rule.text,
-              memory_category: candidate.rule.memoryCategory,
-              confidence: candidate.confidence,
-              source: "auto-capture",
-              source_reason: "preference_distiller",
-              source_session: candidate.latestSessionMarker,
-              stability_score: candidate.stabilityScore,
-              evidence_count: candidate.evidenceCount,
-              distilled_from: candidate.evidenceIds,
-              canonical_id: candidate.rule.canonicalId,
-              state: "confirmed",
-              memory_layer: candidate.rule.memoryCategory === "preferences" ? "durable" : "working",
-              last_confirmed_use_at: now,
-              supersedes: conflicting.id,
-              relations: appendRelation([], { type: "supersedes", targetId: conflicting.id }),
-            },
-          ),
-        ),
-      });
-
-      const archived = buildSmartMetadata(conflicting, {
-        state: "archived",
-        memory_layer: "archive",
-        invalidated_at: now,
-        superseded_by: created.id,
-        prune_reason: "contradiction_newer_version",
-      });
-      await deps.store.update(conflicting.id, { metadata: stringifySmartMetadata(archived) }, scopeFilter);
-      result.created++;
-      result.superseded++;
+        metadata: stringifySmartMetadata(next),
+      }, scopeFilter);
+      result.updated++;
       continue;
     }
 
-    const now = Date.now();
-    const vector = await deps.embedder.embedPassage(candidate.rule.text);
-    await deps.store.store({
-      text: candidate.rule.text,
-      vector,
-      importance: candidate.rule.memoryCategory === "preferences" ? 0.85 : 0.8,
-      category: candidate.rule.storeCategory,
-      scope: candidate.latestScope,
-      metadata: stringifySmartMetadata(
-        buildSmartMetadata(
-          {
-            text: candidate.rule.text,
-            category: candidate.rule.storeCategory,
-            importance: candidate.rule.memoryCategory === "preferences" ? 0.85 : 0.8,
-            timestamp: now,
-          },
-          {
-            l0_abstract: candidate.rule.text,
-            l1_overview: `- ${candidate.rule.text}`,
-            l2_content: candidate.rule.text,
-            memory_category: candidate.rule.memoryCategory,
-            confidence: candidate.confidence,
-            source: "auto-capture",
-            source_reason: "preference_distiller",
-            source_session: candidate.latestSessionMarker,
-            stability_score: candidate.stabilityScore,
-            evidence_count: candidate.evidenceCount,
-            distilled_from: candidate.evidenceIds,
-            canonical_id: candidate.rule.canonicalId,
-            state: "confirmed",
-            memory_layer: candidate.rule.memoryCategory === "preferences" ? "durable" : "working",
-            last_confirmed_use_at: now,
-          },
-        ),
-      ),
-    });
-    result.created++;
+    result.skipped++;
   }
 
   deps.logger?.info?.(

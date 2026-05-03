@@ -15,7 +15,7 @@ import type { MemoryEntry, MemorySearchResult, MemoryStore } from "./store.js";
 import { resolveHookAgentId } from "./config-utils.js";
 import { extractTextContent, redactSecrets } from "./session-utils.js";
 import { isInternalReflectionSessionKey } from "./auto-capture-utils.js";
-import { appendRelation, buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { loadAgentReflectionSlicesFromEntries } from "./reflection-store.js";
 import {
   containsStrongNegativeGovernanceFeedback,
@@ -374,58 +374,6 @@ async function patchBadRecall(params: {
   }));
 }
 
-async function createSelfCorrectionMemory(params: {
-  store: MemoryStore;
-  embedder: Embedder;
-  sessionKey: string;
-  scope: string;
-  text: string;
-  memoryCategory: "preferences" | "patterns";
-  storeCategory: "preference" | "other";
-  confidence: number;
-  canonicalId: string;
-  supersedes?: string;
-}): Promise<MemoryEntry> {
-  const now = Date.now();
-  const importance = params.memoryCategory === "preferences" ? 0.9 : 0.85;
-  const vector = await params.embedder.embedPassage(params.text);
-  return params.store.store({
-    text: params.text,
-    vector,
-    importance,
-    category: params.storeCategory,
-    scope: params.scope,
-    metadata: stringifySmartMetadata(
-      buildSmartMetadata(
-        {
-          text: params.text,
-          category: params.storeCategory,
-          importance,
-          timestamp: now,
-        },
-        {
-          l0_abstract: params.text,
-          l1_overview: `- ${params.text}`,
-          l2_content: params.text,
-          memory_category: params.memoryCategory,
-          confidence: params.confidence,
-          source: "auto-capture",
-          source_reason: "self_correction",
-          source_session: params.sessionKey,
-          evidence_count: 1,
-          stability_score: params.confidence,
-          canonical_id: params.canonicalId,
-          state: "confirmed",
-          memory_layer: params.memoryCategory === "preferences" ? "durable" : "working",
-          last_confirmed_use_at: now,
-          supersedes: params.supersedes,
-          relations: params.supersedes ? appendRelation([], { type: "supersedes", targetId: params.supersedes }) : [],
-        },
-      ),
-    ),
-  });
-}
-
 async function applySelfCorrectionRule(params: {
   api: OpenClawPluginApi;
   store: MemoryStore;
@@ -482,24 +430,27 @@ async function applySelfCorrectionRule(params: {
   if (conflicting) {
     const conflictingMeta = parseSmartMetadata(conflicting.entry.metadata, conflicting.entry);
     if (conflicting.score >= 0.18 || conflictingMeta.canonical_id === rule.canonicalId) {
-      const created = await createSelfCorrectionMemory({
-        store: params.store,
-        embedder: params.embedder,
-        sessionKey: params.sessionKey,
-        scope: conflicting.entry.scope,
+      const now = Date.now();
+      await params.store.update(conflicting.entry.id, {
         text: rule.text,
-        memoryCategory: rule.memoryCategory,
-        storeCategory: rule.storeCategory,
-        confidence: rule.confidence,
-        canonicalId: rule.canonicalId,
-        supersedes: conflicting.entry.id,
-      });
-      await params.store.patchMetadata(conflicting.entry.id, {
-        state: "archived",
-        memory_layer: "archive",
-        invalidated_at: Date.now(),
-        superseded_by: created.id,
-        prune_reason: "self_correction_superseded",
+        vector: await params.embedder.embedPassage(rule.text),
+        importance: Math.max(conflicting.entry.importance, rule.memoryCategory === "preferences" ? 0.9 : 0.85),
+        category: rule.storeCategory,
+        metadata: stringifySmartMetadata(buildSmartMetadata(conflicting.entry, {
+          l0_abstract: rule.text,
+          l1_overview: `- ${rule.text}`,
+          l2_content: rule.text,
+          memory_category: rule.memoryCategory,
+          confidence: rule.confidence,
+          source_reason: "self_correction",
+          source_session: params.sessionKey,
+          evidence_count: Math.max(Number(conflictingMeta.evidence_count || 0), 1),
+          stability_score: Math.max(Number(conflictingMeta.stability_score || 0), rule.confidence),
+          canonical_id: rule.canonicalId,
+          state: "confirmed",
+          memory_layer: rule.memoryCategory === "preferences" ? "durable" : "working",
+          last_confirmed_use_at: now,
+        })),
       }, params.scopeFilter);
       return;
     }
@@ -516,17 +467,7 @@ async function applySelfCorrectionRule(params: {
     return;
   }
 
-  await createSelfCorrectionMemory({
-    store: params.store,
-    embedder: params.embedder,
-    sessionKey: params.sessionKey,
-    scope: params.scopeFilter?.[0] || "global",
-    text: rule.text,
-    memoryCategory: rule.memoryCategory,
-    storeCategory: rule.storeCategory,
-    confidence: rule.confidence,
-    canonicalId: rule.canonicalId,
-  });
+  params.api.logger.debug?.("mymem: self-correction rule skipped because no existing memory matched update-only policy");
 }
 
 export async function preflightAutoCaptureText(params: {
@@ -754,7 +695,7 @@ export function registerHookEnhancements(params: {
             if (match) {
               const vector = await embedder.embedPassage(correction.newText);
               const oldMeta = parseSmartMetadata(match.metadata, match);
-              const meta = buildSmartMetadata({ text: correction.newText, category: match.category, importance: match.importance }, {
+              const meta = buildSmartMetadata(match, {
                 ...oldMeta,
                 l0_abstract: correction.newText,
                 l1_overview: `- ${correction.newText}`,
@@ -766,20 +707,12 @@ export function registerHookEnhancements(params: {
                 state: "confirmed",
                 last_confirmed_use_at: Date.now(),
               });
-              const newEntry = await store.store({
+              await store.update(match.id, {
                 text: correction.newText,
                 vector,
                 importance: Math.max(match.importance, 0.75),
                 category: match.category,
-                scope: match.scope,
                 metadata: stringifySmartMetadata(meta),
-              });
-              await store.patchMetadata(match.id, {
-                superseded_by: newEntry.id,
-                state: "archived",
-                memory_layer: "archive",
-                invalidated_at: Date.now(),
-                correction_reason: clip(correction.oldText, 160),
               }, scopeFilter);
             }
           }

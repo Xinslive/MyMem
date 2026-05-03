@@ -135,6 +135,7 @@ export interface PluginConfig {
   memoryReflection?: {
     enabled?: boolean;
     storeToLanceDB?: boolean;
+    dbPath?: string;
     writeLegacyCombined?: boolean;
     injectMode?: ReflectionInjectMode;
     agentId?: string;

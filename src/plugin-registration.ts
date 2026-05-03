@@ -44,6 +44,7 @@ export interface PluginRegistrationContext {
   api: OpenClawPluginApi;
   config: PluginConfig;
   store: MemoryStore;
+  reflectionStore: MemoryStore;
   embedder: Embedder;
   decayEngine: DecayEngine;
   tierManager: TierManager;

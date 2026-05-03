@@ -18,8 +18,8 @@
  *        - scope:      shared scope (all members must share one)
  *        - metadata:   marked { compacted: true, sourceCount: N }
  *        - lifecycle:  sets initial accessCount=1, lastAccessedAt=now
- *   4. Delete source entries, store merged entry.
- *   5. Record access via AccessTracker to register new entry for future tracking.
+ *   4. Update one source entry with merged content and optionally delete the
+ *      other source entries. Runtime compaction never creates new memories.
  */
 
 import type { MemoryEntry } from "./store.js";
@@ -87,7 +87,7 @@ export interface CompactionResult {
   clustersFound: number;
   /** Source memories deleted (0 when dryRun) */
   memoriesDeleted: number;
-  /** Merged memories created (0 when dryRun) */
+  /** Runtime compaction no longer creates new memories; kept for API compatibility. */
   memoriesCreated: number;
   /** Whether this was a dry run */
   dryRun: boolean;
@@ -357,6 +357,10 @@ function buildRefinementPrompt(members: CompactionEntry[]): string {
     "Return only JSON with keys: abstract, overview, content, category, importance, reason.",
     "category must be one of the smart memory categories: profile, preferences, entities, events, cases, patterns. importance must be a number from 0 to 1.",
     "abstract should be one concise sentence. overview should be a short bullet-style summary. content should be the canonical memory text.",
+    "Output abstract, overview, content, and reason in Simplified Chinese by default; translate ordinary English prose to Simplified Chinese.",
+    "默认用简体中文输出 abstract、overview、content 和 reason；英文普通叙述翻译成简体中文。",
+    "Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.",
+    "代码标识符、API 名、文件路径、命令、URL、配置键、模型名和其它专有名词保留原文。",
     "",
     memoryLines,
   ].join("\n");
@@ -385,14 +389,17 @@ export interface CompactorStore {
     scopeFilter?: string[],
     limit?: number,
   ): Promise<CompactionEntry[]>;
-  store(entry: {
-    text: string;
-    vector: number[];
-    importance: number;
-    category: MemoryEntry["category"];
-    scope: string;
-    metadata?: string;
-  }): Promise<MemoryEntry>;
+  update(
+    id: string,
+    updates: {
+      text?: string;
+      vector?: number[];
+      importance?: number;
+      category?: MemoryEntry["category"];
+      metadata?: string;
+    },
+    scopeFilter?: string[],
+  ): Promise<MemoryEntry | null>;
   delete(id: string, scopeFilter?: string[]): Promise<boolean>;
 }
 
@@ -414,7 +421,7 @@ export interface CompactorLogger {
  */
 export interface CompactorLifecycle {
   /**
-   * Record access for newly created entries.
+   * Record access for compacted representative entries.
    * This sets accessCount=1 and lastAccessedAt=now, breaking the
    * accessCount=0 dead-lock that would prevent tier promotion.
    */
@@ -499,12 +506,12 @@ export async function runCompaction(
   }
 
   let memoriesDeleted = 0;
-  let memoriesCreated = 0;
+  const memoriesCreated = 0;
   let llmRefined = 0;
   let fallbackMerged = 0;
   let failedClusters = 0;
   let llmAttempts = 0;
-  const newEntryIds: string[] = [];
+  const compactedEntryIds: string[] = [];
   const mergeMode = normalizeMergeMode(config.mergeMode);
   const deleteSourceMemories = normalizeDeleteSourceMemories(config.deleteSourceMemories);
   const maxLlmClustersPerRun = normalizeMaxLlmClustersPerRun(config.maxLlmClustersPerRun);
@@ -574,21 +581,30 @@ export async function runCompaction(
         ),
       );
 
-      // Store merged entry
-      const newEntry = await store.store({
-        text: merged.text,
-        vector,
-        importance: merged.importance,
-        category: merged.category,
-        scope: merged.scope,
-        metadata: initialMetadata,
-      });
-      newEntryIds.push(newEntry.id);
-      memoriesCreated++;
+      const representative = members
+        .slice()
+        .sort((a, b) => b.importance - a.importance || b.timestamp - a.timestamp)[0];
+      const updated = await store.update(
+        representative.id,
+        {
+          text: merged.text,
+          vector,
+          importance: merged.importance,
+          category: merged.category,
+          metadata: initialMetadata,
+        },
+        [normalizeScope(representative.scope)],
+      );
+      if (!updated) {
+        failedClusters++;
+        continue;
+      }
+      compactedEntryIds.push(updated.id);
 
       // Delete source entries
       if (deleteSourceMemories) {
         for (const m of members) {
+          if (m.id === representative.id) continue;
           const deleted = await store.delete(m.id, [normalizeScope(m.scope)]);
           if (deleted) memoriesDeleted++;
         }
@@ -601,12 +617,12 @@ export async function runCompaction(
     }
   }
 
-  // Record access for newly created entries via lifecycle dependencies
+  // Record access for compacted representative entries via lifecycle dependencies
   // This ensures AccessTracker knows about them for future flush cycles
-  if (lifecycle?.recordAccess && newEntryIds.length > 0) {
+  if (lifecycle?.recordAccess && compactedEntryIds.length > 0) {
     try {
-      lifecycle.recordAccess(newEntryIds);
-      logger?.info(`memory-compactor: recorded access for ${newEntryIds.length} new entries`);
+      lifecycle.recordAccess(compactedEntryIds);
+      logger?.info(`memory-compactor: recorded access for ${compactedEntryIds.length} compacted entries`);
     } catch (err) {
       logger?.warn(`memory-compactor: failed to record access: ${String(err)}`);
     }

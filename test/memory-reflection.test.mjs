@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +20,10 @@ const { readSessionConversationWithResetFallback } = jiti("../src/session-recove
 const { generateReflectionText } = jiti("../src/reflection-cli.ts");
 const { resolveRuntimeEmbeddedPiRunner } = jiti("../src/openclaw-extension-utils.ts");
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
+const pluginModule = jiti("../index.ts");
+const myMemPlugin = pluginModule.default || pluginModule;
+const { __resetSingletonForTesting__: resetSingleton } = pluginModule;
+const { MemoryStore } = jiti("../src/store.ts");
 const { getDisplayCategoryTag } = jiti("../src/reflection-metadata.ts");
 const {
   classifyReflectionRetry,
@@ -47,6 +52,9 @@ const {
 } = jiti("../src/reflection-item-store.ts");
 const { buildReflectionMappedMetadata } = jiti("../src/reflection-mapped-metadata.ts");
 const { REFLECTION_FALLBACK_SCORE_FACTOR } = jiti("../src/reflection-ranking.ts");
+
+const EMBEDDING_DIMENSIONS = 4;
+const FIXED_VECTOR = [0.5, 0.5, 0.5, 0.5];
 
 function messageLine(role, text, ts) {
   return JSON.stringify({
@@ -80,6 +88,66 @@ function baseConfig() {
       model: "Embedding",
     },
   };
+}
+
+function createEmbeddingServer() {
+  return http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const inputs = Array.isArray(payload.input) ? payload.input : [payload.input];
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      object: "list",
+      data: inputs.map((_, index) => ({
+        object: "embedding",
+        index,
+        embedding: FIXED_VECTOR,
+      })),
+      model: payload.model || "mock-embedding-model",
+      usage: { prompt_tokens: 0, total_tokens: 0 },
+    }));
+  });
+}
+
+function createPluginApiHarness({ pluginConfig, resolveRoot, reflectionText }) {
+  const eventHandlers = new Map();
+
+  const api = {
+    pluginConfig,
+    runtime: {
+      agent: {
+        runEmbeddedPiAgent: async () => ({ payloads: [{ text: reflectionText }] }),
+      },
+    },
+    resolvePath(target) {
+      if (typeof target !== "string") return target;
+      if (path.isAbsolute(target)) return target;
+      return path.join(resolveRoot, target);
+    },
+    logger: {
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    },
+    registerTool() {},
+    registerCli() {},
+    registerService() {},
+    on(eventName, handler, meta) {
+      const list = eventHandlers.get(eventName) || [];
+      list.push({ handler, meta });
+      eventHandlers.set(eventName, list);
+    },
+    registerHook(eventName, handler, meta) {
+      const list = eventHandlers.get(eventName) || [];
+      list.push({ handler, meta });
+      eventHandlers.set(eventName, list);
+    },
+  };
+
+  return { api, eventHandlers };
 }
 
 describe("memory reflection", () => {
@@ -408,6 +476,122 @@ describe("memory reflection", () => {
   });
 
   describe("reflection persistence", () => {
+    let pluginWorkDir;
+    let embeddingServer;
+    let embeddingBaseURL;
+
+    beforeEach(async () => {
+      resetSingleton();
+      pluginWorkDir = mkdtempSync(path.join(tmpdir(), "reflection-plugin-store-test-"));
+      embeddingServer = createEmbeddingServer();
+      await new Promise((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
+      const port = embeddingServer.address().port;
+      embeddingBaseURL = `http://127.0.0.1:${port}/v1`;
+    });
+
+    afterEach(async () => {
+      await new Promise((resolve) => embeddingServer.close(resolve));
+      rmSync(pluginWorkDir, { recursive: true, force: true });
+      resetSingleton();
+    });
+
+    it("writes runtime reflection rows only to the separate reflection store", async () => {
+      const dbPath = path.join(pluginWorkDir, "main-db");
+      const reflectionDbPath = path.join(pluginWorkDir, "reflection-db");
+      const sessionFile = path.join(pluginWorkDir, "session.jsonl");
+      writeFileSync(
+        sessionFile,
+        [
+          messageLine("user", "Please keep task status concise.", 1),
+          messageLine("assistant", "I will keep status concise and verify changes.", 2),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const reflectionText = [
+        "## Invariants",
+        "- Always keep status updates concise.",
+        "## Derived",
+        "- Next run verify reflection isolation.",
+      ].join("\n");
+      const { api, eventHandlers } = createPluginApiHarness({
+        resolveRoot: pluginWorkDir,
+        reflectionText,
+        pluginConfig: {
+          dbPath,
+          autoCapture: false,
+          autoRecall: false,
+          sessionStrategy: "memoryReflection",
+          selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+          memoryReflection: {
+            dbPath: reflectionDbPath,
+            storeToLanceDB: true,
+            writeLegacyCombined: false,
+          },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: embeddingBaseURL,
+            dimensions: EMBEDDING_DIMENSIONS,
+          },
+        },
+      });
+
+      myMemPlugin.register(api);
+
+      const commandHooks = eventHandlers.get("command:new") || [];
+      const reflectionHook = commandHooks.find((hook) => hook.meta?.name === "mymem.memory-reflection.command-new");
+      assert.ok(reflectionHook);
+      await reflectionHook.handler(
+        {
+          action: "new",
+          sessionKey: "agent:main:session:reflection-isolation",
+          timestamp: Date.now(),
+          context: {
+            cfg: {
+              agents: {
+                list: [
+                  { id: "main", model: { primary: "openai/gpt-test" } },
+                ],
+              },
+            },
+            workspaceDir: pluginWorkDir,
+            sessionEntry: {
+              sessionId: "reflection-isolation",
+              sessionFile,
+            },
+          },
+        },
+        {},
+      );
+
+      const mainStore = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
+      const reflectionStore = new MemoryStore({ dbPath: reflectionDbPath, vectorDim: EMBEDDING_DIMENSIONS });
+      const mainRows = await mainStore.list(undefined, undefined, 10, 0);
+      const reflectionRows = await reflectionStore.list(undefined, undefined, 10, 0);
+
+      assert.equal(mainRows.length, 0);
+      assert.ok(reflectionRows.length > 0);
+      assert.ok(reflectionRows.some((entry) => /keep status updates concise/i.test(entry.text)));
+
+      const promptHooks = [...(eventHandlers.get("before_prompt_build") || [])]
+        .sort((a, b) => (a.meta?.priority ?? 99) - (b.meta?.priority ?? 99));
+      const injected = [];
+      for (const hook of promptHooks) {
+        const result = await hook.handler({}, {
+          agentId: "main",
+          sessionKey: "agent:main:session:next",
+        });
+        if (result?.prependContext) injected.push(result.prependContext);
+      }
+
+      assert.match(injected.join("\n"), /<inherited-rules>/);
+      assert.match(injected.join("\n"), /keep status updates concise/i);
+      assert.match(injected.join("\n"), /<derived-focus>/);
+      assert.match(injected.join("\n"), /Next run verify reflection isolation/);
+    });
+
     it("stores event + itemized rows and keeps legacy combined rows by default", async () => {
       const storedEntries = [];
       const vectorSearchCalls = [];

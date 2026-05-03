@@ -55,7 +55,7 @@ export function registerAutoCaptureHook(params: {
   mdMirror?: (entry: any, opts: any) => Promise<void>;
   isCliMode: () => boolean;
 }): void {
-  const { api, config, store, embedder, smartExtractor, extractionRateLimiter, scopeManager } = params;
+  const { api, config, smartExtractor, extractionRateLimiter, scopeManager } = params;
 
   if (config.autoCapture === false) return;
 

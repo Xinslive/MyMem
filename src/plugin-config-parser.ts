@@ -316,6 +316,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       ? {
         enabled: sessionStrategy === "memoryReflection",
         storeToLanceDB: reflectionStoreToLanceDB,
+        dbPath: asNonEmptyString(memoryReflectionRaw.dbPath),
         writeLegacyCombined: memoryReflectionRaw.writeLegacyCombined !== false,
         injectMode: reflectionInjectMode,
         agentId: asNonEmptyString(memoryReflectionRaw.agentId) ?? "main",
@@ -333,6 +334,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       : {
         enabled: sessionStrategy === "memoryReflection",
         storeToLanceDB: reflectionStoreToLanceDB,
+        dbPath: undefined,
         writeLegacyCombined: true,
         injectMode: "inheritance+derived",
         agentId: "main",

@@ -119,7 +119,7 @@ function createStore({ searchResults = [], byId = {}, reflectionEntries = [] } =
     async update(id, patch) {
       updated.push({ id, patch });
       const entry = byId[id];
-      if (entry && patch.metadata) entry.metadata = patch.metadata;
+      if (entry) Object.assign(entry, patch);
       return entry || null;
     },
     async store(newEntry) {
@@ -298,7 +298,7 @@ describe("hook enhancement registration", () => {
     assert.equal(store.patches[0].patch.bad_recall_count, 1);
   });
 
-  it("stores self-correction rules and supersedes conflicting workflow guidance", async () => {
+  it("updates self-correction rules in place for conflicting workflow guidance", async () => {
     const { api, eventHandlers } = createApiHarness();
     const oldDirection = makeMemoryEntry({
       id: "old-1",
@@ -327,9 +327,9 @@ describe("hook enhancement registration", () => {
     }, { sessionKey: "agent:main:cli:self-correction", agentId: "main" });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    assert.equal(store.stored.length >= 1, true);
-    assert.match(store.stored[0].text, /Do not use multiple agents|Avoid repeated confirmation loops/);
-    assert.equal(store.patches.some((patch) => patch.id === "old-1" && patch.patch.state === "archived"), true);
+    assert.equal(store.stored.length, 0);
+    assert.equal(store.updated.some((item) => item.id === "old-1"), true);
+    assert.match(store.updated[0].patch.text, /Do not use multiple agents|Avoid repeated confirmation loops/);
   });
 
   it("does not turn ordinary Chinese questions into preventive lessons", async () => {

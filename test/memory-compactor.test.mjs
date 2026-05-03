@@ -44,16 +44,19 @@ function makeStore(entries = []) {
   const db = new Map(entries.map((e) => [e.id, { ...e }]));
   return {
     stored: [],
+    updated: [],
     deleted: [],
     deleteCalls: [],
     async fetchForCompaction(_maxTs, _scopes, limit = 200) {
       return [...db.values()].slice(0, limit);
     },
-    async store(e) {
-      const newEntry = { id: "merged-" + Math.random().toString(36).slice(2), ...e };
-      db.set(newEntry.id, newEntry);
-      this.stored.push(newEntry);
-      return newEntry;
+    async update(id, updates, scopeFilter) {
+      const current = db.get(id);
+      if (!current) return null;
+      const next = { ...current, ...updates };
+      db.set(id, next);
+      this.updated.push({ id, updates, scopeFilter, entry: next });
+      return next;
     },
     async delete(id, scopeFilter) {
       this.deleteCalls.push({ id, scopeFilter });
@@ -247,11 +250,12 @@ describe("runCompaction", () => {
     const result = await runCompaction(store, embedder, defaultConfig);
 
     assert.equal(result.clustersFound, 1);
-    assert.equal(result.memoriesDeleted, 2);
-    assert.equal(result.memoriesCreated, 1);
+    assert.equal(result.memoriesDeleted, 1);
+    assert.equal(result.memoriesCreated, 0);
     assert.equal(result.dryRun, false);
-    assert.equal(store.stored.length, 1);
-    assert.equal(store.deleted.length, 2);
+    assert.equal(store.stored.length, 0);
+    assert.equal(store.updated.length, 1);
+    assert.equal(store.deleted.length, 1);
     assert.equal(result.fallbackMerged, 1);
   });
 
@@ -263,10 +267,10 @@ describe("runCompaction", () => {
     const result = await runCompaction(store, makeEmbedder(), defaultConfig);
 
     assert.equal(result.clustersFound, 1);
-    assert.equal(result.memoriesDeleted, 2);
+    assert.equal(result.memoriesDeleted, 1);
     assert.deepEqual(
       store.deleteCalls.map((call) => call.scopeFilter),
-      [["team-a"], ["team-a"]],
+      [["team-a"]],
     );
   });
 
@@ -306,10 +310,10 @@ describe("runCompaction", () => {
 
     assert.equal(result.llmRefined, 1);
     assert.equal(result.fallbackMerged, 0);
-    assert.equal(result.memoriesDeleted, 2);
-    assert.equal(store.stored[0].text, "User prefers Neovim as their coding editor.");
-    assert.equal(store.stored[0].importance, 0.82);
-    const meta = JSON.parse(store.stored[0].metadata);
+    assert.equal(result.memoriesDeleted, 1);
+    assert.equal(store.updated[0].entry.text, "User prefers Neovim as their coding editor.");
+    assert.equal(store.updated[0].entry.importance, 0.82);
+    const meta = JSON.parse(store.updated[0].entry.metadata);
     assert.equal(meta.compacted, true);
     assert.deepEqual(meta.source_ids, ["a", "b"]);
     assert.equal(meta.source_count, 2);
@@ -338,8 +342,8 @@ describe("runCompaction", () => {
       const result = await runCompaction(store, makeEmbedder(), { ...defaultConfig, mergeMode: "llm" }, undefined, undefined, undefined, llm);
 
       assert.equal(result.llmRefined, 1);
-      assert.equal(store.stored[0].category, "other");
-      const meta = JSON.parse(store.stored[0].metadata);
+      assert.equal(store.updated[0].entry.category, "other");
+      const meta = JSON.parse(store.updated[0].entry.metadata);
       assert.equal(meta.memory_category, "patterns");
     }
   });
@@ -355,8 +359,8 @@ describe("runCompaction", () => {
     assert.equal(result.llmRefined, 0);
     assert.equal(result.fallbackMerged, 1);
     assert.equal(result.failedClusters, 0);
-    assert.ok(store.stored[0].text.includes("uses vim"));
-    assert.ok(store.stored[0].text.includes("prefers dark mode"));
+    assert.ok(store.updated[0].entry.text.includes("uses vim"));
+    assert.ok(store.updated[0].entry.text.includes("prefers dark mode"));
   });
 
   it("dry-run does not write anything", async () => {
