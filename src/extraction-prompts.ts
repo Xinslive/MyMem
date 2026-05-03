@@ -296,3 +296,32 @@ Return JSON only:
   "reason": "short explanation"
 }`;
 }
+
+export function buildRefineStrategyStepsPrompt(
+  steps: string[],
+  failureContext: string,
+): string {
+  return `You are refining candidate strategy steps extracted from a conversation.
+
+Some steps may be irrelevant chitchat, personal topics, or unrelated conversation fragments that happened to match keyword patterns. Your job is to keep ONLY steps that are directly related to the technical failure/recovery.
+
+**Candidate steps**:
+${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+**Failure/recovery context** (the actual technical issue):
+${failureContext || "(no additional context)"}
+
+Rules:
+- REMOVE steps about personal topics, hobbies, blogs, lifestyle, or general conversation unrelated to the technical issue
+- REMOVE steps that are vague or not actionable (e.g. "user mentioned something")
+- KEEP steps about debugging, fixing, configuring, testing, deploying, or verifying technical issues
+- If a step is partially relevant but noisy, rewrite it to be a clean, actionable technical step
+- If ALL steps are irrelevant, return an empty array
+
+Return JSON:
+{
+  "refined_steps": ["step 1", "step 2"]
+}
+
+Only include steps that are genuinely about the technical failure/recovery. When in doubt, remove it.`;
+}

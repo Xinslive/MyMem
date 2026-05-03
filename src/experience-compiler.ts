@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { Logger } from "./logger.js";
 import type { ExperienceCompilerConfig } from "./plugin-types.js";
 import type { Embedder } from "./embedder.js";
+import type { LlmClient } from "./llm-client.js";
 import type { MemoryEntry } from "./store.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import {
@@ -17,6 +18,7 @@ import {
   type ReasoningStrategyKind,
   type ReasoningStrategyOutcome,
 } from "./reasoning-strategy.js";
+import { buildRefineStrategyStepsPrompt } from "./extraction-prompts.js";
 
 type CompilerStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
@@ -27,6 +29,7 @@ type CompilerStore = {
 export interface ExperienceCompilerDeps {
   store: CompilerStore;
   embedder?: Pick<Embedder, "embedPassage">;
+  llm?: LlmClient;
   logger?: Pick<Logger, "info" | "warn" | "debug">;
 }
 
@@ -43,6 +46,7 @@ export const DEFAULT_EXPERIENCE_COMPILER_CONFIG: Required<ExperienceCompilerConf
   gatewayBackfill: true,
   cooldownHours: 4,
   maxStrategiesPerRun: 3,
+  useLlm: true,
 };
 
 function normalizeConfig(config?: ExperienceCompilerConfig): Required<ExperienceCompilerConfig> {
@@ -51,6 +55,7 @@ function normalizeConfig(config?: ExperienceCompilerConfig): Required<Experience
     gatewayBackfill: config?.gatewayBackfill !== false,
     cooldownHours: Math.max(1, Math.floor(config?.cooldownHours ?? DEFAULT_EXPERIENCE_COMPILER_CONFIG.cooldownHours)),
     maxStrategiesPerRun: Math.max(1, Math.floor(config?.maxStrategiesPerRun ?? DEFAULT_EXPERIENCE_COMPILER_CONFIG.maxStrategiesPerRun)),
+    useLlm: config?.useLlm !== false,
   };
 }
 
@@ -91,11 +96,44 @@ function buildPreventiveSteps(steps: string[]): string[] {
   });
 }
 
+async function refineStepsWithLlm(
+  steps: string[],
+  failureContext: string,
+  llm: LlmClient | undefined,
+  maxItems: number,
+  logger?: Pick<Logger, "info" | "warn" | "debug">,
+): Promise<string[]> {
+  if (!llm || steps.length === 0) return steps;
+  try {
+    const prompt = buildRefineStrategyStepsPrompt(steps, failureContext);
+    const result = await llm.completeJson<{ refined_steps?: string[] }>(prompt, "strategy-step-refinement");
+    if (!result?.refined_steps || !Array.isArray(result.refined_steps) || result.refined_steps.length === 0) {
+      logger?.debug?.("mymem: experience-compiler LLM refinement returned empty/invalid result, using original steps");
+      return steps;
+    }
+    const refined = result.refined_steps
+      .map((s) => (typeof s === "string" ? s.trim() : ""))
+      .filter((s) => s.length >= 8)
+      .slice(0, maxItems);
+    if (refined.length === 0) {
+      logger?.debug?.("mymem: experience-compiler LLM refinement filtered all steps, using original steps");
+      return steps;
+    }
+    logger?.debug?.(`mymem: experience-compiler LLM refinement: ${steps.length} -> ${refined.length} steps`);
+    return refined;
+  } catch (err) {
+    logger?.warn?.(`mymem: experience-compiler LLM refinement failed: ${err instanceof Error ? err.message : String(err)}`);
+    return steps;
+  }
+}
+
 function collectStrategies(
   rows: MemoryEntry[],
   maxStrategiesPerRun: number,
   conversationBySession: Map<string, string>,
-): Array<{
+  llm: LlmClient | undefined,
+  logger?: Pick<Logger, "info" | "warn" | "debug">,
+): Promise<Array<{
   sessionMarker: string;
   scope: string;
   summary: string;
@@ -111,7 +149,7 @@ function collectStrategies(
   strategyDescription: string;
   failureMode?: string;
   successSignal?: string;
-}> {
+}>> {
   const sessionGroups = new Map<string, MemoryEntry[]>();
   for (const entry of rows) {
     const marker = readSessionMarker(entry);
@@ -165,7 +203,8 @@ function collectStrategies(
     if (!caseRows.length && !hasClosure && !hasFailure) continue;
 
     const rawSteps = extractReusableSteps(closureText, 4);
-    const steps = hasFailure && !hasClosure ? buildPreventiveSteps(rawSteps) : rawSteps;
+    const refinedRawSteps = await refineStepsWithLlm(rawSteps, closureText, llm, 4, logger);
+    const steps = hasFailure && !hasClosure ? buildPreventiveSteps(refinedRawSteps) : refinedRawSteps;
     if (steps.length === 0) continue;
 
     const outcome: ReasoningStrategyOutcome =
@@ -254,12 +293,14 @@ export async function runExperienceCompiler(
     conversationBySession.set(params.sessionKey, params.conversation);
   }
 
-  const strategies = collectStrategies(
+  const strategies = await collectStrategies(
     params?.sessionKey
       ? rows.filter((entry) => readSessionMarker(entry) === params.sessionKey)
       : rows,
     cfg.maxStrategiesPerRun,
     conversationBySession,
+    cfg.useLlm !== false ? deps.llm : undefined,
+    deps.logger,
   );
   result.sessionsConsidered = strategies.length;
 

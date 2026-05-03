@@ -210,14 +210,14 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoRecallMinLength: parsePositiveInt(cfg.autoRecallMinLength) ?? 6,
     autoRecallMinRepeated: parsePositiveInt(cfg.autoRecallMinRepeated) ?? 8,
     autoRecallMaxItems: parsePositiveInt(cfg.autoRecallMaxItems) ?? 5,
-    autoRecallMaxChars: parsePositiveInt(cfg.autoRecallMaxChars) ?? 600,
+    autoRecallMaxChars: parsePositiveInt(cfg.autoRecallMaxChars) ?? 1000,
     autoRecallPerItemMaxChars: parsePositiveInt(cfg.autoRecallPerItemMaxChars) ?? 180,
     autoRecallMaxQueryLength: clampInt(parsePositiveInt(cfg.autoRecallMaxQueryLength) ?? 2_000, 100, 10_000),
     autoRecallCandidatePoolSize: clampInt(parsePositiveInt(cfg.autoRecallCandidatePoolSize) ?? 8, 4, 30),
     autoRecallTimeoutMs: parsePositiveInt(cfg.autoRecallTimeoutMs) ?? 20_000,
     autoRecallDegradeAfterMs: parsePositiveInt(cfg.autoRecallDegradeAfterMs) ?? 5_000,
-    maxRecallPerTurn: parsePositiveInt(cfg.maxRecallPerTurn) ?? 10,
-    recallMode: (cfg.recallMode === "full" || cfg.recallMode === "summary" || cfg.recallMode === "adaptive" || cfg.recallMode === "off") ? cfg.recallMode : "full",
+    maxRecallPerTurn: parsePositiveInt(cfg.maxRecallPerTurn) ?? 15,
+    recallMode: (cfg.recallMode === "full" || cfg.recallMode === "summary" || cfg.recallMode === "l0" || cfg.recallMode === "adaptive" || cfg.recallMode === "off") ? cfg.recallMode : "full",
     autoRecallExcludeAgents: Array.isArray(cfg.autoRecallExcludeAgents)
       ? cfg.autoRecallExcludeAgents
         .filter((id: unknown): id is string => typeof id === "string" && id.trim() !== "")
@@ -239,7 +239,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           : 0.62,
     },
     captureAgents: configuredCaptureAgents ?? ["main"],
-    captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 10, 1, 50),
+    captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 32, 1, 50),
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
         ? (() => {
@@ -292,7 +292,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       } as PluginConfig["llm"];
     })(),
     extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 8,
-    extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8000,
+    extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 12000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as PluginConfig["scopes"] : undefined,
     enableManagementTools: cfg.enableManagementTools !== false,
     sessionStrategy,

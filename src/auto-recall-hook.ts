@@ -371,9 +371,9 @@ export function registerAutoRecallHook(params: {
       }
 
       const configMaxItems = clampInt(config.autoRecallMaxItems ?? 6, 1, 20);
-      const maxPerTurn = clampInt(config.maxRecallPerTurn ?? 10, 1, 50);
+      const maxPerTurn = clampInt(config.maxRecallPerTurn ?? 15, 1, 50);
       const autoRecallMaxItems = Math.min(configMaxItems, maxPerTurn);
-      const autoRecallMaxChars = clampInt(config.autoRecallMaxChars ?? 800, 64, 8000);
+      const autoRecallMaxChars = clampInt(config.autoRecallMaxChars ?? 1000, 64, 8000);
       const autoRecallPerItemMaxChars = clampInt(config.autoRecallPerItemMaxChars ?? 200, 32, 1000);
       const autoRecallCandidatePoolSize = clampInt(config.autoRecallCandidatePoolSize ?? 12, 4, 30);
       const reasoningStrategyConfig = config.reasoningStrategyRecall ?? {};
@@ -530,7 +530,7 @@ export function registerAutoRecallHook(params: {
       }
 
       const effectivePerItemMaxChars = (() => {
-        if (recallMode === "summary") return Math.min(autoRecallPerItemMaxChars, 80);
+        if (recallMode === "summary" || recallMode === "l0") return Math.min(autoRecallPerItemMaxChars, 80);
         if (!intent) return autoRecallPerItemMaxChars;
         switch (intent.depth) {
           case "l0": return Math.min(autoRecallPerItemMaxChars, 80);
@@ -567,7 +567,7 @@ export function registerAutoRecallHook(params: {
           if (metaObj.source) parts.push("(" + metaObj.source + ")");
           return parts.join(" ");
         };
-        const contentText = recallMode === "summary"
+        const contentText = (recallMode === "summary" || recallMode === "l0")
           ? (metaObj.l0_abstract || r.entry.text)
           : intent?.depth === "full"
             ? (r.entry.text)

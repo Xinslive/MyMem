@@ -158,7 +158,7 @@ export function registerAutoCaptureHook(params: {
           params.autoCaptureRecentTexts.set(sessionKey, nextRecentTexts);
         }
 
-        const captureMaxMessages = Math.max(1, Math.min(50, Math.floor(config.captureMaxMessages ?? 10)));
+        const captureMaxMessages = Math.max(1, Math.min(50, Math.floor(config.captureMaxMessages ?? 32)));
         captureItems = captureItems.slice(-captureMaxMessages);
         const texts = textsOf(captureItems);
         if (skippedAutoCaptureTexts > 0) {

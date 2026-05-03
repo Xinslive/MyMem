@@ -157,7 +157,7 @@ async function runGatewayMaintenanceOnce(
 
   if (runCompiler) {
     compilerResult = await deps.runExperienceCompiler(
-      { store, embedder, logger: api.logger },
+      { store, embedder, llm: smartExtractionLlmClient ?? undefined, logger: api.logger },
       config.experienceCompiler,
     );
     await deps.recordExperienceCompilerRun(compilerStateFile);

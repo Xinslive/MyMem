@@ -234,8 +234,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
       smartExtractor = new SmartExtractor(store, embedder, llmClient, {
         user: "User",
-        extractMinMessages: config.extractMinMessages ?? 5,
-        extractMaxChars: config.extractMaxChars ?? 8000,
+        extractMinMessages: config.extractMinMessages ?? 8,
+        extractMaxChars: config.extractMaxChars ?? 12000,
         defaultScope: config.scopes?.default ?? "global",
         workspaceBoundary: config.workspaceBoundary,
         admissionControl: config.admissionControl,
