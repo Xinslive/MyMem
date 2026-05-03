@@ -175,8 +175,11 @@ function clip(text: string, maxChars: number): string {
 }
 
 function hasNegativeRecallSignal(text: string): boolean {
-  return /\b(wrong|incorrect|not relevant|irrelevant|outdated|stale|bad recall|misremembered|you remembered wrong)\b/i.test(text) ||
-    /(?:不对|不是这样|记错|无关|过时|别再提|不要再用|错误的记忆)/.test(text) ||
+  // Only match phrases that are explicitly about memory/recall quality,
+  // NOT generic negative words (wrong, incorrect, stale) which frequently
+  // appear in normal conversation about code, bugs, tests, etc.
+  return /\b(bad recall|misremembered|you remembered wrong|don't remember that|not what I said)\b/i.test(text) ||
+    /(?:记错|错记|不要记|别再提|不要再用|错误的记忆|你记错了|我没说过这个|不要用这个记忆)/.test(text) ||
     containsStrongNegativeGovernanceFeedback(text);
 }
 
@@ -188,6 +191,8 @@ function hasNegativeRecallSignal(text: string): boolean {
 function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boolean {
   if (!userMessage.trim() || injectedTexts.length === 0) return false;
   const tokenize = (s: string) => {
+    // CJK single characters are common particles (的/是/了) — require length >= 2
+    // to avoid spurious overlaps on function words.
     const words = s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").split(/\s+/).filter((w) => w.length >= 2);
     return new Set(words);
   };
@@ -202,8 +207,10 @@ function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boo
   for (const t of userTokens) {
     if (memoryTokens.has(t)) overlap++;
   }
-  // Very low overlap ratio → likely topic change
-  return overlap / Math.max(userTokens.size, 1) < 0.08 && overlap < 3;
+  // Require both low ratio AND low absolute overlap.
+  // Raised absolute threshold from 3 → 4 to reduce false positives
+  // on short Chinese messages where a few shared character-pairs are coincidental.
+  return overlap / Math.max(userTokens.size, 1) < 0.08 && overlap < 4;
 }
 
 function extractCorrection(text: string): { oldText: string; newText: string } | null {
@@ -565,7 +572,7 @@ export function registerHookEnhancements(params: {
         for (const m of recentInjected) {
           m.ignoreCount = (m.ignoreCount || 0) + 1;
         }
-        const toSuppress = recentInjected.filter((m) => (m.ignoreCount || 0) >= 3);
+        const toSuppress = recentInjected.filter((m) => (m.ignoreCount || 0) >= 5);
         if (toSuppress.length > 0) {
           try {
             await patchBadRecall({
@@ -702,15 +709,22 @@ export function registerHookEnhancements(params: {
 
     void (async () => {
       try {
-        if (enhancementEnabled(config, "badRecallFeedback") && session.injected.length > 0 && hasNegativeRecallSignal(`${userText}\n${text}`)) {
-          await patchBadRecall({
-            store,
-            injected: session.injected,
-            scopeFilter,
-            reason: "negative_recall_signal",
-            currentTurn: session.turnCount,
-            suppressTurns: getSelfCorrectionLoopConfig(config).suppressTurns,
-          });
+        // Only check the user's latest message for negative recall signals,
+        // NOT the full conversation (which includes agent responses about code
+        // bugs, test failures, etc. that contain words like "wrong"/"incorrect").
+        // Also only flag memories injected in the last 5 minutes, not the entire session.
+        if (enhancementEnabled(config, "badRecallFeedback") && session.injected.length > 0) {
+          const recentInjected = session.injected.filter((m) => Date.now() - m.injectedAt < 300_000);
+          if (recentInjected.length > 0 && hasNegativeRecallSignal(userText)) {
+            await patchBadRecall({
+              store,
+              injected: recentInjected,
+              scopeFilter,
+              reason: "negative_recall_signal",
+              currentTurn: session.turnCount,
+              suppressTurns: getSelfCorrectionLoopConfig(config).suppressTurns,
+            });
+          }
         }
 
         const selfCorrectionLoop = getSelfCorrectionLoopConfig(config);

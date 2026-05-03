@@ -290,7 +290,7 @@ describe("hook enhancement registration", () => {
     const agentEndHooks = eventHandlers.get("agent_end") || [];
     agentEndHooks[0].handler({
       success: true,
-      messages: [{ role: "user", content: "that recall was wrong and irrelevant" }],
+      messages: [{ role: "user", content: "you misremembered that, bad recall" }],
     }, { sessionKey: "agent:main:cli:session-2", agentId: "main" });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -334,7 +334,7 @@ describe("hook enhancement registration", () => {
     const agentEndHooks = eventHandlers.get("agent_end") || [];
     agentEndHooks[0].handler({
       success: true,
-      messages: [{ role: "user", content: "that recall was wrong and irrelevant" }],
+      messages: [{ role: "user", content: "you misremembered that, bad recall" }],
     }, { sessionKey: "agent:main:cli:session-2b", agentId: "main" });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
