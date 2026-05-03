@@ -207,6 +207,11 @@ try {
   assert.equal(services.length, 1, "plugin should register its background service");
   assert.equal(typeof api.hooks.agent_end, "function", "autoCapture should remain enabled by default");
   assert.equal(typeof api.hooks.before_reset, "function", "selfImprovement before_reset hook should be registered by default");
+  assert.deepEqual(
+    Object.keys(api.toolFactories).sort(),
+    manifest.contracts.tools.toSorted(),
+    "contracts.tools should list every tool registered by the default plugin configuration",
+  );
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
   const originalSetInterval = globalThis.setInterval;

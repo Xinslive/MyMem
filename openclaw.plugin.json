@@ -7,6 +7,27 @@
   "skills": [
     "./lesson"
   ],
+  "contracts": {
+    "tools": [
+      "mymem_recall",
+      "mymem_store",
+      "mymem_forget",
+      "mymem_update",
+      "mymem_stats",
+      "mymem_doctor",
+      "mymem_debug",
+      "mymem_explain",
+      "mymem_list",
+      "mymem_promote",
+      "mymem_archive",
+      "mymem_compact",
+      "mymem_explain_rank",
+      "self_improvement_log",
+      "self_improvement_extract_skill",
+      "self_improvement_review",
+      "self_improvement_distill"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
