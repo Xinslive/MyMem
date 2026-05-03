@@ -86,6 +86,7 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "profile",
+  "worth_storing": true,
   "abstract": "用户基本信息：AI 开发工程师，有 3 年 LLM 经验",
   "overview": "## 背景\\n- 职业：AI 开发工程师\\n- 经验：3 年 LLM 应用开发\\n- 技术栈：Python、LangChain",
   "content": "用户是 AI 开发工程师，有 3 年 LLM 应用开发经验。"
@@ -96,6 +97,7 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "preferences",
+  "worth_storing": true,
   "abstract": "Python 代码风格：不要类型提示，简洁直接",
   "overview": "## 偏好领域\\n- 语言：Python\\n- 主题：代码风格\\n\\n## 细节\\n- 不写类型提示\\n- 函数注释保持简洁\\n- 实现方式直接",
   "content": "用户偏好 Python 代码不写类型提示，函数注释简洁，实现方式直接。"
@@ -106,11 +108,31 @@ Each memory contains three levels:
 \`\`\`json
 {
   "category": "cases",
+  "worth_storing": true,
   "abstract": "LanceDB BigInt 数值处理问题",
   "overview": "## 问题\\nLanceDB 0.26+ 会把数值列返回为 BigInt\\n\\n## 解决办法\\n做算术前用 Number(...) 转换",
   "content": "当 LanceDB 返回 BigInt 数值时，做算术运算前要先用 Number(...) 包裹转换。"
 }
 \`\`\`
+
+# Worth Storing Judgment
+
+For each candidate memory, judge whether it is truly worth long-term storage.
+
+**worth_storing = true** when:
+- Personalized information specific to this user (not generic knowledge)
+- Has concrete details, will still be useful weeks/months later
+- Durable preferences, profile facts, reusable procedures, key relationships, significant decisions
+- Problem-solution pairs with enough detail to be actionable
+
+**worth_storing = false** when:
+- One-off chitchat, greetings, or transient situational remarks
+- Vague generalizations without specific details (e.g., "user asked about a feature")
+- Information that will be obsolete within days (temporary schedules, fleeting context)
+- Low-signal restatements of things already clearly implied by the conversation
+- Tool output, error logs, boilerplate, or system metadata
+
+Be strict: when in doubt, set worth_storing to false. Only extract memories that a personal assistant would genuinely need to recall in a future session weeks later.
 
 # Output Format
 
@@ -119,6 +141,7 @@ Return JSON:
   "memories": [
     {
       "category": "profile|preferences|entities|events|cases|patterns",
+      "worth_storing": true,
       "abstract": "中文单行索引",
       "overview": "中文结构化 Markdown 摘要",
       "content": "中文完整叙述"
@@ -127,6 +150,7 @@ Return JSON:
 }
 
 Notes:
+- "worth_storing" is REQUIRED for every candidate. Set to true only for genuinely valuable long-term memories.
 - Output abstract, overview, and content in Simplified Chinese by default, even when the conversation contains English.
 - 默认用简体中文生成 abstract、overview、content；即使对话是英文，也把普通叙述翻译成中文。
 - Preserve code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns exactly.
@@ -225,4 +249,37 @@ Return JSON:
       "overview": "合并后的中文结构化 Markdown 概览",
         "content": "合并后的中文完整内容"
   } `;
+}
+
+export function buildLessonWorthinessPrompt(params: {
+  summary: string;
+  details?: string;
+  source: string;
+  prevention?: string;
+  existingLessonsCount: number;
+}): string {
+  return `Evaluate whether this feedback evidence is worth creating a new preventive lesson memory.
+
+Evidence:
+- Source: ${params.source}
+- Summary: ${params.summary}
+${params.details ? `- Details: ${params.details}` : ""}
+${params.prevention ? `- Suggested prevention: ${params.prevention}` : ""}
+- Existing preventive lessons in memory: ${params.existingLessonsCount}
+
+A preventive lesson is worth creating when:
+- The failure pattern is likely to recur in future sessions
+- The lesson contains concrete, actionable prevention steps
+- It captures a non-obvious pitfall that would otherwise be forgotten
+
+A preventive lesson is NOT worth creating when:
+- It is a one-off transient issue unlikely to recur
+- The evidence is too vague or generic to be actionable
+- An existing lesson already covers this pattern adequately
+
+Return JSON only:
+{
+  "worth_storing": true,
+  "reason": "short explanation"
+}`;
 }

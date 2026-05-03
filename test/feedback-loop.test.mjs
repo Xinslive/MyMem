@@ -325,7 +325,7 @@ it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled
   assert.ok(adaptationCount >= 1, `expected periodic prior adaptation, got ${adaptationCount}`);
 });
 
-it("FeedbackLoop: preventive lesson evidence without an existing lesson is skipped", async () => {
+it("FeedbackLoop: preventive lesson evidence without an existing lesson creates via default (no LLM)", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     admissionController: null,
@@ -347,8 +347,10 @@ it("FeedbackLoop: preventive lesson evidence without an existing lesson is skipp
   });
   await loop.drainPreventiveLessonBuffer();
 
-  assert.equal(lessonStore.entries.size, 0);
-  assert.equal(loop.getStatus().preventiveLessons.skipped, 1);
+  // No LLM provided — defaults to creating the lesson
+  assert.equal(lessonStore.entries.size, 1);
+  assert.equal(loop.getStatus().preventiveLessons.learned, 1);
+  assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
   loop.dispose();
 });
 

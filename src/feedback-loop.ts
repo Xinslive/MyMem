@@ -14,8 +14,10 @@ import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, 
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
 import type { MemoryEntry } from "./store.js";
+import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { buildReasoningStrategyFields } from "./reasoning-strategy.js";
+import { buildLessonWorthinessPrompt } from "./extraction-prompts.js";
 
 // ============================================================================
 // Types
@@ -133,6 +135,7 @@ export const DEFAULT_FEEDBACK_LOOP_CONFIG: FeedbackLoopConfig = {
 type LessonStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
   update(id: string, updates: { metadata?: string }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
+  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
 };
 const MAX_LESSON_TEXT_CHARS = 900;
 
@@ -323,6 +326,7 @@ class ProcessedErrorTracker {
 export class FeedbackLoop {
   private admissionController: AdmissionController | null;
   private lessonStore: LessonStore | null;
+  private llm: LlmClient | null;
   private config: FeedbackLoopConfig;
   private debugLog: (msg: string) => void;
   private runtimeContext: FeedbackLoopRuntimeContext;
@@ -347,12 +351,14 @@ export class FeedbackLoop {
   constructor(opts: {
     admissionController: AdmissionController | null;
     store?: LessonStore | null;
+    llm?: LlmClient | null;
     config: FeedbackLoopConfig;
     debugLog?: (msg: string) => void;
     runtimeContext?: FeedbackLoopRuntimeContext;
   }) {
     this.admissionController = opts.admissionController;
     this.lessonStore = opts.store ?? null;
+    this.llm = opts.llm ?? null;
     this.config = {
       ...opts.config,
       priorAdaptation: opts.config.priorAdaptation ?? DEFAULT_PRIOR_ADAPTATION_CONFIG,
@@ -588,7 +594,85 @@ export class FeedbackLoop {
       return;
     }
 
-    this.skippedPreventiveLessons++;
+    // No existing lesson found — ask LLM whether to create a new one
+    const shouldCreate = await this.evaluateLessonWorthiness(evidence);
+    if (!shouldCreate) {
+      this.skippedPreventiveLessons++;
+      return;
+    }
+
+    // Create new preventive lesson memory
+    try {
+      const scope = evidence.scope ?? scopeFilter?.[0] ?? "global";
+      const newEntry = await this.lessonStore.store({
+        text,
+        vector: [],
+        category: "other",
+        scope,
+        importance: this.config.preventiveLessons.pendingConfidence,
+        metadata: stringifySmartMetadata(buildSmartMetadata(
+          { text, category: "other", importance: this.config.preventiveLessons.pendingConfidence, timestamp: now } as MemoryEntry,
+          {
+            ...strategyFields,
+            memory_category: "patterns",
+            canonical_id: canonicalId,
+            source_reason: "feedback_loop_preventive_lesson",
+            evidence_count: 1,
+            last_evidence_at: now,
+            last_evidence_source: evidence.source,
+            confidence: this.config.preventiveLessons.pendingConfidence,
+            state: "pending",
+            memory_layer: "working",
+          },
+        )),
+      });
+      this.learnedPreventiveLessons++;
+      this.debugLog(`feedback-loop: created new preventive lesson ${newEntry.id} (canonical=${canonicalId})`);
+    } catch (err) {
+      this.failedPreventiveLessons++;
+      this.debugLog(`feedback-loop: failed to create preventive lesson: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Ask LLM whether a piece of evidence is worth creating a new preventive lesson.
+   * Returns true if worth storing, false otherwise. Defaults to true on failure
+   * (err on the side of remembering, not forgetting).
+   */
+  private async evaluateLessonWorthiness(evidence: PreventiveLessonEvidence): Promise<boolean> {
+    if (!this.llm) return true; // No LLM available — default to creating
+
+    try {
+      const existingLessonsCount = this.lessonStore
+        ? (await this.lessonStore.list(evidence.scopeFilter, undefined, 200, 0)).length
+        : 0;
+
+      const prompt = buildLessonWorthinessPrompt({
+        summary: evidence.summary,
+        details: evidence.details,
+        source: evidence.source,
+        prevention: evidence.prevention,
+        existingLessonsCount,
+      });
+
+      const result = await this.llm.completeJson<{ worth_storing?: boolean; reason?: string }>(
+        prompt,
+        "lesson-worthiness",
+      );
+
+      if (!result || typeof result.worth_storing !== "boolean") {
+        this.debugLog("feedback-loop: lesson worthiness LLM returned invalid response, defaulting to create");
+        return true;
+      }
+
+      this.debugLog(
+        `feedback-loop: lesson worthiness judgment: worth_storing=${result.worth_storing} reason=${result.reason ?? "n/a"}`,
+      );
+      return result.worth_storing;
+    } catch (err) {
+      this.debugLog(`feedback-loop: lesson worthiness LLM call failed, defaulting to create: ${String(err)}`);
+      return true;
+    }
   }
 
   // --- Prior Adaptation ---

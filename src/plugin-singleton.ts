@@ -262,6 +262,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         feedbackLoop = new FeedbackLoop({
           admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
           store,
+          llm: smartExtractionLlmClient,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
@@ -277,6 +278,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         feedbackLoop = new FeedbackLoop({
           admissionController: null,
           store,
+          llm: smartExtractionLlmClient,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
@@ -291,6 +293,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     feedbackLoop = new FeedbackLoop({
       admissionController: null,
       store,
+      llm: smartExtractionLlmClient,
       config: feedbackLoopConfig,
       debugLog: (msg: string) => api.logger.debug(msg),
       runtimeContext: {

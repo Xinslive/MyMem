@@ -400,6 +400,7 @@ export class SmartExtractor {
     const result = await this.llm.completeJson<{
       memories: Array<{
         category: string;
+        worth_storing?: boolean;
         abstract: string;
         overview: string;
         content: string;
@@ -465,14 +466,23 @@ export class SmartExtractor {
         continue;
       }
 
-      candidates.push({ category, abstract, overview, content });
+      candidates.push({ category, abstract, overview, content, worth_storing: raw.worth_storing });
     }
 
     this.debugLog(
       `mymem: smart-extractor: validation summary accepted=${candidates.length}, invalidCategory=${invalidCategoryCount}, shortAbstract=${shortAbstractCount}, noiseAbstract=${noiseAbstractCount}`,
     );
 
-    return candidates;
+    // Filter out candidates the LLM judged not worth storing
+    const worthStoring = candidates.filter((c) => c.worth_storing !== false);
+    const notWorthCount = candidates.length - worthStoring.length;
+    if (notWorthCount > 0) {
+      this.debugLog(
+        `mymem: smart-extractor: LLM filtered ${notWorthCount} candidate(s) as not worth storing`,
+      );
+    }
+
+    return worthStoring;
   }
 
   // --------------------------------------------------------------------------
@@ -546,6 +556,7 @@ export class SmartExtractor {
           candidateVector: vector,
           conversationText,
           scopeFilter: scopeFilter ?? [targetScope],
+          worthStoring: candidate.worth_storing,
         })
       : undefined;
 

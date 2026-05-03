@@ -92,6 +92,8 @@ export type CandidateMemory = {
   abstract: string; // L0: one-sentence index
   overview: string; // L1: structured markdown summary
   content: string; // L2: full narrative
+  /** LLM judgment: whether this candidate is worth long-term storage. */
+  worth_storing?: boolean;
 };
 
 /** Dedup decision from LLM. */

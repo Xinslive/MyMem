@@ -689,6 +689,8 @@ export class AdmissionController {
     conversationText: string;
     scopeFilter: string[];
     now?: number;
+    /** When set, skip LLM utility call and use this pre-judged score directly. */
+    worthStoring?: boolean;
   }): Promise<AdmissionEvaluation> {
     const now = params.now ?? Date.now();
     const relevantMatches = await this.loadRelevantMatches(
@@ -697,12 +699,20 @@ export class AdmissionController {
       params.scopeFilter,
     );
 
-    const utility = await scoreUtility(
-      this.llm,
-      this.config.utilityMode,
-      params.candidate,
-      params.conversationText,
-    );
+    // Skip LLM utility call when extraction LLM already judged worth_storing
+    const utility = params.worthStoring !== undefined
+      ? {
+          score: params.worthStoring ? 0.85 : 0.15,
+          reason: params.worthStoring
+            ? "Extraction LLM judged worth_storing=true"
+            : "Extraction LLM judged worth_storing=false",
+        }
+      : await scoreUtility(
+          this.llm,
+          this.config.utilityMode,
+          params.candidate,
+          params.conversationText,
+        );
     const confidence = scoreConfidenceSupport(params.candidate, params.conversationText);
     const novelty = scoreNoveltyFromMatches(params.candidateVector, relevantMatches);
     const recency = scoreRecencyGap(now, relevantMatches, this.config.recency.halfLifeDays);
