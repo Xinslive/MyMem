@@ -46,9 +46,8 @@ export interface PluginConfig {
   /** Agent IDs included in auto-recall injection (whitelist mode). */
   autoRecallIncludeAgents?: string[];
   reasoningStrategyRecall?: ReasoningStrategyRecallConfig;
-  captureAssistant?: boolean;
-  /** Agent IDs whose assistant replies are eligible for auto-capture. Defaults to ["main"]. */
-  captureAssistantAgents?: string[];
+  /** Agent IDs allowed to participate in auto-capture (whitelist). Defaults to ["main"]. Non-listed agents skip auto-capture entirely. */
+  captureAgents?: string[];
   /** Recent user/assistant messages sent to the smart extraction LLM during auto-capture. Default: 10. */
   captureMaxMessages?: number;
   retrieval?: {

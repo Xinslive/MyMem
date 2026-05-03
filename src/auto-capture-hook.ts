@@ -23,14 +23,6 @@ import { preflightAutoCaptureText } from "./hook-enhancements.js";
 
 type CaptureItem = { role: "user" | "assistant"; text: string };
 
-function shouldCaptureAssistantForAgent(config: PluginConfig, agentId: string): boolean {
-  if (config.captureAssistant === true) return true;
-  if (config.captureAssistant === false && config.captureAssistantAgents === undefined) return false;
-
-  const captureAssistantAgents = config.captureAssistantAgents ?? ["main"];
-  return captureAssistantAgents.includes(agentId);
-}
-
 function textsOf(items: CaptureItem[]): string[] {
   return items.map((item) => item.text);
 }
@@ -79,15 +71,21 @@ export function registerAutoCaptureHook(params: {
         }
 
         const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
+
+        const captureAgents = config.captureAgents ?? ["main"];
+        if (!captureAgents.includes(agentId)) {
+          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
+          return;
+        }
+
         const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
         const defaultScope = isSystemBypassId(agentId)
           ? config.scopes?.default ?? "global"
           : scopeManager.getDefaultScope(agentId);
         const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
-        const captureAssistantForAgent = shouldCaptureAssistantForAgent(config, agentId);
 
         api.logger.debug(
-          `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${captureAssistantForAgent}, ${summarizeAgentEndMessages(event.messages)})`,
+          `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, ${summarizeAgentEndMessages(event.messages)})`,
         );
 
         const eligibleItems: Array<{ role: "user" | "assistant"; text: string }> = [];
@@ -98,7 +96,6 @@ export function registerAutoCaptureHook(params: {
           const rawRole = msgObj.role;
           if (rawRole !== "user" && rawRole !== "assistant") continue;
           const role = rawRole;
-          if (role !== "user" && !(captureAssistantForAgent && role === "assistant")) continue;
 
           const content = msgObj.content;
           if (typeof content === "string") {

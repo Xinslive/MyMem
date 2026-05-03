@@ -123,7 +123,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       .map((id) => id.trim());
     return ids.length > 0 ? [...new Set(ids)] : [];
   };
-  const configuredCaptureAssistantAgents = normalizeAgentIdList(cfg.captureAssistantAgents);
+  const configuredCaptureAgents = normalizeAgentIdList(cfg.captureAgents);
 
   const normalizeSessionPrimer = (raw: unknown): Required<SessionPrimerConfig> => {
     if (raw === false) {
@@ -238,10 +238,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           ? Math.max(0, Math.min(1, reasoningStrategyRecallRaw.minScore))
           : 0.62,
     },
-    captureAssistant: cfg.captureAssistant === true,
-    captureAssistantAgents:
-      configuredCaptureAssistantAgents ??
-      (cfg.captureAssistant === false ? [] : ["main"]),
+    captureAgents: configuredCaptureAgents ?? ["main"],
     captureMaxMessages: clampInt(parsePositiveInt(cfg.captureMaxMessages) ?? 10, 1, 50),
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
