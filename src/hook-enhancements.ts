@@ -9,6 +9,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { Embedder } from "./embedder.js";
 import type { PluginConfig } from "./plugin-types.js";
 import type { ScopeManager } from "./scopes.js";
+import type { FeedbackLoop } from "./feedback-loop.js";
 import { resolveScopeFilter } from "./scopes.js";
 import type { MemoryEntry, MemorySearchResult, MemoryStore } from "./store.js";
 import { resolveHookAgentId } from "./config-utils.js";
@@ -541,10 +542,11 @@ export function registerHookEnhancements(params: {
   store: MemoryStore;
   embedder: Embedder;
   scopeManager: ScopeManager;
+  feedbackLoop?: FeedbackLoop | null;
   state?: HookEnhancementState;
   isCliMode?: () => boolean;
 }): HookEnhancementState {
-  const { api, config, store, embedder, scopeManager } = params;
+  const { api, config, store, embedder, scopeManager, feedbackLoop } = params;
   const state = params.state ?? createHookEnhancementState();
 
   api.on("after_tool_call", (event: any, ctx: any) => {
@@ -554,7 +556,20 @@ export function registerHookEnhancements(params: {
     const text = extractToolText(event);
     session.lastTouchedFiles = extractTouchedFiles(text).reduce((acc, file) => uniquePush(acc, file), session.lastTouchedFiles);
     const failed = event?.success === false || event?.error || /\b(error|failed|exception|traceback)\b/i.test(text);
-    if (failed) session.lastToolError = clip(`${extractToolName(event)}: ${text}`, 1_000);
+    if (failed) {
+      const toolName = extractToolName(event);
+      session.lastToolError = clip(`${toolName}: ${text}`, 1_000);
+      feedbackLoop?.onPreventiveLessonEvidence({
+        summary: session.lastToolError,
+        details: text,
+        source: /\b(test|assert|expect|node --test|npm test|pytest|vitest|jest|tsc|eslint)\b/i.test(text)
+          ? "test_failure"
+          : "tool_error",
+        sessionKey,
+        scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx?.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
+        toolName,
+      });
+    }
   }, { priority: 8 });
 
   api.on("before_prompt_build", async (event: any, ctx: any) => {
@@ -714,6 +729,14 @@ export function registerHookEnhancements(params: {
           const correctionRules = extractGovernanceRulesFromText(userText || text)
             .filter((rule) => rule.confidence >= selfCorrectionLoop.minConfidence);
           for (const rule of correctionRules) {
+            feedbackLoop?.onPreventiveLessonEvidence({
+              summary: rule.text,
+              details: userText || text,
+              source: "user_correction",
+              sessionKey,
+              scopeFilter,
+              prevention: "Preserve this correction as a preventive rule and suppress or supersede conflicting memories before relying on them again.",
+            });
             await applySelfCorrectionRule({
               api,
               store,
@@ -729,6 +752,14 @@ export function registerHookEnhancements(params: {
         if (enhancementEnabled(config, "correctionDiff")) {
           const correction = extractCorrection(userText || text);
           if (correction) {
+            feedbackLoop?.onPreventiveLessonEvidence({
+              summary: `User corrected '${correction.oldText}' to '${correction.newText}'.`,
+              details: userText || text,
+              source: "user_correction",
+              sessionKey,
+              scopeFilter,
+              prevention: `Use '${correction.newText}' instead of '${correction.oldText}' and archive conflicting recall before using it again.`,
+            });
             const results = await searchMemories({ store, embedder, query: correction.oldText, scopeFilter, limit: 1, minScore: 0.12 });
             const match = results[0]?.entry;
             if (match) {
@@ -771,6 +802,8 @@ export function registerHookEnhancements(params: {
             workspace_drift_updated_at: Date.now(),
           }, scopeFilter)));
         }
+
+        await feedbackLoop?.drainPreventiveLessonBuffer();
       } catch (err) {
         api.logger.warn?.(`mymem: hook enhancement agent_end failed: ${String(err)}`);
       }

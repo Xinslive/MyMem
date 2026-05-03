@@ -11,6 +11,12 @@ import {
   hasTaskClosureSignal,
   normalizeGovernanceText,
 } from "./governance-rules.js";
+import {
+  buildReasoningStrategyFields,
+  formatStrategyStepsMarkdown,
+  type ReasoningStrategyKind,
+  type ReasoningStrategyOutcome,
+} from "./reasoning-strategy.js";
 
 type CompilerStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
@@ -65,6 +71,26 @@ function buildStrategySummary(steps: string[]): string {
   return summary.length <= 220 ? summary : `${summary.slice(0, 219).trimEnd()}…`;
 }
 
+function containsFailureSignal(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(?:\b(error|failed|failure|exception|traceback|regression|timeout|wrong|incorrect|flaky)\b|报错|失败|异常|回归|超时|不对|错误|没通过)/i.test(trimmed);
+}
+
+function containsRecoverySignal(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(?:\b(recovered|recovery|retried|reran|fixed after|resolved after|fallback worked|workaround)\b|恢复|重试后|重新运行后|绕过后|修复后)/i.test(trimmed);
+}
+
+function buildPreventiveSteps(steps: string[]): string[] {
+  const prefixPattern = /^(?:avoid|prevent|before|verify|check|retest|confirm|do not|don't|不要|避免|先|验证|确认)\b/i;
+  return steps.map((step) => {
+    if (prefixPattern.test(step)) return step;
+    return `Before repeating this failure mode, ${step.charAt(0).toLowerCase()}${step.slice(1)}`;
+  });
+}
+
 function collectStrategies(
   rows: MemoryEntry[],
   maxStrategiesPerRun: number,
@@ -78,6 +104,13 @@ function collectStrategies(
   caseIds: string[];
   canonicalId: string;
   confidence: number;
+  outcome: ReasoningStrategyOutcome;
+  strategyKind: ReasoningStrategyKind;
+  strategyTitle: string;
+  strategySteps: string[];
+  strategyDescription: string;
+  failureMode?: string;
+  successSignal?: string;
 }> {
   const sessionGroups = new Map<string, MemoryEntry[]>();
   for (const entry of rows) {
@@ -96,6 +129,13 @@ function collectStrategies(
     caseIds: string[];
     canonicalId: string;
     confidence: number;
+    outcome: ReasoningStrategyOutcome;
+    strategyKind: ReasoningStrategyKind;
+    strategyTitle: string;
+    strategySteps: string[];
+    strategyDescription: string;
+    failureMode?: string;
+    successSignal?: string;
   }> = [];
 
   for (const [sessionMarker, sessionRows] of [...sessionGroups.entries()].sort((a, b) => {
@@ -119,24 +159,44 @@ function collectStrategies(
       .join("\n");
 
     const closureText = [conversation, joinedCaseText].filter(Boolean).join("\n");
-    if (!caseRows.length && !hasTaskClosureSignal(closureText)) continue;
+    const hasClosure = hasTaskClosureSignal(closureText);
+    const hasFailure = containsFailureSignal(closureText);
+    const hasRecovery = containsRecoverySignal(closureText);
+    if (!caseRows.length && !hasClosure && !hasFailure) continue;
 
-    const steps = extractReusableSteps(closureText, 4);
+    const rawSteps = extractReusableSteps(closureText, 4);
+    const steps = hasFailure && !hasClosure ? buildPreventiveSteps(rawSteps) : rawSteps;
     if (steps.length === 0) continue;
 
-    const summary = buildStrategySummary(steps);
+    const outcome: ReasoningStrategyOutcome =
+      hasFailure && hasClosure && hasRecovery ? "mixed" : hasClosure ? "success" : hasFailure ? "failure" : "success";
+    const strategyKind: ReasoningStrategyKind =
+      outcome === "mixed" ? "contrastive" : outcome === "failure" ? "preventive" : "validated";
+    const strategyTitle = buildStrategySummary(steps);
+    const strategyDescription = strategyKind === "preventive"
+      ? "Preventive strategy compiled from a recent failure mode."
+      : strategyKind === "contrastive"
+        ? "Contrastive strategy compiled from a recent failure and recovery."
+        : "Reusable strategy compiled from recent successful work.";
     compiled.push({
       sessionMarker,
       scope: caseRows[0]?.scope ?? sessionRows[0]?.scope ?? "global",
-      summary,
-      overview: steps.map((step) => `- ${step}`).join("\n"),
+      summary: strategyTitle,
+      overview: formatStrategyStepsMarkdown(steps),
       content: [
-        "Reusable strategy compiled from recent successful work:",
+        `${strategyDescription}:`,
         ...steps.map((step, index) => `${index + 1}. ${step}`),
       ].join("\n"),
       caseIds: caseRows.map((entry) => entry.id).slice(0, 8),
-      canonicalId: `strategy:${normalizeGovernanceText(steps.join(" ")).slice(0, 120)}`,
-      confidence: hasTaskClosureSignal(closureText) ? 0.8 : 0.72,
+      canonicalId: `strategy:${strategyKind}:${normalizeGovernanceText(steps.join(" ")).slice(0, 120)}`,
+      confidence: outcome === "success" ? 0.8 : outcome === "mixed" ? 0.76 : 0.68,
+      outcome,
+      strategyKind,
+      strategyTitle,
+      strategySteps: steps,
+      strategyDescription,
+      failureMode: hasFailure ? closureText.slice(0, 220).trim() : undefined,
+      successSignal: hasClosure ? closureText.slice(-220).trim() : undefined,
     });
 
     if (compiled.length >= maxStrategiesPerRun) break;
@@ -216,8 +276,19 @@ export async function runExperienceCompiler(
 
     if (existing) {
       const meta = parseSmartMetadata(existing.metadata, existing);
+      const strategyFields = buildReasoningStrategyFields({
+        kind: strategy.strategyKind,
+        outcome: strategy.outcome,
+        title: strategy.strategyTitle,
+        steps: strategy.strategySteps,
+        description: strategy.strategyDescription,
+        failureMode: strategy.failureMode,
+        prevention: strategy.outcome !== "success" ? strategy.strategySteps.join(" ") : undefined,
+        successSignal: strategy.successSignal,
+      });
       const next = buildSmartMetadata(existing, {
         compiled_strategy: true,
+        ...strategyFields,
         compiled_from_case_ids: Array.from(new Set([
           ...(Array.isArray(meta.compiled_from_case_ids) ? meta.compiled_from_case_ids : []),
           ...strategy.caseIds,
@@ -233,6 +304,16 @@ export async function runExperienceCompiler(
 
     const now = Date.now();
     const vector = await deps.embedder.embedPassage(strategy.summary);
+    const strategyFields = buildReasoningStrategyFields({
+      kind: strategy.strategyKind,
+      outcome: strategy.outcome,
+      title: strategy.strategyTitle,
+      steps: strategy.strategySteps,
+      description: strategy.strategyDescription,
+      failureMode: strategy.failureMode,
+      prevention: strategy.outcome !== "success" ? strategy.strategySteps.join(" ") : undefined,
+      successSignal: strategy.successSignal,
+    });
     await deps.store.store({
       text: strategy.summary,
       vector,
@@ -257,6 +338,7 @@ export async function runExperienceCompiler(
             source_reason: "experience_compiler",
             source_session: strategy.sessionMarker,
             compiled_strategy: true,
+            ...strategyFields,
             compiled_from_case_ids: strategy.caseIds,
             canonical_id: strategy.canonicalId,
             state: "confirmed",

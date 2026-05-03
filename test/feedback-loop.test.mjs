@@ -18,7 +18,9 @@ const {
   DEFAULT_FEEDBACK_LOOP_CONFIG,
   DEFAULT_NOISE_LEARNING_CONFIG,
   DEFAULT_PRIOR_ADAPTATION_CONFIG,
+  DEFAULT_PREVENTIVE_LESSON_CONFIG,
 } = jiti("../src/feedback-loop.ts");
+const { parseSmartMetadata } = jiti("../src/smart-metadata.ts");
 
 // ============================================================================
 // Helpers
@@ -84,6 +86,32 @@ function writeRejectedAudits(dbPath, entries) {
   );
 }
 
+function makeLessonStore() {
+  const entries = new Map();
+  return {
+    entries,
+    async list(scopeFilter, category, limit = 20, offset = 0) {
+      const rows = [...entries.values()]
+        .filter((entry) => !scopeFilter || scopeFilter.includes(entry.scope))
+        .filter((entry) => !category || entry.category === category);
+      return rows.slice(offset, offset + limit);
+    },
+    async store(entry) {
+      const id = `lesson-${entries.size + 1}`;
+      const full = { ...entry, id, timestamp: Date.now() };
+      entries.set(id, full);
+      return full;
+    },
+    async update(id, updates) {
+      const entry = entries.get(id);
+      if (!entry) return null;
+      const next = { ...entry, ...updates };
+      entries.set(id, next);
+      return next;
+    },
+  };
+}
+
 // ============================================================================
 // Config Normalization Tests
 // ============================================================================
@@ -101,6 +129,7 @@ it("normalizeFeedbackLoopConfig: enabled=true", () => {
   assert.equal(result.enabled, true);
   assert.deepStrictEqual(result.noiseLearning, DEFAULT_NOISE_LEARNING_CONFIG);
   assert.deepStrictEqual(result.priorAdaptation, DEFAULT_PRIOR_ADAPTATION_CONFIG);
+  assert.deepStrictEqual(result.preventiveLessons, DEFAULT_PREVENTIVE_LESSON_CONFIG);
 });
 
 it("normalizeFeedbackLoopConfig: enabled=false when explicitly set", () => {
@@ -152,6 +181,30 @@ it("normalizeFeedbackLoopConfig: priorAdaptation sub-fields", () => {
   assert.equal(result.priorAdaptation.maxRejectionAudits, 50);
 });
 
+it("normalizeFeedbackLoopConfig: preventiveLessons sub-fields", () => {
+  const result = normalizeFeedbackLoopConfig({
+    enabled: true,
+    preventiveLessons: {
+      enabled: false,
+      fromErrors: false,
+      fromCorrections: false,
+      minEvidenceToConfirm: 3,
+      pendingConfidence: 0.35,
+      confirmedConfidence: 0.8,
+      maxLearnPerScan: 4,
+    },
+  });
+  assert.deepStrictEqual(result.preventiveLessons, {
+    enabled: false,
+    fromErrors: false,
+    fromCorrections: false,
+    minEvidenceToConfirm: 3,
+    pendingConfidence: 0.35,
+    confirmedConfidence: 0.8,
+    maxLearnPerScan: 4,
+  });
+});
+
 it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   const result = normalizeFeedbackLoopConfig({
     enabled: true,
@@ -178,6 +231,8 @@ it("normalizeFeedbackLoopConfig: clamps out-of-range values", () => {
   assert.equal(result.priorAdaptation.maxAdjustment, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxAdjustment);
   assert.equal(result.priorAdaptation.observationWindowMs, DEFAULT_PRIOR_ADAPTATION_CONFIG.observationWindowMs);
   assert.equal(result.priorAdaptation.maxRejectionAudits, DEFAULT_PRIOR_ADAPTATION_CONFIG.maxRejectionAudits);
+  assert.equal(result.preventiveLessons.minEvidenceToConfirm, DEFAULT_PREVENTIVE_LESSON_CONFIG.minEvidenceToConfirm);
+  assert.equal(result.preventiveLessons.pendingConfidence, DEFAULT_PREVENTIVE_LESSON_CONFIG.pendingConfidence);
 });
 
 // ============================================================================
@@ -247,14 +302,17 @@ it("FeedbackLoop: onAdmissionRejected buffers entry when enabled", () => {
 });
 
 it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted counts", () => {
+  const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     noiseBank: null,
     embedder: { embed: async () => [] },
     admissionController: { setAdaptiveTypePriors: () => {} },
+    store: lessonStore,
     config: {
       enabled: true,
       noiseLearning: { ...DEFAULT_NOISE_LEARNING_CONFIG, fromErrors: true, fromRejections: true },
       priorAdaptation: { ...DEFAULT_PRIOR_ADAPTATION_CONFIG, enabled: true },
+      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
     },
     runtimeContext: {
       workspaceDir: "/tmp/workspace",
@@ -265,6 +323,7 @@ it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted count
 
   loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
   loop.onSelfImprovementError({ area: "extraction", summary: "extractor returned noise" });
+  loop.onPreventiveLessonEvidence({ source: "user_correction", summary: "Don't use stale recall.", scope: "global" });
   loop.onAdmissionAdmitted("preferences");
 
   const status = loop.getStatus();
@@ -272,6 +331,7 @@ it("FeedbackLoop: getStatus exposes buffers, runtime context, and admitted count
   assert.equal(status.disposed, false);
   assert.equal(status.noiseLearning.bufferedErrors, 1);
   assert.equal(status.noiseLearning.bufferedRejections, 1);
+  assert.equal(status.preventiveLessons.bufferedEvidence, 2);
   assert.equal(status.priorAdaptation.enabled, true);
   assert.equal(status.priorAdaptation.observedAdmitted, 1);
   assert.deepStrictEqual(status.runtime, {
@@ -367,6 +427,90 @@ it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled
   }
 
   assert.ok(adaptationCount >= 1, `expected periodic prior adaptation, got ${adaptationCount}`);
+});
+
+it("FeedbackLoop: preventive lesson evidence writes pending low-confidence strategy", async () => {
+  const lessonStore = makeLessonStore();
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [0.1, 0.2], embedPassage: async () => [0.1, 0.2] },
+    admissionController: null,
+    store: lessonStore,
+    config: {
+      enabled: true,
+      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
+      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
+    },
+  });
+
+  loop.onPreventiveLessonEvidence({
+    summary: "node --test failed because parser fixtures were stale",
+    details: "AssertionError: expected normalized cron expression",
+    source: "test_failure",
+    sessionKey: "agent:main:session:test",
+    scope: "global",
+    signatureHash: "same-failure",
+  });
+  await loop.drainPreventiveLessonBuffer();
+
+  assert.equal(lessonStore.entries.size, 1);
+  const entry = [...lessonStore.entries.values()][0];
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  assert.equal(meta.reasoning_strategy, true);
+  assert.equal(meta.strategy_kind, "preventive");
+  assert.equal(meta.outcome, "failure");
+  assert.equal(meta.state, "pending");
+  assert.equal(meta.confidence, DEFAULT_PREVENTIVE_LESSON_CONFIG.pendingConfidence);
+  assert.equal(meta.evidence_count, 1);
+  assert.match(meta.prevention, /rerun the focused failing check/i);
+  assert.equal(meta.source_reason, "feedback_loop_preventive_lesson");
+  loop.dispose();
+});
+
+it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", async () => {
+  const lessonStore = makeLessonStore();
+  const loop = new FeedbackLoop({
+    noiseBank: null,
+    embedder: { embed: async () => [0.1, 0.2], embedPassage: async () => [0.1, 0.2] },
+    admissionController: null,
+    store: lessonStore,
+    config: {
+      enabled: true,
+      noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
+      priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+      preventiveLessons: {
+        ...DEFAULT_PREVENTIVE_LESSON_CONFIG,
+        minEvidenceToConfirm: 2,
+        pendingConfidence: 0.4,
+        confirmedConfidence: 0.75,
+      },
+    },
+  });
+
+  const evidence = {
+    summary: "Tool failed with timeout while reading large logs",
+    details: "Error: timeout after 20000ms",
+    source: "tool_error",
+    sessionKey: "agent:main:session:test",
+    scopeFilter: ["global"],
+    toolName: "exec_command",
+    signatureHash: "timeout-large-logs",
+  };
+  loop.onPreventiveLessonEvidence(evidence);
+  await loop.drainPreventiveLessonBuffer();
+  loop.onPreventiveLessonEvidence(evidence);
+  await loop.drainPreventiveLessonBuffer();
+
+  assert.equal(lessonStore.entries.size, 1, "repeated evidence should update the same canonical lesson");
+  const entry = [...lessonStore.entries.values()][0];
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  assert.equal(meta.state, "confirmed");
+  assert.equal(meta.evidence_count, 2);
+  assert.equal(meta.confidence, 0.75);
+  assert.ok(meta.last_confirmed_use_at);
+  assert.equal(loop.getStatus().preventiveLessons.promoted, 1);
+  loop.dispose();
 });
 
 // ============================================================================

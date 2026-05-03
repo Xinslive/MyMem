@@ -7,6 +7,7 @@
  * 2. Admission rejection rates → AdmissionController type priors (adapt over time)
  */
 
+import { createHash } from "node:crypto";
 import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { NoisePrototypeBank } from "./noise-prototypes.js";
@@ -14,6 +15,9 @@ import type { Embedder } from "./embedder.js";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
+import type { MemoryEntry } from "./store.js";
+import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { buildReasoningStrategyFields } from "./reasoning-strategy.js";
 
 // ============================================================================
 // Types
@@ -39,16 +43,47 @@ export interface PriorAdaptationConfig {
   maxRejectionAudits: number;
 }
 
+export interface PreventiveLessonLearningConfig {
+  enabled: boolean;
+  fromErrors: boolean;
+  fromCorrections: boolean;
+  minEvidenceToConfirm: number;
+  pendingConfidence: number;
+  confirmedConfidence: number;
+  maxLearnPerScan: number;
+}
+
 export interface FeedbackLoopConfig {
   enabled: boolean;
   noiseLearning: NoiseLearningConfig;
   priorAdaptation: PriorAdaptationConfig;
+  preventiveLessons: PreventiveLessonLearningConfig;
 }
 
 export interface FeedbackLoopRuntimeContext {
   workspaceDir?: string;
   dbPath?: string;
   admissionConfig?: AdmissionControlConfig;
+}
+
+export type PreventiveLessonSource =
+  | "tool_error"
+  | "tool_output"
+  | "test_failure"
+  | "user_correction"
+  | "error_file";
+
+export interface PreventiveLessonEvidence {
+  summary: string;
+  details?: string;
+  area?: string;
+  source: PreventiveLessonSource;
+  sessionKey?: string;
+  scope?: string;
+  scopeFilter?: string[];
+  toolName?: string;
+  signatureHash?: string;
+  prevention?: string;
 }
 
 export interface FeedbackLoopStatus {
@@ -75,6 +110,15 @@ export interface FeedbackLoopStatus {
     cycles: number;
     lastAdaptedAt: number | null;
     lastAdaptiveTypePriors: AdmissionTypePriors | null;
+  };
+  preventiveLessons: {
+    enabled: boolean;
+    bufferedEvidence: number;
+    learned: number;
+    updated: number;
+    promoted: number;
+    skipped: number;
+    failed: number;
   };
   runtime: {
     hasWorkspaceDir: boolean;
@@ -103,11 +147,95 @@ export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
   maxRejectionAudits: 1_000,
 };
 
+export const DEFAULT_PREVENTIVE_LESSON_CONFIG: PreventiveLessonLearningConfig = {
+  enabled: true,
+  fromErrors: true,
+  fromCorrections: true,
+  minEvidenceToConfirm: 2,
+  pendingConfidence: 0.45,
+  confirmedConfidence: 0.72,
+  maxLearnPerScan: 3,
+};
+
 export const DEFAULT_FEEDBACK_LOOP_CONFIG: FeedbackLoopConfig = {
   enabled: true,
   noiseLearning: DEFAULT_NOISE_LEARNING_CONFIG,
   priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+  preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
 };
+
+type LessonStore = {
+  list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
+  store(entry: Omit<MemoryEntry, "id" | "timestamp">): Promise<MemoryEntry>;
+  update(id: string, updates: { metadata?: string }, scopeFilter?: string[]): Promise<MemoryEntry | null>;
+};
+
+const DEFAULT_LESSON_SCOPE = "global";
+const MAX_LESSON_TEXT_CHARS = 900;
+
+function clip(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(1, maxChars - 3)).trimEnd()}...`;
+}
+
+function normalizeLessonText(text: string): string {
+  return text.toLowerCase()
+    .normalize("NFKC")
+    .replace(/\/[^ \n\r\t]+/g, "<path>")
+    .replace(/[a-z]:\\[^ \n\r\t]+/gi, "<path>")
+    .replace(/\b\d+\b/g, "<n>")
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hashText(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+function classifyPreventiveLessonSource(evidence: PreventiveLessonEvidence): PreventiveLessonSource {
+  const combined = `${evidence.source} ${evidence.area ?? ""} ${evidence.summary} ${evidence.details ?? ""}`.toLowerCase();
+  if (/\b(test|assert|expect|suite|node --test|npm test|pytest|vitest|jest|tsc|eslint)\b|测试|断言|没通过/.test(combined)) {
+    return "test_failure";
+  }
+  return evidence.source;
+}
+
+function buildPreventionText(evidence: PreventiveLessonEvidence): string {
+  if (typeof evidence.prevention === "string" && evidence.prevention.trim()) {
+    return clip(evidence.prevention, 360);
+  }
+  const source = classifyPreventiveLessonSource(evidence);
+  const toolPart = evidence.toolName ? ` in ${evidence.toolName}` : "";
+  switch (source) {
+    case "user_correction":
+      return "Treat the user correction as the source of truth, update or suppress conflicting memory, and avoid repeating the corrected behavior.";
+    case "test_failure":
+      return "Before broadening the fix, rerun the focused failing check, inspect the first concrete assertion or error, and store the verified prevention once it recurs.";
+    case "tool_error":
+    case "tool_output":
+      return `After a tool failure${toolPart}, inspect the exact error text, retry only the narrow failing step, and verify the fix before continuing.`;
+    case "error_file":
+      return "When this logged error recurs, use the prior failure summary as a checklist before attempting a wider change.";
+  }
+}
+
+function buildPreventiveLessonText(evidence: PreventiveLessonEvidence): string {
+  const source = classifyPreventiveLessonSource(evidence);
+  const summary = clip(evidence.summary, 260);
+  const details = evidence.details ? clip(evidence.details, 260) : "";
+  const prevention = buildPreventionText(evidence);
+  const sourceLabel = source.replace(/_/g, " ");
+  const detailPart = details && details !== summary ? ` Cause: ${details}` : "";
+  return clip(`Pitfall: ${summary}${detailPart} Prevention: ${prevention} Source: ${sourceLabel}.`, MAX_LESSON_TEXT_CHARS);
+}
+
+function canonicalLessonId(evidence: PreventiveLessonEvidence): string {
+  if (evidence.signatureHash) return `preventive:${classifyPreventiveLessonSource(evidence)}:${evidence.signatureHash}`;
+  const key = normalizeLessonText(`${evidence.summary}\n${evidence.details ?? ""}`).slice(0, 240);
+  return `preventive:${classifyPreventiveLessonSource(evidence)}:${hashText(key).slice(0, 16)}`;
+}
 
 // ============================================================================
 // Error File Parser
@@ -349,17 +477,25 @@ export class FeedbackLoop {
   private noiseBank: NoisePrototypeBank | null;
   private embedder: Embedder;
   private admissionController: AdmissionController | null;
+  private lessonStore: LessonStore | null;
   private config: FeedbackLoopConfig;
   private debugLog: (msg: string) => void;
   private runtimeContext: FeedbackLoopRuntimeContext;
 
   private processedErrors = new ProcessedErrorTracker();
+  private processedPreventiveLessonErrors = new ProcessedErrorTracker();
   private learnedRejectionClusters = new LearnedRejectionClusterTracker();
   private rejectionBuffer: AdmissionRejectionAuditEntry[] = [];
   private errorBuffer: { summary: string; details?: string; area?: string }[] = [];
+  private preventiveLessonBuffer: PreventiveLessonEvidence[] = [];
   private admittedTimestampsByCategory: Record<string, number[]> = {};
   private learnedFromErrors = 0;
   private learnedFromRejections = 0;
+  private learnedPreventiveLessons = 0;
+  private updatedPreventiveLessons = 0;
+  private promotedPreventiveLessons = 0;
+  private skippedPreventiveLessons = 0;
+  private failedPreventiveLessons = 0;
   private skippedRelearnCooldown = 0;
   private failedEmbeddings = 0;
   private scanCycles = 0;
@@ -376,6 +512,7 @@ export class FeedbackLoop {
     noiseBank: NoisePrototypeBank | null;
     embedder: Embedder;
     admissionController: AdmissionController | null;
+    store?: LessonStore | null;
     config: FeedbackLoopConfig;
     debugLog?: (msg: string) => void;
     runtimeContext?: FeedbackLoopRuntimeContext;
@@ -383,7 +520,13 @@ export class FeedbackLoop {
     this.noiseBank = opts.noiseBank;
     this.embedder = opts.embedder;
     this.admissionController = opts.admissionController;
-    this.config = opts.config;
+    this.lessonStore = opts.store ?? null;
+    this.config = {
+      ...opts.config,
+      noiseLearning: opts.config.noiseLearning ?? DEFAULT_NOISE_LEARNING_CONFIG,
+      priorAdaptation: opts.config.priorAdaptation ?? DEFAULT_PRIOR_ADAPTATION_CONFIG,
+      preventiveLessons: opts.config.preventiveLessons ?? DEFAULT_PREVENTIVE_LESSON_CONFIG,
+    };
     this.debugLog = opts.debugLog ?? (() => {});
     this.runtimeContext = {};
     this.rememberRuntimeContext(opts.runtimeContext);
@@ -453,6 +596,15 @@ export class FeedbackLoop {
         lastAdaptedAt: this.lastAdaptedAt,
         lastAdaptiveTypePriors: this.lastAdaptiveTypePriors ? { ...this.lastAdaptiveTypePriors } : null,
       },
+      preventiveLessons: {
+        enabled: this.config.preventiveLessons.enabled && Boolean(this.lessonStore),
+        bufferedEvidence: this.preventiveLessonBuffer.length,
+        learned: this.learnedPreventiveLessons,
+        updated: this.updatedPreventiveLessons,
+        promoted: this.promotedPreventiveLessons,
+        skipped: this.skippedPreventiveLessons,
+        failed: this.failedPreventiveLessons,
+      },
       runtime: {
         hasWorkspaceDir: Boolean(this.runtimeContext.workspaceDir),
         hasDbPath: Boolean(this.runtimeContext.dbPath),
@@ -485,13 +637,39 @@ export class FeedbackLoop {
     if (this.config.noiseLearning.fromErrors && this.config.noiseLearning.errorAreas.includes(params.area ?? "")) {
       this.errorBuffer.push(params);
     }
+    if (this.config.preventiveLessons.fromErrors && this.config.noiseLearning.errorAreas.includes(params.area ?? "")) {
+      this.onPreventiveLessonEvidence({
+        summary: params.summary,
+        details: params.details,
+        area: params.area,
+        source: "tool_error",
+      });
+    }
+  }
+
+  onPreventiveLessonEvidence(evidence: PreventiveLessonEvidence): void {
+    if (this.disposed || !this.config.enabled || !this.config.preventiveLessons.enabled) return;
+    if (!this.lessonStore) return;
+    if (evidence.source === "user_correction" && !this.config.preventiveLessons.fromCorrections) return;
+    if (evidence.source !== "user_correction" && !this.config.preventiveLessons.fromErrors) return;
+    if (!evidence.summary.trim()) return;
+    this.preventiveLessonBuffer.push(evidence);
+    const maxBuffered = Math.max(this.config.preventiveLessons.maxLearnPerScan * 10, 20);
+    if (this.preventiveLessonBuffer.length > maxBuffered) {
+      this.preventiveLessonBuffer.splice(0, this.preventiveLessonBuffer.length - maxBuffered);
+    }
   }
 
   // --- Error File Scanning ---
 
   async scanErrorFile(baseDir: string): Promise<void> {
     this.rememberRuntimeContext({ workspaceDir: baseDir });
-    if (this.disposed || !this.config.noiseLearning.fromErrors || !this.noiseBank?.initialized) return;
+    const learnNoise = this.config.noiseLearning.fromErrors && Boolean(this.noiseBank?.initialized);
+    const learnLessons =
+      this.config.preventiveLessons.enabled &&
+      this.config.preventiveLessons.fromErrors &&
+      Boolean(this.lessonStore);
+    if (this.disposed || (!learnNoise && !learnLessons)) return;
     this.scanCycles++;
     this.lastScanAt = Date.now();
 
@@ -500,28 +678,53 @@ export class FeedbackLoop {
       const content = await readFile(filePath, "utf-8");
       const entries = parseErrorsFile(content);
 
-      let learned = 0;
+      const maxPerScan = Math.max(
+        learnNoise ? this.config.noiseLearning.maxLearnPerScan : 0,
+        learnLessons ? this.config.preventiveLessons.maxLearnPerScan : 0,
+      );
+      let processed = 0;
       for (const entry of entries) {
-        if (learned >= this.config.noiseLearning.maxLearnPerScan) break;
-        if (this.processedErrors.has(entry.id)) continue;
+        if (processed >= maxPerScan) break;
+        const noiseProcessed = this.processedErrors.has(entry.id);
+        const lessonProcessed = this.processedPreventiveLessonErrors.has(entry.id);
+        if ((!learnNoise || noiseProcessed) && (!learnLessons || lessonProcessed)) continue;
         if (!this.config.noiseLearning.errorAreas.some((a) => entry.area.toLowerCase().includes(a))) continue;
 
         const text = (entry.summary + (entry.details ? "\n" + entry.details : "")).slice(0, 300);
         if (!text.trim()) continue;
 
-        try {
-          const vector = await this.embedder.embed(text);
-          if (vector && vector.length > 0) {
-            this.noiseBank.learn(vector);
-            this.processedErrors.add(entry.id);
-            this.learnedFromErrors++;
-            this.lastLearnedAt = Date.now();
-            learned++;
-            this.debugLog(`feedback-loop: learned noise from error ${entry.id}`);
+        let processedEntry = false;
+        if (learnNoise && !noiseProcessed && this.noiseBank?.initialized) {
+          try {
+            const vector = await this.embedder.embed(text);
+            if (vector && vector.length > 0) {
+              this.noiseBank.learn(vector);
+              this.processedErrors.add(entry.id);
+              this.learnedFromErrors++;
+              this.lastLearnedAt = Date.now();
+              this.debugLog(`feedback-loop: learned noise from error ${entry.id}`);
+              processedEntry = true;
+            }
+          } catch {
+            this.failedEmbeddings++;
+            this.debugLog(`feedback-loop: failed to embed error ${entry.id}, skipping`);
           }
-        } catch {
-          this.failedEmbeddings++;
-          this.debugLog(`feedback-loop: failed to embed error ${entry.id}, skipping`);
+        }
+
+        if (learnLessons && !lessonProcessed) {
+          this.onPreventiveLessonEvidence({
+            summary: entry.summary,
+            details: entry.details,
+            area: entry.area,
+            source: "error_file",
+            signatureHash: entry.id,
+          });
+          this.processedPreventiveLessonErrors.add(entry.id);
+          processedEntry = true;
+        }
+
+        if (processedEntry) {
+          processed++;
         }
       }
     } catch {
@@ -529,6 +732,7 @@ export class FeedbackLoop {
     }
 
     await this.drainErrorBuffer();
+    await this.drainPreventiveLessonBuffer();
   }
 
   private async drainErrorBuffer(): Promise<void> {
@@ -547,12 +751,141 @@ export class FeedbackLoop {
           this.learnedFromErrors++;
           this.lastLearnedAt = Date.now();
           learned++;
+          this.onPreventiveLessonEvidence({
+            summary: entry.summary,
+            details: entry.details,
+            area: entry.area,
+            source: "tool_error",
+          });
         }
       } catch {
         this.failedEmbeddings++;
         // Skip failed embeddings
       }
     }
+  }
+
+  async drainPreventiveLessonBuffer(): Promise<void> {
+    if (!this.lessonStore || !this.config.preventiveLessons.enabled) return;
+
+    let learned = 0;
+    while (this.preventiveLessonBuffer.length > 0 && learned < this.config.preventiveLessons.maxLearnPerScan) {
+      const evidence = this.preventiveLessonBuffer.shift()!;
+      try {
+        await this.learnPreventiveLesson(evidence);
+        learned++;
+      } catch (err) {
+        this.failedPreventiveLessons++;
+        this.debugLog(`feedback-loop: preventive lesson learn failed: ${String(err)}`);
+      }
+    }
+  }
+
+  private async learnPreventiveLesson(evidence: PreventiveLessonEvidence): Promise<void> {
+    if (!this.lessonStore) return;
+    const text = buildPreventiveLessonText(evidence);
+    if (!text.trim()) {
+      this.skippedPreventiveLessons++;
+      return;
+    }
+
+    const canonicalId = canonicalLessonId(evidence);
+    const scopeFilter = evidence.scopeFilter;
+    const existingRows = await this.lessonStore.list(scopeFilter, undefined, 200, 0);
+    const existing = existingRows.find((entry) => {
+      const meta = parseSmartMetadata(entry.metadata, entry);
+      return meta.state !== "archived" &&
+        meta.memory_category === "patterns" &&
+        meta.reasoning_strategy === true &&
+        meta.strategy_kind === "preventive" &&
+        meta.canonical_id === canonicalId;
+    });
+
+    const now = Date.now();
+    const prevention = buildPreventionText(evidence);
+    const strategyFields = buildReasoningStrategyFields({
+      kind: "preventive",
+      outcome: "failure",
+      title: text,
+      steps: text,
+      description: "Low-confidence preventive lesson inferred from feedback-loop evidence.",
+      failureMode: [evidence.summary, evidence.details].filter(Boolean).join("\n"),
+      prevention,
+    });
+
+    if (existing) {
+      const meta = parseSmartMetadata(existing.metadata, existing);
+      const evidenceCount = Math.max(1, Number(meta.evidence_count || 1) + 1);
+      const shouldConfirm = evidenceCount >= this.config.preventiveLessons.minEvidenceToConfirm;
+      await this.lessonStore.update(existing.id, {
+        metadata: stringifySmartMetadata(buildSmartMetadata(existing, {
+          ...strategyFields,
+          canonical_id: canonicalId,
+          source_reason: "feedback_loop_preventive_lesson",
+          evidence_count: evidenceCount,
+          last_evidence_at: now,
+          last_evidence_source: evidence.source,
+          confidence: shouldConfirm
+            ? Math.max(Number(meta.confidence || 0), this.config.preventiveLessons.confirmedConfidence)
+            : Math.max(Number(meta.confidence || 0), this.config.preventiveLessons.pendingConfidence),
+          state: shouldConfirm ? "confirmed" : "pending",
+          memory_layer: "working",
+          last_confirmed_use_at: shouldConfirm ? now : meta.last_confirmed_use_at,
+        })),
+      }, scopeFilter);
+      this.updatedPreventiveLessons++;
+      if (shouldConfirm && meta.state !== "confirmed") this.promotedPreventiveLessons++;
+      return;
+    }
+
+    const vector = await this.embedLessonText(text);
+    if (!vector.length) {
+      this.skippedPreventiveLessons++;
+      return;
+    }
+    const scope = evidence.scope || scopeFilter?.[0] || DEFAULT_LESSON_SCOPE;
+    await this.lessonStore.store({
+      text,
+      vector,
+      importance: 0.72,
+      category: "other",
+      scope,
+      metadata: stringifySmartMetadata(buildSmartMetadata(
+        {
+          text,
+          category: "other",
+          importance: 0.72,
+          timestamp: now,
+        },
+        {
+          l0_abstract: text,
+          l1_overview: `- ${text}`,
+          l2_content: text,
+          memory_category: "patterns",
+          memory_type: "experience",
+          tier: "working",
+          confidence: this.config.preventiveLessons.pendingConfidence,
+          source: "auto-capture",
+          source_reason: "feedback_loop_preventive_lesson",
+          source_session: evidence.sessionKey,
+          evidence_count: 1,
+          first_evidence_at: now,
+          last_evidence_at: now,
+          last_evidence_source: evidence.source,
+          canonical_id: canonicalId,
+          state: "pending",
+          memory_layer: "working",
+          ...strategyFields,
+        },
+      )),
+    });
+    this.learnedPreventiveLessons++;
+  }
+
+  private async embedLessonText(text: string): Promise<number[]> {
+    const embedder = this.embedder as Pick<Embedder, "embed" | "embedPassage">;
+    if (typeof embedder.embedPassage === "function") return embedder.embedPassage(text);
+    return embedder.embed(text);
   }
 
   // --- Rejection Audit Scanning ---
@@ -603,6 +936,7 @@ export class FeedbackLoop {
     }
 
     await this.drainRejectionBuffer(admissionConfig.rejectThreshold);
+    await this.drainPreventiveLessonBuffer();
   }
 
   private async drainRejectionBuffer(rejectThreshold: number): Promise<void> {
@@ -724,6 +1058,8 @@ export class FeedbackLoop {
         } else {
           await this.drainErrorBuffer();
         }
+      } else {
+        await this.drainPreventiveLessonBuffer();
       }
       if (this.config.noiseLearning.fromRejections) {
         if (dbPath && admissionConfig) {
@@ -732,6 +1068,7 @@ export class FeedbackLoop {
           await this.drainRejectionBuffer(admissionConfig?.rejectThreshold ?? 0.45);
         }
       }
+      await this.drainPreventiveLessonBuffer();
     } catch {
       // Non-critical: swallow
     }
@@ -823,6 +1160,9 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
   const pa = obj.priorAdaptation && typeof obj.priorAdaptation === "object"
     ? obj.priorAdaptation as Record<string, unknown>
     : {};
+  const pl = obj.preventiveLessons && typeof obj.preventiveLessons === "object"
+    ? obj.preventiveLessons as Record<string, unknown>
+    : {};
 
   return {
     enabled: obj.enabled !== false,
@@ -854,6 +1194,19 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
         ? Math.floor(pa.observationWindowMs) : DEFAULT_PRIOR_ADAPTATION_CONFIG.observationWindowMs,
       maxRejectionAudits: typeof pa.maxRejectionAudits === "number" && pa.maxRejectionAudits >= 10 && pa.maxRejectionAudits <= 100_000
         ? Math.floor(pa.maxRejectionAudits) : DEFAULT_PRIOR_ADAPTATION_CONFIG.maxRejectionAudits,
+    },
+    preventiveLessons: {
+      enabled: pl.enabled !== false,
+      fromErrors: pl.fromErrors !== false,
+      fromCorrections: pl.fromCorrections !== false,
+      minEvidenceToConfirm: typeof pl.minEvidenceToConfirm === "number" && pl.minEvidenceToConfirm >= 1 && pl.minEvidenceToConfirm <= 10
+        ? Math.floor(pl.minEvidenceToConfirm) : DEFAULT_PREVENTIVE_LESSON_CONFIG.minEvidenceToConfirm,
+      pendingConfidence: typeof pl.pendingConfidence === "number" && pl.pendingConfidence >= 0 && pl.pendingConfidence <= 1
+        ? pl.pendingConfidence : DEFAULT_PREVENTIVE_LESSON_CONFIG.pendingConfidence,
+      confirmedConfidence: typeof pl.confirmedConfidence === "number" && pl.confirmedConfidence >= 0 && pl.confirmedConfidence <= 1
+        ? pl.confirmedConfidence : DEFAULT_PREVENTIVE_LESSON_CONFIG.confirmedConfidence,
+      maxLearnPerScan: typeof pl.maxLearnPerScan === "number" && pl.maxLearnPerScan >= 1 && pl.maxLearnPerScan <= 10
+        ? Math.floor(pl.maxLearnPerScan) : DEFAULT_PREVENTIVE_LESSON_CONFIG.maxLearnPerScan,
     },
   };
 }

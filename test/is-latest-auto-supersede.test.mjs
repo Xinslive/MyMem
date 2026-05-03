@@ -21,7 +21,6 @@ const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { registerMemoryStoreTool } = jiti("../src/tools.ts");
 const {
   buildSmartMetadata,
-  isMemoryActiveAt,
   parseSmartMetadata,
   stringifySmartMetadata,
 } = jiti("../src/smart-metadata.ts");
@@ -290,6 +289,50 @@ async function runTests() {
 
     assert.equal(res.details.action, "created", "facts should not be auto-superseded");
     console.log("  ✅ facts are not auto-superseded (only preference/entity)");
+  }
+
+  // Test 10: /lesson pitfall format is marked as preventive reasoning strategy
+  {
+    console.log("Test 10: lesson pitfall format becomes preventive reasoning strategy...");
+    const store = makeMockStore();
+    store.setNextSearchResults([]);
+
+    const lessonText = "Pitfall: timeout hid the real failure. Cause: logs were truncated. Fix: rerun the focused test with verbose logs. Prevention: verify the abort path before broad changes.";
+    const tool = createTool(registerMemoryStoreTool, makeContext(store));
+    const res = await tool.execute(null, { text: lessonText, category: "fact" });
+
+    assert.equal(res.details.action, "created");
+    const entry = store._entries.get(res.details.id);
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    assert.equal(meta.reasoning_strategy, true);
+    assert.equal(meta.strategy_kind, "preventive");
+    assert.equal(meta.outcome, "failure");
+    assert.match(meta.prevention, /verify the abort path before broad changes/);
+    assert.deepEqual(meta.strategy_steps.slice(0, 2), [
+      "Pitfall: timeout hid the real failure",
+      "Cause: logs were truncated",
+    ]);
+    console.log("  ✅ lesson pitfall stored as preventive reasoning strategy");
+  }
+
+  // Test 11: /lesson decision-principle format is marked as validated reasoning strategy
+  {
+    console.log("Test 11: lesson decision-principle format becomes validated reasoning strategy...");
+    const store = makeMockStore();
+    store.setNextSearchResults([]);
+
+    const lessonText = "Decision principle (tests): Trigger: parser behavior changes. Action: run the focused parser suite before broad refactors.";
+    const tool = createTool(registerMemoryStoreTool, makeContext(store));
+    const res = await tool.execute(null, { text: lessonText, category: "decision" });
+
+    assert.equal(res.details.action, "created");
+    const entry = store._entries.get(res.details.id);
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    assert.equal(meta.reasoning_strategy, true);
+    assert.equal(meta.strategy_kind, "validated");
+    assert.equal(meta.outcome, "success");
+    assert.match(meta.strategy_title, /Decision principle/);
+    console.log("  ✅ decision principle stored as validated reasoning strategy");
   }
 
   console.log("\n✅ All is-latest auto-supersede tests passed!");

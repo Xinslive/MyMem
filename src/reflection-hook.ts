@@ -208,11 +208,22 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
 
     if (typeof event.error === "string" && event.error.trim().length > 0) {
       const signature = normalizeErrorSignature(event.error);
+      const summary = summarizeErrorText(event.error);
+      const signatureHash = sha256Hex(signature).slice(0, 16);
       helpers.addReflectionErrorSignal(sessionKey, {
         at: Date.now(), toolName: event.toolName || "unknown",
-        summary: summarizeErrorText(event.error), source: "tool_error",
-        signature, signatureHash: sha256Hex(signature).slice(0, 16),
+        summary, source: "tool_error",
+        signature, signatureHash,
       }, reflectionDedupeErrorSignals);
+      singletonState.feedbackLoop?.onPreventiveLessonEvidence({
+        summary,
+        details: event.error,
+        source: "tool_error",
+        sessionKey,
+        scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
+        toolName: event.toolName || "unknown",
+        signatureHash,
+      });
       return;
     }
 
@@ -220,11 +231,22 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
     const resultText = resultTextRaw.length > DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS ? resultTextRaw.slice(0, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS) : resultTextRaw;
     if (resultText && containsErrorSignal(resultText)) {
       const signature = normalizeErrorSignature(resultText);
+      const summary = summarizeErrorText(resultText);
+      const signatureHash = sha256Hex(signature).slice(0, 16);
       helpers.addReflectionErrorSignal(sessionKey, {
         at: Date.now(), toolName: event.toolName || "unknown",
-        summary: summarizeErrorText(resultText), source: "tool_output",
-        signature, signatureHash: sha256Hex(signature).slice(0, 16),
+        summary, source: "tool_output",
+        signature, signatureHash,
       }, reflectionDedupeErrorSignals);
+      singletonState.feedbackLoop?.onPreventiveLessonEvidence({
+        summary,
+        details: resultText,
+        source: "tool_output",
+        sessionKey,
+        scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
+        toolName: event.toolName || "unknown",
+        signatureHash,
+      });
     }
   }, { priority: 15 });
 
@@ -413,6 +435,18 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
           });
         }
         if (singletonState?.feedbackLoop) {
+          for (const signal of toolErrorSignals) {
+            singletonState.feedbackLoop.onPreventiveLessonEvidence({
+              summary: signal.summary,
+              source: signal.source,
+              sessionKey,
+              scope: targetScope,
+              scopeFilter: [targetScope],
+              toolName: signal.toolName,
+              signatureHash: signal.signatureHash,
+            });
+          }
+          singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch(() => {});
           singletonState.feedbackLoop.scanErrorFile(workspaceDir).catch(() => {});
           singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch(() => {});
         }

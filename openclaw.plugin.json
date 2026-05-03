@@ -236,6 +236,41 @@
         "default": [],
         "description": "Whitelist mode for auto-recall injection. Only agents in this list receive auto-recall. Agent resolution falls back to 'main' when no explicit agentId is available. If both include and exclude are set, autoRecallIncludeAgents takes precedence (whitelist wins)."
       },
+      "reasoningStrategyRecall": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Dedicated high-precision channel for compiled reasoning strategy memories. Runs separately from general auto-recall and injects only a small top-N set.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 2
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 2000,
+            "default": 600
+          },
+          "candidatePoolSize": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 20,
+            "default": 8
+          },
+          "minScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.62
+          }
+        }
+      },
       "captureAssistant": {
         "type": "boolean"
       },
@@ -1156,7 +1191,7 @@
       "feedbackLoop": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Feedback loops connecting self-improvement errors and admission rejections back into noise detection and admission priors. All sub-features are opt-in (disabled by default).",
+        "description": "Feedback loops connecting self-improvement errors, corrections, and admission rejections back into noise detection, admission priors, and preventive lessons.",
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -1268,6 +1303,56 @@
                 "maximum": 100000,
                 "default": 1000,
                 "description": "Maximum recent rejected-admission audit rows to inspect per adaptation cycle."
+              }
+            }
+          },
+          "preventiveLessons": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Automatically store low-confidence preventive reasoning lessons from tool errors, test failures, and user corrections; repeated evidence promotes them to confirmed strategies.",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Create preventive lesson memories from repeated feedback-loop evidence."
+              },
+              "fromErrors": {
+                "type": "boolean",
+                "default": true,
+                "description": "Learn preventive lessons from tool errors, tool error output, test failures, and logged self-improvement errors."
+              },
+              "fromCorrections": {
+                "type": "boolean",
+                "default": true,
+                "description": "Learn preventive lessons from explicit user corrections."
+              },
+              "minEvidenceToConfirm": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 2,
+                "description": "Number of matching evidence events required before a pending preventive lesson is promoted to confirmed."
+              },
+              "pendingConfidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.45,
+                "description": "Initial confidence for automatically inferred pending preventive lessons."
+              },
+              "confirmedConfidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.72,
+                "description": "Minimum confidence after promotion to confirmed."
+              },
+              "maxLearnPerScan": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 3,
+                "description": "Maximum preventive lessons learned or updated per feedback scan."
               }
             }
           }
@@ -1524,6 +1609,31 @@
       "help": "Hard per-turn injection cap. Acts as a safety ceiling on top of Auto-Recall Max Items. Default: 10.",
       "advanced": true
     },
+    "reasoningStrategyRecall.enabled": {
+      "label": "Reasoning Strategy Recall",
+      "help": "Inject a separate high-precision block of compiled reasoning strategies during auto-recall.",
+      "advanced": true
+    },
+    "reasoningStrategyRecall.maxItems": {
+      "label": "Strategy Max Items",
+      "help": "Maximum compiled reasoning strategies injected per turn. Default: 2.",
+      "advanced": true
+    },
+    "reasoningStrategyRecall.maxChars": {
+      "label": "Strategy Max Chars",
+      "help": "Character budget for the dedicated reasoning strategy block.",
+      "advanced": true
+    },
+    "reasoningStrategyRecall.candidatePoolSize": {
+      "label": "Strategy Candidate Pool",
+      "help": "Candidate pool cap for high-precision reasoning strategy recall.",
+      "advanced": true
+    },
+    "reasoningStrategyRecall.minScore": {
+      "label": "Strategy Min Score",
+      "help": "Minimum retrieval score required before a reasoning strategy can be injected.",
+      "advanced": true
+    },
     "captureAssistant": {
       "label": "Capture Assistant Messages",
       "help": "Also auto-capture assistant messages (default false to reduce memory pollution)",
@@ -1746,6 +1856,26 @@
     "memoryReflection.dedupeErrorSignals": {
       "label": "Dedupe Error Signals",
       "help": "Deduplicate repeated error signatures per session",
+      "advanced": true
+    },
+    "feedbackLoop.preventiveLessons.enabled": {
+      "label": "Preventive Lesson Learning",
+      "help": "Automatically store low-confidence preventive reasoning lessons from tool failures, test failures, and user corrections.",
+      "advanced": true
+    },
+    "feedbackLoop.preventiveLessons.minEvidenceToConfirm": {
+      "label": "Lesson Promotion Evidence",
+      "help": "Matching evidence count required before a pending preventive lesson is promoted to confirmed.",
+      "advanced": true
+    },
+    "feedbackLoop.preventiveLessons.pendingConfidence": {
+      "label": "Pending Lesson Confidence",
+      "help": "Initial confidence for automatically inferred preventive lessons.",
+      "advanced": true
+    },
+    "feedbackLoop.preventiveLessons.confirmedConfidence": {
+      "label": "Confirmed Lesson Confidence",
+      "help": "Minimum confidence assigned when a preventive lesson is promoted to confirmed.",
       "advanced": true
     },
     "scopes.default": {

@@ -95,6 +95,17 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.experienceCompiler?.enabled, true);
     assert.equal(parsed.experienceCompiler?.cooldownHours, 4);
     assert.equal(parsed.experienceCompiler?.maxStrategiesPerRun, 3);
+    assert.equal(parsed.reasoningStrategyRecall?.enabled, true);
+    assert.equal(parsed.reasoningStrategyRecall?.maxItems, 2);
+    assert.equal(parsed.reasoningStrategyRecall?.maxChars, 600);
+    assert.equal(parsed.reasoningStrategyRecall?.candidatePoolSize, 8);
+    assert.equal(parsed.reasoningStrategyRecall?.minScore, 0.62);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.enabled, true);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.fromErrors, true);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.fromCorrections, true);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.minEvidenceToConfirm, 2);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.pendingConfidence, 0.45);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.confirmedConfidence, 0.72);
     assert.equal(parsed.extractionThrottle?.skipLowValue, false);
     assert.equal(parsed.extractionThrottle?.maxExtractionsPerHour, 0);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.enabled, true);

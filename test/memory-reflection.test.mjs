@@ -1125,6 +1125,36 @@ describe("memory reflection", () => {
       assert.deepEqual(metadata.errorSignals, ["deadbeef1234abcd"]);
     });
 
+    it("marks mapped lessons as preventive reasoning strategies", () => {
+      const metadata = buildReflectionMappedMetadata({
+        mappedItem: {
+          text: "Pitfall: timeout hid the real failure. Fix: rerun the focused test with full logs.",
+          category: "fact",
+          heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
+          mappedKind: "lesson",
+          ordinal: 0,
+          groupSize: 1,
+        },
+        eventId: "refl-20260307-lesson",
+        agentId: "main",
+        sessionKey: "agent:main:session:lesson",
+        sessionId: "lesson",
+        runAt: 1_741_356_000_000,
+        usedFallback: false,
+        toolErrorSignals: [],
+      });
+
+      assert.equal(metadata.reasoning_strategy, true);
+      assert.equal(metadata.strategy_kind, "preventive");
+      assert.equal(metadata.outcome, "failure");
+      assert.match(metadata.strategy_summary, /timeout hid the real failure/);
+      assert.match(metadata.prevention, /timeout hid the real failure/);
+      assert.deepEqual(metadata.strategy_steps, [
+        "Pitfall: timeout hid the real failure",
+        "Fix: rerun the focused test with full logs",
+      ]);
+    });
+
     it("loads mapped rows with decay-aware ranking and fallback penalty", () => {
       const now = Date.UTC(2026, 2, 7);
       const day = 24 * 60 * 60 * 1000;

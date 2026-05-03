@@ -262,6 +262,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           noiseBank: sharedNoiseBank,
           embedder,
           admissionController: smartExtractor ? smartExtractor.getAdmissionController() : null,
+          store,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
@@ -278,6 +279,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           noiseBank: sharedNoiseBank,
           embedder,
           admissionController: null,
+          store,
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
@@ -293,6 +295,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       noiseBank: sharedNoiseBank,
       embedder,
       admissionController: null,
+      store,
       config: feedbackLoopConfig,
       debugLog: (msg: string) => api.logger.debug(msg),
       runtimeContext: {

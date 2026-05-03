@@ -307,6 +307,51 @@ function makeGovernanceFilteredResults() {
   ];
 }
 
+function makeReasoningStrategyResults(count = 3) {
+  const now = Date.now();
+  return Array.from({ length: count }, (_, i) => {
+    const text = `Reusable strategy: run focused test ${i + 1}, patch narrow code, verify regression ${i + 1}.`;
+    return {
+      entry: {
+        id: `s${i + 1}`,
+        text,
+        category: "other",
+        scope: "global",
+        importance: 0.82,
+        timestamp: now - i * 1000,
+        metadata: stringifySmartMetadata(
+          buildSmartMetadata(
+            { text, category: "other", importance: 0.82, timestamp: now - i * 1000 },
+            {
+              l0_abstract: text,
+              l1_overview: `- Run focused test ${i + 1}\n- Patch narrow code\n- Verify regression ${i + 1}`,
+              l2_content: text,
+              memory_category: "patterns",
+              compiled_strategy: true,
+              reasoning_strategy: true,
+              strategy_kind: i === 1 ? "preventive" : "validated",
+              outcome: i === 1 ? "failure" : "success",
+              strategy_title: text,
+              strategy_steps: [
+                `Run focused test ${i + 1}`,
+                "Patch narrow code",
+                `Verify regression ${i + 1}`,
+              ],
+              state: "confirmed",
+              memory_layer: "working",
+              source: "auto-capture",
+            },
+          ),
+        ),
+      },
+      score: 0.94 - i * 0.04,
+      sources: {
+        vector: { score: 0.94 - i * 0.04, rank: i + 1 },
+      },
+    };
+  });
+}
+
 function makeRecallContext(results = makeResults()) {
   return {
     retriever: {
@@ -815,6 +860,82 @@ describe("recall text cleanup", () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith("- "));
     assert.ok(injectedLines.length <= 2, "injected lines should respect autoRecallMaxItems");
+  });
+
+  it("injects compiled reasoning strategies through a separate top-2 channel", async () => {
+    const strategyResults = makeReasoningStrategyResults(3);
+    let retrieveCount = 0;
+    currentMockRetrieve = () => {
+      retrieveCount += 1;
+      return retrieveCount === 1 ? [...strategyResults, ...makeResults()] : strategyResults;
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    myMemPlugin.register(harness.api);
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    const [{ handler: autoRecallHook }] = hooks;
+    const output = await autoRecallHook(
+      { prompt: "Please recall the best strategy for this regression." },
+      { sessionId: "strategy-channel", sessionKey: "agent:main:session:strategy-channel", agentId: "main" },
+    );
+
+    assert.ok(output);
+    assert.match(output.prependContext, /<reasoning-strategies>/);
+    assert.match(output.prependContext, /<relevant-memories>/);
+    const strategyLines = output.prependContext
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- [validated:") || line.startsWith("- [preventive:"));
+    assert.equal(strategyLines.length, 2, "default reasoning strategy channel should inject top 2");
+    assert.match(output.prependContext, /focused test 1/i);
+    assert.match(output.prependContext, /focused test 2/i);
+    assert.doesNotMatch(output.prependContext, /focused test 3/i);
+    const generalBlock = output.prependContext.split("<relevant-memories>")[1] || "";
+    assert.doesNotMatch(generalBlock, /Reusable strategy/i, "compiled strategies should not leak into general memory block");
+  });
+
+  it("can disable the dedicated reasoning strategy channel", async () => {
+    currentMockRetrieve = () => makeResults();
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        reasoningStrategyRecall: { enabled: false },
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    myMemPlugin.register(harness.api);
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    const [{ handler: autoRecallHook }] = hooks;
+    const output = await autoRecallHook(
+      { prompt: "Please recall the best strategy for this regression." },
+      { sessionId: "strategy-disabled", sessionKey: "agent:main:session:strategy-disabled", agentId: "main" },
+    );
+
+    assert.ok(output);
+    assert.doesNotMatch(output.prependContext, /<reasoning-strategies>/);
+    assert.match(output.prependContext, /<relevant-memories>/);
   });
 
   it("auto-recall only injects confirmed non-archived memories", async () => {

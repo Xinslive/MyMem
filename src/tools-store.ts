@@ -27,6 +27,7 @@ import {
 } from "./smart-metadata.js";
 import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
 import { isUserMdExclusiveMemory } from "./workspace-boundary.js";
+import { detectLessonReasoningStrategy } from "./reasoning-strategy.js";
 
 export function registerMemoryStoreTool(
   api: OpenClawPluginApi,
@@ -152,6 +153,7 @@ export function registerMemoryStoreTool(
 
           const safeImportance = clamp01(importance, 0.7);
           const storeCategory = toLegacyMemoryCategory(category) ?? "other";
+          const manualStrategyFields = detectLessonReasoningStrategy(stripped);
           const vector = await runtimeContext.embedder.embedPassage(stripped);
 
           // Temporal awareness: classify and infer expiry
@@ -225,6 +227,7 @@ export function registerMemoryStoreTool(
                 memory_category: oldMeta.memory_category,
                 tier: oldMeta.tier,
                 source: "manual",
+                ...(manualStrategyFields ?? {}),
                 state: "confirmed",
                 memory_layer: deriveManualMemoryLayer(storeCategory),
                 last_confirmed_use_at: now,
@@ -325,6 +328,7 @@ export function registerMemoryStoreTool(
                   l2_content: text,
                   memory_category: deriveManualMemoryCategory(storeCategory, text),
                   source: "manual",
+                  ...(manualStrategyFields ?? {}),
                   state: "confirmed",
                   memory_layer: deriveManualMemoryLayer(storeCategory),
                   last_confirmed_use_at: Date.now(),

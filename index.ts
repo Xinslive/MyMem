@@ -407,6 +407,7 @@ const myMemPlugin = {
       store,
       embedder,
       scopeManager,
+      feedbackLoop,
       state: hookEnhancementState,
       isCliMode,
     });

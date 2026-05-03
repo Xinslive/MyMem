@@ -45,6 +45,7 @@ export interface PluginConfig {
   autoRecallExcludeAgents?: string[];
   /** Agent IDs included in auto-recall injection (whitelist mode). */
   autoRecallIncludeAgents?: string[];
+  reasoningStrategyRecall?: ReasoningStrategyRecallConfig;
   captureAssistant?: boolean;
   retrieval?: {
     mode?: "hybrid" | "vector";
@@ -195,6 +196,15 @@ export interface PluginConfig {
       observationWindowMs?: number;
       maxRejectionAudits?: number;
     };
+    preventiveLessons?: {
+      enabled?: boolean;
+      fromErrors?: boolean;
+      fromCorrections?: boolean;
+      minEvidenceToConfirm?: number;
+      pendingConfidence?: number;
+      confirmedConfidence?: number;
+      maxLearnPerScan?: number;
+    };
   };
   recallPrefix?: {
     categoryField?: string;
@@ -250,6 +260,14 @@ export interface ExperienceCompilerConfig {
   gatewayBackfill?: boolean;
   cooldownHours?: number;
   maxStrategiesPerRun?: number;
+}
+
+export interface ReasoningStrategyRecallConfig {
+  enabled?: boolean;
+  maxItems?: number;
+  maxChars?: number;
+  candidatePoolSize?: number;
+  minScore?: number;
 }
 
 export type ReflectionThinkLevel = "off" | "minimal" | "low" | "medium" | "high";

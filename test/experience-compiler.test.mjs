@@ -94,8 +94,80 @@ describe("experience compiler", () => {
     assert.equal(result.created, 1);
     const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
     assert.equal(meta.compiled_strategy, true);
+    assert.equal(meta.reasoning_strategy, true);
+    assert.equal(meta.strategy_kind, "validated");
+    assert.equal(meta.outcome, "success");
+    assert.match(meta.strategy_summary, /Reusable strategy/);
+    assert.deepEqual(meta.strategy_steps.slice(0, 3), [
+      "Run the failing test first",
+      "Patch the parser",
+      "Verify the focused suite",
+    ]);
     assert.equal(meta.memory_category, "patterns");
     assert.deepEqual(meta.compiled_from_case_ids, ["case-1", "event-1"]);
+  });
+
+  it("creates contrastive strategies when failure is recovered in the same session", async () => {
+    const now = Date.now();
+    const rows = [
+      makeEntry({
+        id: "case-1",
+        text: "The first test failed with a timeout. Rerun with verbose logs, patch the abort guard, then verify the focused suite passed.",
+        memoryCategory: "cases",
+        timestamp: now - 10_000,
+        metadata: { source_session: "sess-mixed" },
+      }),
+    ];
+    const store = createStore(rows);
+
+    const result = await runExperienceCompiler(
+      { store, embedder: { embedPassage: async () => [0.1] } },
+      { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
+      {
+        sessionKey: "sess-mixed",
+        conversation: "assistant: The first test failed with a timeout. assistant: Rerun with verbose logs. assistant: Patch the abort guard. assistant: Recovered after rerun and the focused suite passed.",
+      },
+    );
+
+    assert.equal(result.created, 1);
+    const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
+    assert.equal(meta.strategy_kind, "contrastive");
+    assert.equal(meta.outcome, "mixed");
+    assert.match(meta.failure_mode, /first test failed/i);
+    assert.match(meta.success_signal, /focused suite passed/i);
+    assert.match(meta.l2_content, /failure and recovery/i);
+  });
+
+  it("creates preventive reasoning strategies from failure experiences", async () => {
+    const now = Date.now();
+    const rows = [
+      makeEntry({
+        id: "case-1",
+        text: "The test failed because the hook skipped the retry. Check the abort path and verify the focused regression.",
+        memoryCategory: "cases",
+        timestamp: now - 10_000,
+        metadata: { source_session: "sess-failure" },
+      }),
+    ];
+    const store = createStore(rows);
+
+    const result = await runExperienceCompiler(
+      { store, embedder: { embedPassage: async () => [0.1] } },
+      { enabled: true, gatewayBackfill: true, cooldownHours: 6, maxStrategiesPerRun: 3 },
+      {
+        sessionKey: "sess-failure",
+        conversation: "assistant: The test failed with a timeout. assistant: Check the abort path. assistant: Verify the focused regression before retrying.",
+      },
+    );
+
+    assert.equal(result.created, 1);
+    const meta = parseSmartMetadata(store.stored[0].metadata, store.stored[0]);
+    assert.equal(meta.compiled_strategy, true);
+    assert.equal(meta.reasoning_strategy, true);
+    assert.equal(meta.strategy_kind, "preventive");
+    assert.equal(meta.outcome, "failure");
+    assert.match(meta.failure_mode, /test failed/i);
+    assert.match(meta.l2_content, /Preventive strategy/);
   });
 
   it("skips compilation when the session ends with strong negative feedback", async () => {

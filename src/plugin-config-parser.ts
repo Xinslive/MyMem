@@ -84,6 +84,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   const workspaceBoundaryRaw = typeof cfg.workspaceBoundary === "object" && cfg.workspaceBoundary !== null
     ? cfg.workspaceBoundary as Record<string, unknown>
     : null;
+  const reasoningStrategyRecallRaw = typeof cfg.reasoningStrategyRecall === "object" && cfg.reasoningStrategyRecall !== null
+    ? cfg.reasoningStrategyRecall as Record<string, unknown>
+    : null;
   const userMdExclusiveRaw = typeof workspaceBoundaryRaw?.userMdExclusive === "object" && workspaceBoundaryRaw.userMdExclusive !== null
     ? workspaceBoundaryRaw.userMdExclusive as Record<string, unknown>
     : null;
@@ -217,6 +220,16 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         .filter((id: unknown): id is string => typeof id === "string" && id.trim() !== "")
         .map((id) => id.trim())
       : undefined,
+    reasoningStrategyRecall: {
+      enabled: reasoningStrategyRecallRaw?.enabled !== false,
+      maxItems: clampInt(parsePositiveInt(reasoningStrategyRecallRaw?.maxItems) ?? 2, 1, 5),
+      maxChars: clampInt(parsePositiveInt(reasoningStrategyRecallRaw?.maxChars) ?? 600, 120, 2000),
+      candidatePoolSize: clampInt(parsePositiveInt(reasoningStrategyRecallRaw?.candidatePoolSize) ?? 8, 2, 20),
+      minScore:
+        typeof reasoningStrategyRecallRaw?.minScore === "number"
+          ? Math.max(0, Math.min(1, reasoningStrategyRecallRaw.minScore))
+          : 0.62,
+    },
     captureAssistant: cfg.captureAssistant === true,
     retrieval:
       typeof cfg.retrieval === "object" && cfg.retrieval !== null
