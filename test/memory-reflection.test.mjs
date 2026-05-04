@@ -596,6 +596,65 @@ describe("memory reflection", () => {
       assert.match(injected.join("\n"), /Next run verify reflection isolation/);
     });
 
+    it("injects pending tool error signals into the next reflection prompt context", async () => {
+      const dbPath = path.join(pluginWorkDir, "main-db");
+      const reflectionDbPath = path.join(pluginWorkDir, "reflection-db");
+      const { api, eventHandlers } = createPluginApiHarness({
+        resolveRoot: pluginWorkDir,
+        reflectionText: "## Invariants\n- Always keep reflection error reminders visible.",
+        pluginConfig: {
+          dbPath,
+          autoCapture: false,
+          autoRecall: false,
+          sessionStrategy: "memoryReflection",
+          selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+          memoryReflection: {
+            dbPath: reflectionDbPath,
+            storeToLanceDB: false,
+            errorReminderMaxEntries: 3,
+          },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: embeddingBaseURL,
+            dimensions: EMBEDDING_DIMENSIONS,
+          },
+        },
+      });
+
+      myMemPlugin.register(api);
+
+      const afterToolHooks = eventHandlers.get("after_tool_call") || [];
+      assert.ok(afterToolHooks.length > 0, "expected after_tool_call hook");
+      for (const hook of afterToolHooks) {
+        hook.handler(
+          { toolName: "shell", error: "Error: fixture generation failed with ENOENT" },
+          { sessionKey: "agent:main:session:error-reminder", agentId: "main" },
+        );
+        hook.handler(
+          { toolName: "shell", error: "Error: fixture generation failed with ENOENT" },
+          { sessionKey: "agent:main:session:error-reminder", agentId: "main" },
+        );
+      }
+
+      const promptHooks = [...(eventHandlers.get("before_prompt_build") || [])]
+        .sort((a, b) => (a.meta?.priority ?? 99) - (b.meta?.priority ?? 99));
+      const injected = [];
+      for (const hook of promptHooks) {
+        const result = await hook.handler({}, {
+          agentId: "main",
+          sessionKey: "agent:main:session:error-reminder",
+        });
+        if (result?.prependContext) injected.push(result.prependContext);
+      }
+      const errorBlock = injected.find((block) => block.includes("<error-detected>")) || "";
+
+      assert.match(errorBlock, /<error-detected>/);
+      assert.match(errorBlock, /fixture generation failed/i);
+      assert.equal((errorBlock.match(/fixture generation failed/gi) || []).length, 1);
+    });
+
     it("stores event + itemized rows and keeps legacy combined rows by default", async () => {
       const storedEntries = [];
       const vectorSearchCalls = [];

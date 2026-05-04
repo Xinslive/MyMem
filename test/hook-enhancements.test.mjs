@@ -303,6 +303,80 @@ describe("hook enhancement registration", () => {
     assert.doesNotMatch(output.prependContext, /main-store reflection/);
   });
 
+  it("injects a tool error playbook after a failed tool call", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const playbookMemory = makeMemoryEntry({
+      id: "playbook-1",
+      text: "When npm test fails with a missing fixture, recreate the fixture before rerunning.",
+      category: "other",
+      memoryCategory: "patterns",
+    });
+    const store = createStore({
+      searchResults: [{ entry: playbookMemory, score: 0.91 }],
+    });
+
+    registerHookEnhancements({
+      api,
+      config: baseConfig({ hookEnhancements: { sessionPrimer: false, stalenessConfirmation: false } }),
+      store,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+    });
+
+    const afterToolHooks = eventHandlers.get("after_tool_call") || [];
+    afterToolHooks[0].handler(
+      { toolName: "npm", error: "npm test failed: missing fixture file" },
+      { sessionKey: "agent:main:cli:tool-error-playbook", agentId: "main" },
+    );
+
+    const promptHooks = eventHandlers.get("before_prompt_build") || [];
+    const output = await promptHooks[0].handler(
+      { prompt: "Continue debugging the failed test." },
+      { sessionKey: "agent:main:cli:tool-error-playbook", agentId: "main" },
+    );
+
+    assert.match(output.prependContext, /<tool-error-playbook>/);
+    assert.match(output.prependContext, /missing fixture/);
+  });
+
+  it("injects a staleness check for recently injected old memories", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const oldTimestamp = Date.now() - 120 * 24 * 60 * 60 * 1000;
+    const staleMemory = makeMemoryEntry({
+      id: "stale-1",
+      text: "Old deployment constraint that should be revalidated.",
+      category: "decision",
+      memoryCategory: "patterns",
+      timestamp: oldTimestamp,
+    });
+    const store = createStore({ byId: { "stale-1": staleMemory } });
+    const state = createHookEnhancementState();
+
+    registerHookEnhancements({
+      api,
+      config: baseConfig({ hookEnhancements: { sessionPrimer: false, toolErrorPlaybook: false } }),
+      store,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+      state,
+    });
+    recordInjectedMemoriesForEnhancements({
+      state,
+      sessionKey: "agent:main:cli:staleness",
+      source: "auto-recall",
+      memories: [{ id: "stale-1", text: staleMemory.text, scope: "global", category: "decision" }],
+    });
+
+    const promptHooks = eventHandlers.get("before_prompt_build") || [];
+    const output = await promptHooks[0].handler(
+      { prompt: "Can I rely on this deployment constraint?" },
+      { sessionKey: "agent:main:cli:staleness", agentId: "main" },
+    );
+
+    assert.match(output.prependContext, /<memory-staleness-check>/);
+    assert.match(output.prependContext, /Old deployment constraint/);
+  });
+
   it("returns advisory hints for dangerous tool calls without blocking", async () => {
     const { api, eventHandlers } = createApiHarness();
     const mem = makeMemoryEntry({
