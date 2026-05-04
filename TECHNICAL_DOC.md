@@ -509,16 +509,19 @@ const INTENT_RULES: IntentRule[] = [
 `SmartExtractor`（`src/smart-extractor.ts`）是 MyMem 的核心提取引擎：
 
 ```
-对话文本 → 包络剥离 → 会话压缩 → LLM 提取 → 候选记忆 → 批量去重 → 嵌入 → 逐条去重/合并 → 准入控制 → 持久化
+对话文本 → 字符预算截断 → 包络剥离 → LLM 提取 → 候选记忆
+→ 边界过滤 → 批量去重 → 嵌入 → 准入控制 → 逐条去重/合并 → 持久化
 ```
 
 ### 7.2 包络剥离 (Envelope Stripping)
 
 `src/envelope-stripping.ts` 移除对话中的元数据信封（如 Discord 频道头部、外部内容标记），只保留有价值的对话内容。
 
-### 7.3 会话压缩 (Session Compression)
+### 7.3 会话压缩工具 (Session Compression)
 
-`src/session-compressor.ts` 在提取前对对话文本进行价值评分和压缩：
+`src/session-compressor.ts` 提供对话文本价值评分和压缩函数，当前主要作为独立工具模块和测试覆盖对象存在；默认 `SmartExtractor` 主路径不会调用它。自动捕获进入 LLM 前的实际处理是：按 `extractMaxChars` 保留最近内容，然后通过 `stripEnvelopeMetadata()` 剥离平台包络元数据。
+
+压缩模块使用的评分信号包括：
 
 ```typescript
 // 评分信号
@@ -528,7 +531,7 @@ const DECISION_INDICATORS = [/\bdecided\b/i, /\blet's go with\b/i, ...];
 const BOILERPLATE_INDICATORS = [/\bthanks?\b/i, /\bok\b/i, /^hi\b/i, ...];
 ```
 
-高信号内容（工具调用、纠正、决策）优先保留，低信号内容（问候、确认）优先丢弃。
+调用该模块时，高信号内容（工具调用、纠正、决策）会优先保留，低信号内容（问候、确认）会优先丢弃。
 
 ### 7.4 LLM 提取
 
@@ -585,7 +588,7 @@ type DedupDecision =
 
 ### 7.7 准入控制 (Admission Control)
 
-`src/admission-control.ts` 在去重之后、持久化之前，对候选进行准入评分：
+`src/admission-control.ts` 在候选嵌入之后、逐条 LLM 去重/合并之前，对候选进行准入评分；被拒绝的候选不会进入后续去重和持久化。
 
 ```typescript
 interface AdmissionWeights {
@@ -765,10 +768,10 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 
 ### 11.1 反思管线
 
-会话结束时，MyMem 执行反思沉淀（`src/reflection-hook.ts` + `src/reflection-store.ts`）：
+在 `sessionStrategy: "memoryReflection"` 下，MyMem 在 `/new` 和 `/reset` 命令触发时执行反思沉淀（`src/reflection-hook.ts` + `src/reflection-store.ts`）。`session_end` 钩子主要用于清理反思相关的会话内状态，不会单独生成反思记录。
 
 ```
-会话结束 → 读取对话 → 构建反思 Prompt → LLM 生成反思 → 切片 → 存储到 LanceDB
+/new 或 /reset → 恢复/读取上一段对话 → 构建反思 Prompt → LLM 生成反思 → 切片 → 存储到 reflection LanceDB
 ```
 
 ### 11.2 反思切片
@@ -905,11 +908,13 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 ### 15.2 自动召回 (Auto-Recall)
 
-`src/auto-recall-hook.ts` 注册 `agent_start` 事件钩子：
+`src/auto-recall-hook.ts` 注册 `before_prompt_build` 钩子，在模型提示词构建前尝试召回并注入相关记忆：
 
 ```
-Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 准入过滤 → 上下文注入
+提示词构建前 → 读取最近用户消息 → 检索记忆 → 治理过滤 → 预算裁剪 → 上下文注入
 ```
+
+默认 `recallMode` 为 `full`，此时自动召回不执行规则式意图分析；设置 `recallMode: "adaptive"` 后才会使用 `intent-analyzer` 做类别和知识/经验通道提升。查询扩展目前只应用在手动工具调用和 CLI 检索路径，自动召回路径为了降低延迟直接使用原查询。
 
 关键配置：
 - `autoRecall`：是否启用（默认 true）
@@ -924,7 +929,7 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 
 ### 15.4 自我改进 Hook
 
-`src/self-improvement-hook.ts` 注册自我改进相关的生命周期事件，在会话结束时触发学习文件的更新和技能提取。
+`src/self-improvement-hook.ts` 注册自我改进相关的生命周期事件，在 agent bootstrap 时注入提醒，并在 `/new` / `/reset` 前从当前对话中记录可能的学习项或错误项到 `.learnings`。技能提取不是自动动作，需要后续通过 `self_improvement_extract_skill` 指定学习项和技能名生成草稿。
 
 ### 15.5 插件注册与网关维护
 
@@ -1160,7 +1165,7 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 | 模块 | 功能 |
 |------|------|
 | `envelope-stripping.ts` | 信封元数据剥离 |
-| `session-compressor.ts` | 会话价值评分与压缩 |
+| `session-compressor.ts` | 会话价值评分与压缩工具（当前不在默认提取主路径中调用） |
 | `batch-dedup.ts` | 批量内部余弦去重 |
 | `smart-extractor-dedup.ts` | LLM 逐条去重决策 |
 | `smart-extractor-handlers.ts` | 去重决策执行器 |
@@ -1220,12 +1225,12 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 
 | 模块 | 功能 |
 |------|------|
-| `auto-recall-hook.ts` | 自动召回 Hook（agent_start） |
+| `auto-recall-hook.ts` | 自动召回 Hook（before_prompt_build） |
 | `auto-capture-hook.ts` | 自动捕获 Hook（agent_end） |
 | `auto-capture-cleanup.ts` | 捕获文本规范化 |
 | `auto-capture-utils.ts` | 捕获工具函数 |
 | `session-memory-hook.ts` | 会话记忆 Hook |
-| `session-compressor.ts` | 会话压缩器 |
+| `session-compressor.ts` | 会话压缩工具 |
 | `plugin-registration.ts` | 插件注册与网关维护 |
 
 ### 20.9 工具层
