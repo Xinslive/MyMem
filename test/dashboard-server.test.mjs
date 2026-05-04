@@ -222,7 +222,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     const page = await requestText(server.url + "/");
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /MyMem 记忆管理台/);
-    assert.match(page.body, /召回诊断/);
+    assert.match(page.body, /召回实验台/);
     assert.match(page.body, /记忆瀑布流/);
     assert.match(page.body, /masonry-list/);
     assert.match(page.body, /data-action="delete"/);

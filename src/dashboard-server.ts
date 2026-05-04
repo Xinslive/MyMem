@@ -1115,21 +1115,28 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     }
     .layout {
       width: 100%;
-      max-width: 1440px;
+      max-width: 1500px;
       margin: 0 auto;
       padding: 18px 20px 28px;
       display: grid;
       gap: 16px;
     }
-    .grid {
+    .dashboard-workspace {
       display: grid;
-      grid-template-columns: minmax(420px, 0.95fr) minmax(500px, 1.05fr);
+      grid-template-columns: minmax(420px, 0.85fr) minmax(620px, 1.15fr);
       gap: 16px;
       align-items: start;
     }
-    .column {
+    .memory-console,
+    .recall-console {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
       display: grid;
-      gap: 16px;
+      grid-template-rows: auto 1fr;
     }
     .panel {
       background: var(--panel);
@@ -1151,14 +1158,44 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       font-size: 15px;
       line-height: 1.2;
     }
-    .panel-body {
-      padding: 14px 16px 16px;
+    .console-title-group {
+      min-width: 0;
     }
-    .charts {
+    .console-head {
+      min-width: 0;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .console-title {
+      margin: 0 0 4px;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+    .memory-console-body {
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 16px;
+      min-height: 0;
+    }
+    .map-section {
+      min-width: 0;
+    }
+    .map-split {
+      padding-top: 14px;
+    }
+    .map-split {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 20px;
       align-items: start;
+    }
+    .panel-body {
+      padding: 14px 16px 16px;
     }
     .chart-card {
       min-width: 0;
@@ -1347,32 +1384,57 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     }
     .explain-form {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 92px 110px;
+      grid-template-columns: minmax(0, 1fr) 94px 118px;
       gap: 8px;
       align-items: center;
     }
     .explain-output {
-      margin-top: 14px;
       display: grid;
       gap: 12px;
-      min-height: 420px;
+      min-height: 0;
     }
     .explain-columns {
       display: grid;
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 12px;
       align-items: stretch;
+      min-height: 0;
     }
-    .preview-card {
-      min-height: 318px;
+    .recall-console-body {
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+      min-height: 0;
+    }
+    .query-dock {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--panel-soft);
+      background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
+      padding: 12px;
+    }
+    .stage-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
       padding: 12px;
       display: grid;
-      align-content: start;
       gap: 10px;
       min-width: 0;
+    }
+    .stage-card,
+    .results-card {
+      min-width: 0;
+      min-height: 0;
+    }
+    .results-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
     }
     .preview-head {
       display: flex;
@@ -1411,27 +1473,91 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     }
     .stage-list {
       display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
     .stage {
+      position: relative;
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) 92px 70px;
-      gap: 10px;
-      align-items: center;
+      grid-template-columns: 8px minmax(0, 1fr);
+      grid-template-areas:
+        "dot name"
+        "dot flow"
+        "dot time";
+      gap: 2px 8px;
+      align-items: start;
       font-size: 13px;
-      border-bottom: 1px solid #edf1f6;
-      padding-bottom: 8px;
+      min-height: 70px;
+      border: 1px solid #e7ecf2;
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+      overflow: hidden;
     }
-    .stage:last-child { border-bottom: 0; padding-bottom: 0; }
+    .stage::before {
+      content: "";
+      grid-area: dot;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--teal);
+      margin-top: 4px;
+    }
+    .muted-preview.stage::before {
+      background: #b8c3cf;
+    }
+    .stage::after {
+      content: attr(data-step);
+      position: absolute;
+      right: 10px;
+      bottom: -8px;
+      color: rgba(102, 112, 133, 0.12);
+      font-size: 46px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .stage-main {
+      grid-area: name / name / flow / flow;
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .stage-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .stage-flow {
       color: var(--muted);
       font-variant-numeric: tabular-nums;
-      text-align: right;
+      font-size: 12px;
     }
     .stage-time {
+      grid-area: time;
       color: var(--muted);
       font-variant-numeric: tabular-nums;
-      text-align: right;
+      text-align: left;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .result-stack {
+      min-height: 0;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .result-list-scroll {
+      max-height: clamp(190px, 28vh, 300px);
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+    .result-list-scroll::-webkit-scrollbar {
+      width: 0;
+      height: 0;
     }
     .alert {
       border: 1px solid var(--line);
@@ -1553,7 +1679,10 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     @keyframes spin { to { transform: rotate(360deg); } }
 
     @media (max-width: 1080px) {
-      .grid { grid-template-columns: 1fr; }
+      .dashboard-workspace {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
     }
     @media (max-width: 720px) {
       .topbar-inner {
@@ -1578,18 +1707,16 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         flex: 1 1 100%;
       }
       .layout { padding: 12px; }
-      .charts { grid-template-columns: 1fr; }
       .chart-card.wide { grid-column: auto; }
       .category-grid { grid-template-columns: 1fr; }
+      .map-split { grid-template-columns: 1fr; }
       .explain-form { grid-template-columns: 1fr; }
       .explain-columns { grid-template-columns: 1fr; }
-      .explain-output { min-height: 0; }
-      .preview-card { min-height: 220px; }
+      .stage-list { grid-template-columns: 1fr; }
       .masonry-list { column-count: 2; }
       .memory-stats { grid-template-columns: 1fr; }
       .config-grid { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: 1fr; }
-      .stage { grid-template-columns: 1fr 70px 70px; }
     }
     @media (max-width: 440px) {
       .masonry-list { column-count: 1; }
@@ -1616,39 +1743,43 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     </header>
 
     <main class="layout">
-      <section class="grid" data-view-section="dashboard">
-        <div class="column">
-          <section class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">分布概览</h2>
-              <span class="subtle" id="distributionHint">--</span>
+      <section class="dashboard-workspace" data-view-section="dashboard">
+        <section class="memory-console">
+          <div class="console-head">
+            <div>
+              <h2 class="console-title">记忆地图</h2>
+              <div class="subtle">类型、活跃度和层级分布</div>
             </div>
-            <div class="panel-body">
-              <div class="charts">
-                <div class="chart-card wide">
-                  <div class="chart-title">按记忆类型</div>
-                  <div id="categoryChart"></div>
-                </div>
-                <div class="chart-card">
-                  <div class="chart-title">按活跃时间</div>
-                  <div id="activityChart"></div>
-                </div>
-                <div class="chart-card">
-                  <div class="chart-title">按层级</div>
-                  <div id="tierChart"></div>
-                </div>
-              </div>
+            <span class="subtle" id="distributionHint">--</span>
+          </div>
+          <div class="memory-console-body">
+            <section class="map-section">
+              <div class="chart-title">按记忆类型</div>
+              <div id="categoryChart"></div>
+            </section>
+            <div class="map-split">
+              <section class="map-section">
+                <div class="chart-title">按活跃时间</div>
+                <div id="activityChart"></div>
+              </section>
+              <section class="map-section">
+                <div class="chart-title">按层级</div>
+                <div id="tierChart"></div>
+              </section>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
 
-        <aside class="column">
-          <section class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">召回诊断</h2>
-              <span class="subtle" id="explainCount">尚未查询</span>
+        <aside class="recall-console">
+          <div class="console-head">
+            <div>
+              <h2 class="console-title">召回实验台</h2>
+              <div class="subtle">查询、阶段链路和命中结果</div>
             </div>
-            <div class="panel-body">
+            <span class="subtle" id="explainCount">尚未查询</span>
+          </div>
+          <div class="recall-console-body">
+            <section class="query-dock">
               <div class="explain-form">
                 <input id="queryInput" placeholder="输入想查的记忆" aria-label="查询内容">
                 <select id="limitInput" aria-label="返回数量">
@@ -1658,51 +1789,43 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
                 </select>
                 <button class="primary" id="explainBtn">诊断</button>
               </div>
-              <div class="explain-output" id="explainOutput">
-                <div class="explain-columns">
-                  <section class="preview-card">
-                    <div class="preview-head">
-                      <div class="chart-title">处理阶段</div>
-                      <span class="subtle">待诊断</span>
-                    </div>
-                    <div class="stage-list">
-                      <div class="stage muted-preview"><div>混合候选</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
-                      <div class="stage muted-preview"><div>过滤与重排</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
-                      <div class="stage muted-preview"><div>多样性处理</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
-                    </div>
-                  </section>
-                  <section class="preview-card">
-                    <div class="preview-head">
-                      <div class="chart-title">命中结果</div>
-                      <span class="subtle">待诊断</span>
-                    </div>
+            </section>
+            <div class="explain-output" id="explainOutput">
+              <div class="explain-columns">
+                <section class="stage-card">
+                  <div class="preview-head">
+                    <div class="chart-title">处理阶段</div>
+                    <span class="subtle">待诊断</span>
+                  </div>
+                  <div class="stage-list">
+                    <div class="stage muted-preview" data-step="01"><div class="stage-main"><div class="stage-name">混合候选</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                    <div class="stage muted-preview" data-step="02"><div class="stage-main"><div class="stage-name">过滤与重排</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                    <div class="stage muted-preview" data-step="03"><div class="stage-main"><div class="stage-name">多样性处理</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                  </div>
+                </section>
+                <section class="results-card">
+                  <div class="preview-head">
+                    <div class="chart-title">命中结果</div>
+                    <span class="subtle">待诊断</span>
+                  </div>
+                  <div class="result-stack">
                     <div class="diagnosis placeholder">
                       <div class="diagnosis-title">未生成诊断</div>
                       <div class="subtle">状态：待查询</div>
                     </div>
-                    <div class="memory-list">
-                      <article class="memory-item preview-memory">
-                        <div class="memory-meta">
-                          <span class="chip">类别</span>
-                          <span class="chip">范围</span>
-                          <span class="chip">得分</span>
-                        </div>
-                        <div class="memory-text">暂无命中结果</div>
-                      </article>
-                      <article class="memory-item preview-memory">
-                        <div class="memory-meta">
-                          <span class="chip">类别</span>
-                          <span class="chip">范围</span>
-                          <span class="chip">得分</span>
-                        </div>
-                        <div class="memory-text">暂无过滤原因</div>
-                      </article>
-                    </div>
-                  </section>
-                </div>
+                    <article class="memory-item preview-memory">
+                      <div class="memory-meta">
+                        <span class="chip">类别</span>
+                        <span class="chip">范围</span>
+                        <span class="chip">得分</span>
+                      </div>
+                      <div class="memory-text">暂无命中结果</div>
+                    </article>
+                  </div>
+                </section>
               </div>
             </div>
-          </section>
+          </div>
         </aside>
       </section>
       <section class="memories-page" data-view-section="memories">
@@ -1986,14 +2109,16 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       const reasons = (explanation.reasons || []).map((item) => '<li>' + escapeHtml(item) + '</li>').join("");
       const suggestions = (explanation.suggestions || []).map((item) => '<li>' + escapeHtml(item) + '</li>').join("");
       const traceStages = (report.trace && report.trace.stages) || [];
-      const stages = traceStages.map((stage) => {
+      const stages = traceStages.map((stage, index) => {
         const dropped = Math.max(0, Number(stage.inputCount || 0) - Number(stage.outputCount || 0));
         const flow = Number(stage.inputCount || 0) === 0
           ? "找到 " + stage.outputCount + " 条"
           : stage.inputCount + " → " + stage.outputCount + " (-" + dropped + ")";
-        return '<div class="stage">' +
-          '<div>' + escapeHtml(stageName(stage.name)) + '</div>' +
-          '<div class="stage-flow">' + escapeHtml(flow) + '</div>' +
+        return '<div class="stage" data-step="' + String(index + 1).padStart(2, "0") + '">' +
+          '<div class="stage-main">' +
+            '<div class="stage-name">' + escapeHtml(stageName(stage.name)) + '</div>' +
+            '<div class="stage-flow">' + escapeHtml(flow) + '</div>' +
+          '</div>' +
           '<div class="stage-time">' + escapeHtml(stage.durationMs) + 'ms</div>' +
         '</div>';
       }).join("") || '<div class="empty-state">没有记录处理阶段。</div>';
@@ -2010,18 +2135,20 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
 
       $("explainOutput").innerHTML =
         '<div class="explain-columns">' +
-          '<section class="preview-card">' +
+          '<section class="stage-card">' +
             '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">' + traceStages.length + ' 个阶段</span></div>' +
             '<div class="stage-list">' + stages + '</div>' +
           '</section>' +
-          '<section class="preview-card">' +
+          '<section class="results-card">' +
             '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">' + report.count + ' 条</span></div>' +
             '<div class="diagnosis' + diagnosisClass + '">' +
               '<div class="diagnosis-title">' + escapeHtml(explanation.summary || "暂无诊断") + '</div>' +
               (reasons ? '<ul class="plain-list">' + reasons + '</ul>' : "") +
               (suggestions ? '<ul class="plain-list">' + suggestions + '</ul>' : "") +
             '</div>' +
-            '<div class="memory-list">' + results + '</div>' +
+            '<div class="result-list-scroll">' +
+              '<div class="memory-list">' + results + '</div>' +
+            '</div>' +
           '</section>' +
         '</div>';
     }
@@ -2141,20 +2268,19 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         $("explainCount").textContent = "尚未查询";
         $("explainOutput").innerHTML =
           '<div class="explain-columns">' +
-            '<section class="preview-card">' +
+            '<section class="stage-card">' +
               '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">待诊断</span></div>' +
               '<div class="stage-list">' +
-                '<div class="stage muted-preview"><div>混合候选</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
-                '<div class="stage muted-preview"><div>过滤与重排</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
-                '<div class="stage muted-preview"><div>多样性处理</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview" data-step="01"><div class="stage-main"><div class="stage-name">混合候选</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview" data-step="02"><div class="stage-main"><div class="stage-name">过滤与重排</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview" data-step="03"><div class="stage-main"><div class="stage-name">多样性处理</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
               '</div>' +
             '</section>' +
-            '<section class="preview-card">' +
+            '<section class="results-card">' +
               '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">待诊断</span></div>' +
               '<div class="diagnosis placeholder"><div class="diagnosis-title">未生成诊断</div><div class="subtle">状态：待查询</div></div>' +
-              '<div class="memory-list">' +
+              '<div class="result-list-scroll">' +
                 '<article class="memory-item preview-memory"><div class="memory-meta"><span class="chip">类别</span><span class="chip">范围</span><span class="chip">得分</span></div><div class="memory-text">暂无命中结果</div></article>' +
-                '<article class="memory-item preview-memory"><div class="memory-meta"><span class="chip">类别</span><span class="chip">范围</span><span class="chip">得分</span></div><div class="memory-text">暂无过滤原因</div></article>' +
               '</div>' +
             '</section>' +
           '</div>';
