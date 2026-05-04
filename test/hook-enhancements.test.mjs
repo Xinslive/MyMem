@@ -232,6 +232,77 @@ describe("hook enhancement registration", () => {
     assert.doesNotMatch(output.prependContext, /One-off scheduling note/);
   });
 
+  it("reads session primer reflection invariants from the dedicated reflection store", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const now = Date.now();
+    const store = createStore({
+      searchResults: [
+        {
+          score: 0.98,
+          entry: makeMemoryEntry({
+            id: "distilled-1",
+            text: "Keep responses concise and direct.",
+            category: "preference",
+            memoryCategory: "preferences",
+            metadata: { source_reason: "preference_distiller", evidence_count: 3, stability_score: 0.8 },
+            timestamp: now,
+          }),
+        },
+      ],
+      reflectionEntries: [
+        makeMemoryEntry({
+          id: "main-reflection",
+          text: "Always ignore this main-store reflection.",
+          category: "reflection",
+          memoryCategory: "patterns",
+          metadata: {
+            type: "memory-reflection-item",
+            itemKind: "invariant",
+            agentId: "main",
+            storedAt: now,
+          },
+          timestamp: now,
+        }),
+      ],
+    });
+    const reflectionStore = createStore({
+      reflectionEntries: [
+        makeMemoryEntry({
+          id: "dedicated-reflection",
+          text: "Always prefer the dedicated reflection store for primer invariants.",
+          category: "reflection",
+          memoryCategory: "patterns",
+          metadata: {
+            type: "memory-reflection-item",
+            itemKind: "invariant",
+            agentId: "main",
+            storedAt: now,
+          },
+          timestamp: now,
+        }),
+      ],
+    });
+
+    registerHookEnhancements({
+      api,
+      config: baseConfig(),
+      store,
+      reflectionStore,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+    });
+
+    const promptHooks = eventHandlers.get("before_prompt_build") || [];
+    const output = await promptHooks[0].handler(
+      { prompt: "简洁一点" },
+      { sessionKey: "agent:main:cli:session-primer-reflection", agentId: "main" },
+    );
+
+    assert.match(output.prependContext, /Reflection invariants:/);
+    assert.match(output.prependContext, /dedicated reflection store/);
+    assert.doesNotMatch(output.prependContext, /main-store reflection/);
+  });
+
   it("returns advisory hints for dangerous tool calls without blocking", async () => {
     const { api, eventHandlers } = createApiHarness();
     const mem = makeMemoryEntry({

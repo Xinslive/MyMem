@@ -34,27 +34,69 @@ export interface ReflectionGovernanceEntry {
   suggestedAction?: string;
 }
 
-export function extractSectionMarkdown(markdown: string, heading: string): string {
+function normalizeMarkdownHeadingLabel(label: string): string {
+  return label
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function parseMarkdownHeading(line: string): { level: number; label: string } | null {
+  const match = line.trim().match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+  if (!match) return null;
+  return {
+    level: match[1].length,
+    label: normalizeMarkdownHeadingLabel(match[2]),
+  };
+}
+
+function extractSectionMarkdownForHeadings(markdown: string, headings: string[]): string {
   const lines = markdown.split(/\r?\n/);
-  const headingNeedle = `## ${heading}`.toLowerCase();
+  const headingNeedles = new Set(headings.map(normalizeMarkdownHeadingLabel));
   let inSection = false;
+  let sectionLevel = 2;
   const collected: string[] = [];
+  const sections: string[] = [];
+
+  const flush = () => {
+    const section = collected.join("\n").trim();
+    if (section) sections.push(section);
+    collected.length = 0;
+  };
+
   for (const raw of lines) {
-    const line = raw.trim();
-    const lower = line.toLowerCase();
-    if (lower.startsWith("## ")) {
-      if (inSection && lower !== headingNeedle) break;
-      inSection = lower === headingNeedle;
+    const headingInfo = parseMarkdownHeading(raw);
+    if (headingInfo) {
+      if (inSection && headingInfo.level <= sectionLevel) {
+        flush();
+        inSection = false;
+      }
+      if (!inSection && headingNeedles.has(headingInfo.label)) {
+        inSection = true;
+        sectionLevel = headingInfo.level;
+      } else if (inSection) {
+        collected.push(raw);
+      }
       continue;
     }
     if (!inSection) continue;
     collected.push(raw);
   }
-  return collected.join("\n").trim();
+  if (inSection) flush();
+  return sections.join("\n").trim();
+}
+
+export function extractSectionMarkdown(markdown: string, heading: string): string {
+  return extractSectionMarkdownForHeadings(markdown, [heading]);
 }
 
 export function parseSectionBullets(markdown: string, heading: string): string[] {
-  const lines = extractSectionMarkdown(markdown, heading).split(/\r?\n/);
+  return parseSectionBulletsForHeadings(markdown, [heading]);
+}
+
+function parseSectionBulletsForHeadings(markdown: string, headings: string[]): string[] {
+  const lines = extractSectionMarkdownForHeadings(markdown, headings).split(/\r?\n/);
   const collected: string[] = [];
   for (const raw of lines) {
     const line = raw.trim();
@@ -113,20 +155,32 @@ export function sanitizeInjectableReflectionLines(lines: string[]): string[] {
 
 function isInvariantRuleLike(line: string): boolean {
   return /^(always|never|when\b|if\b|before\b|after\b|prefer\b|avoid\b|require\b|only\b|do not\b|must\b|should\b)/i.test(line) ||
-    /\b(must|should|never|always|prefer|avoid|required?)\b/i.test(line);
+    /\b(must|should|never|always|prefer|avoid|required?)\b/i.test(line) ||
+    /^(用户|使用者|主人|master)/i.test(line) ||
+    /^(用户|使用者|主人|master).*(偏好|习惯|期望|喜欢|不喜欢|倾向|关注|感兴趣|只想|不需要|会主动|会用|维护|指令简洁)/i.test(line) ||
+    /(必须记住|不要再犯|不要反复|期望.*直接|喜欢.*实用|不喜欢.*说教)/i.test(line);
 }
 
 function isDerivedDeltaLike(line: string): boolean {
   return /^(this run|next run|going forward|follow-up|re-check|retest|verify|confirm|avoid repeating|adjust|change|update|retry|keep|watch)\b/i.test(line) ||
-    /\b(this run|next run|delta|change|adjust|retry|re-check|retest|verify|confirm|avoid repeating|follow-up)\b/i.test(line);
+    /\b(this run|next run|delta|change|adjust|retry|re-check|retest|verify|confirm|avoid repeating|follow-up)\b/i.test(line) ||
+    /^(下次|后续|继续|需要|关注|检查|确认|修复|排查|优化|积累|避免|记录|更新|补充|测试|验证|推荐|主动)/.test(line) ||
+    /(下次|后续|待办|未解决|需要继续|需要检查|值得优化|可以主动|可以推荐|继续排查|不要再犯)/.test(line);
 }
 
 function isOpenLoopAction(line: string): boolean {
-  return /^(investigate|verify|confirm|re-check|retest|update|add|remove|fix|avoid|keep|watch|document)\b/i.test(line);
+  return /^(investigate|verify|confirm|re-check|retest|update|add|remove|fix|avoid|keep|watch|document)\b/i.test(line) ||
+    /^(关注|继续|检查|确认|修复|排查|优化|积累|避免|记录|更新|补充|测试|验证|推荐|主动)/.test(line);
 }
 
 export function extractReflectionLessons(reflectionText: string): string[] {
-  return sanitizeReflectionSliceLines(parseSectionBullets(reflectionText, "Lessons & pitfalls (symptom / cause / fix / prevention)"));
+  return sanitizeReflectionSliceLines(parseSectionBulletsForHeadings(reflectionText, [
+    "Lessons & pitfalls (symptom / cause / fix / prevention)",
+    "核心教训",
+    "问题与修复",
+    "问题和修复",
+    "错误与修复",
+  ]));
 }
 
 export function extractReflectionLearningGovernanceCandidates(reflectionText: string): ReflectionGovernanceEntry[] {
@@ -199,33 +253,38 @@ function extractReflectionMappedMemoryItemsWithSanitizer(
 ): ReflectionMappedMemoryItem[] {
   const mappedSections: Array<{
     heading: string;
+    aliases?: string[];
     category: "preference" | "fact" | "decision";
     mappedKind: ReflectionMappedKind;
   }> = [
     {
       heading: "User model deltas (about the human)",
+      aliases: ["用户偏好", "用户偏好（确认）", "用户偏好(确认)", "用户习惯", "用户画像"],
       category: "preference",
       mappedKind: "user-model",
     },
     {
       heading: "Agent model deltas (about the assistant/system)",
+      aliases: ["潜在改进", "改进方向", "助手改进", "系统改进"],
       category: "preference",
       mappedKind: "agent-model",
     },
     {
       heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
+      aliases: ["核心教训", "问题与修复", "问题和修复", "错误与修复"],
       category: "fact",
       mappedKind: "lesson",
     },
     {
       heading: "Decisions (durable)",
+      aliases: ["关键决策", "决策", "持久决策"],
       category: "decision",
       mappedKind: "decision",
     },
   ];
 
-  return mappedSections.flatMap(({ heading, category, mappedKind }) => {
-    const lines = sanitizeLines(parseSectionBullets(reflectionText, heading));
+  return mappedSections.flatMap(({ heading, aliases = [], category, mappedKind }) => {
+    const lines = sanitizeLines(parseSectionBulletsForHeadings(reflectionText, [heading, ...aliases]));
     const groupSize = lines.length;
     return lines.map((text, ordinal) => ({ text, category, heading, mappedKind, ordinal, groupSize }));
   });
@@ -247,8 +306,21 @@ function extractReflectionSlicesWithSanitizer(
   reflectionText: string,
   sanitizeLines: (lines: string[]) => string[],
 ): ReflectionSlices {
-  const invariantSection = parseSectionBullets(reflectionText, "Invariants");
-  const derivedSection = parseSectionBullets(reflectionText, "Derived");
+  const invariantSection = parseSectionBulletsForHeadings(reflectionText, [
+    "Invariants",
+    "用户偏好",
+    "用户偏好（确认）",
+    "用户偏好(确认)",
+    "新增不变式",
+    "新增/更新不变式",
+    "核心发现",
+  ]);
+  const derivedSection = parseSectionBulletsForHeadings(reflectionText, [
+    "Derived",
+    "待办",
+    "遗留待办",
+    "潜在改进",
+  ]);
   const mergedSection = parseSectionBullets(reflectionText, "Invariants & Reflections");
 
   const invariantsPrimary = sanitizeLines(invariantSection).filter(isInvariantRuleLike);

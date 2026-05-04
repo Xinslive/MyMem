@@ -52,6 +52,10 @@ const {
 } = jiti("../src/reflection-item-store.ts");
 const { buildReflectionMappedMetadata } = jiti("../src/reflection-mapped-metadata.ts");
 const { REFLECTION_FALLBACK_SCORE_FACTOR } = jiti("../src/reflection-ranking.ts");
+const {
+  extractInjectableReflectionMappedMemories,
+  extractInjectableReflectionSlices,
+} = jiti("../src/reflection-slices.ts");
 
 const EMBEDDING_DIMENSIONS = 4;
 const FIXED_VECTOR = [0.5, 0.5, 0.5, 0.5];
@@ -831,6 +835,49 @@ describe("memory reflection", () => {
   });
 
   describe("reflection slice loading", () => {
+    it("extracts injectable slices from Chinese reflection headings", () => {
+      const reflectionText = [
+        "## 反思 - 2026-05-03 记忆召回测试",
+        "",
+        "### 核心发现",
+        "",
+        "- **MyMem auto-capture 工作正常**：用户之前测试时分享的个人信息全部被自动捕获并成功召回",
+        "- **API 本身没问题**：curl 直接测试全部通过",
+        "",
+        "### 用户偏好",
+        "",
+        "- 用户会用简单的问答来测试记忆系统",
+        "- 用户对排查过程不太关心，只想要结果",
+        "",
+        "### 待办",
+        "",
+        "- **chat/gpt-5.5 调用问题未解决**——需要继续排查 OpenClaw 对 tools 流式响应的处理",
+        "- 关注记忆压制率是否影响召回质量",
+        "",
+        "### 潜在改进",
+        "",
+        "- 下次遇到 Excel 公式问题可以主动提供帮助",
+        "- 用户对 AI 工具化应用很感兴趣，可以推荐更多工作场景的 AI 用法",
+        "",
+        "### 新增 facts",
+        "",
+        "- **entity**: 用户邮箱 — mail@example.test",
+        "- **case**: 假期信息不在记忆系统范围内 — 需查公司考勤系统",
+      ].join("\n");
+
+      const slices = extractInjectableReflectionSlices(reflectionText);
+      assert.deepEqual(slices.invariants, [
+        "用户会用简单的问答来测试记忆系统",
+        "用户对排查过程不太关心，只想要结果",
+      ]);
+      assert.deepEqual(slices.derived, [
+        "chat/gpt-5.5 调用问题未解决——需要继续排查 OpenClaw 对 tools 流式响应的处理",
+        "关注记忆压制率是否影响召回质量",
+        "下次遇到 Excel 公式问题可以主动提供帮助",
+        "用户对 AI 工具化应用很感兴趣，可以推荐更多工作场景的 AI 用法",
+      ]);
+    });
+
     it("loads legacy combined rows for backward compatibility", () => {
       const now = Date.UTC(2026, 2, 7);
       const entries = [
@@ -1275,6 +1322,52 @@ describe("memory reflection", () => {
   });
 
   describe("mapped reflection metadata and ranking", () => {
+    it("maps Chinese reflection headings into user and agent model rows", () => {
+      const reflectionText = [
+        "### 用户偏好",
+        "- 用户会主动查看系统配置，对技术细节感兴趣",
+        "- 用户指令简洁，直接执行，不需要确认",
+        "",
+        "### 潜在改进",
+        "- 下次遇到 Excel 公式问题可以主动提供帮助",
+        "",
+        "### 核心教训",
+        "- Gateway launchctl 路径不是旧路径，用户纠正后不要再犯",
+        "",
+        "### 关键决策",
+        "- 使用 DashScope 原生 rerank endpoint 修复 400 错误",
+      ].join("\n");
+
+      const mapped = extractInjectableReflectionMappedMemories(reflectionText);
+      assert.deepEqual(mapped, [
+        {
+          text: "用户会主动查看系统配置，对技术细节感兴趣",
+          category: "preference",
+          heading: "User model deltas (about the human)",
+        },
+        {
+          text: "用户指令简洁，直接执行，不需要确认",
+          category: "preference",
+          heading: "User model deltas (about the human)",
+        },
+        {
+          text: "下次遇到 Excel 公式问题可以主动提供帮助",
+          category: "preference",
+          heading: "Agent model deltas (about the assistant/system)",
+        },
+        {
+          text: "Gateway launchctl 路径不是旧路径，用户纠正后不要再犯",
+          category: "fact",
+          heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
+        },
+        {
+          text: "使用 DashScope 原生 rerank endpoint 修复 400 错误",
+          category: "decision",
+          heading: "Decisions (durable)",
+        },
+      ]);
+    });
+
     it("builds enriched mapped metadata with decay defaults and provenance", () => {
       const metadata = buildReflectionMappedMetadata({
         mappedItem: {

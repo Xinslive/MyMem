@@ -350,6 +350,7 @@ const myMemPlugin = {
       api,
       config,
       store,
+      reflectionStore,
       embedder,
       scopeManager,
       feedbackLoop,

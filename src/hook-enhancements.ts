@@ -522,6 +522,7 @@ export function registerHookEnhancements(params: {
   api: OpenClawPluginApi;
   config: PluginConfig;
   store: MemoryStore;
+  reflectionStore?: MemoryStore;
   embedder: Embedder;
   scopeManager: ScopeManager;
   feedbackLoop?: FeedbackLoop | null;
@@ -529,6 +530,7 @@ export function registerHookEnhancements(params: {
   isCliMode?: () => boolean;
 }): HookEnhancementState {
   const { api, config, store, embedder, scopeManager, feedbackLoop } = params;
+  const reflectionStore = params.reflectionStore ?? store;
   const state = params.state ?? createHookEnhancementState();
 
   api.on("after_tool_call", (event: any, ctx: any) => {
@@ -617,7 +619,7 @@ export function registerHookEnhancements(params: {
         );
         const invariants = primerConfig.includeReflectionInvariants
           ? (() => {
-            return store.list(scopeFilter, "reflection", 120, 0)
+            return reflectionStore.list(scopeFilter, "reflection", 120, 0)
               .then((entries) => loadAgentReflectionSlicesFromEntries({ entries, agentId }).invariants.slice(0, 2))
               .catch(() => []);
           })()
