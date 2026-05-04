@@ -867,7 +867,7 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 关键配置：
 - `autoCapture`：是否启用（默认 true）
-- `captureAssistant`：是否捕获 Assistant 消息（默认 false）
+- `captureAgents`：允许自动捕获的 Agent 白名单（默认 `["main"]`）；不在列表中的 Agent 会话不会进入 SmartExtractor
 - `extractionThrottle.maxExtractionsPerHour`：每小时最大提取次数
 
 ### 15.2 自动召回 (Auto-Recall)

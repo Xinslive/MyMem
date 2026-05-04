@@ -115,18 +115,25 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.hookEnhancements?.selfCorrectionLoop?.enabled, true);
   });
 
-  it("preserves explicit assistant capture settings", () => {
+  it("preserves explicit capture agent settings", () => {
     const disabled = parsePluginConfig({
       ...baseConfig(),
       captureAssistant: false,
     });
     assert.deepEqual(disabled.captureAgents, []);
 
-    const scoped = parsePluginConfig({
+    const legacyAlias = parsePluginConfig({
       ...baseConfig(),
       captureAssistantAgents: ["main", "life", "main", ""],
     });
-    assert.deepEqual(scoped.captureAgents, ["main", "life"]);
+    assert.deepEqual(legacyAlias.captureAgents, ["main", "life"]);
+
+    const scoped = parsePluginConfig({
+      ...baseConfig(),
+      captureAgents: ["main", "cron", "main", ""],
+      captureAssistantAgents: ["life"],
+    });
+    assert.deepEqual(scoped.captureAgents, ["main", "cron"]);
 
     const global = parsePluginConfig({
       ...baseConfig(),

@@ -138,9 +138,12 @@ describe("auto-capture cleanup", () => {
     );
   });
 
-  it("does not keep non-main assistant text by default", async () => {
+  it("skips non-main auto-capture before smart extraction by default", async () => {
     const { api, eventHandlers } = createAutoCaptureHarness();
-    let capturedConversationText = "";
+    let extractionRuns = 0;
+    const autoCapturePendingIngressTexts = new Map([
+      ["channel-1:conversation-1", ["Pending ingress should be discarded for skipped agents."]],
+    ]);
 
     registerAutoCaptureHook({
       api,
@@ -150,8 +153,8 @@ describe("auto-capture cleanup", () => {
       store: {},
       embedder: {},
       smartExtractor: {
-        async extractAndPersist(conversationText) {
-          capturedConversationText = conversationText;
+        async extractAndPersist() {
+          extractionRuns++;
           return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
         },
       },
@@ -173,7 +176,7 @@ describe("auto-capture cleanup", () => {
         },
       },
       autoCaptureSeenTextCount: new Map(),
-      autoCapturePendingIngressTexts: new Map(),
+      autoCapturePendingIngressTexts,
       autoCaptureRecentTexts: new Map(),
       mdMirror: null,
       isCliMode: () => false,
@@ -198,7 +201,8 @@ describe("auto-capture cleanup", () => {
 
     await agentEndHook.__lastRun;
 
-    assert.equal(capturedConversationText, "User:\nUser asked for terse status updates in future sessions.");
+    assert.equal(extractionRuns, 0);
+    assert.equal(autoCapturePendingIngressTexts.size, 0);
   });
 
   it("keeps main assistant text by default", async () => {

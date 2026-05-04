@@ -294,7 +294,16 @@
       },
       "captureAssistant": {
         "type": "boolean",
-        "description": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless captureAssistantAgents is explicitly set."
+        "description": "Legacy compatibility switch. false maps to an empty captureAgents list unless captureAgents or captureAssistantAgents is explicitly set."
+      },
+      "captureAgents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default": ["main"],
+        "description": "Agent IDs whose user/assistant conversations are eligible for auto-capture. Agents outside this list skip smart extraction entirely, including user text and pending ingress text."
       },
       "captureAssistantAgents": {
         "type": "array",
@@ -302,8 +311,7 @@
           "type": "string",
           "minLength": 1
         },
-        "default": ["main"],
-        "description": "Agent IDs whose assistant replies are eligible for auto-capture. Defaults to main so the primary agent's discovered answers and summaries can become memories."
+        "description": "Deprecated alias for captureAgents. Kept for compatibility with older configurations."
       },
       "smartExtraction": {
         "type": "boolean",
@@ -1603,12 +1611,17 @@
     },
     "captureAssistant": {
       "label": "Capture Assistant Messages",
-      "help": "Legacy global switch. true captures assistant replies for all agents; false disables assistant capture unless Assistant Capture Agents is set.",
+      "help": "Legacy compatibility switch. Prefer Capture Agents.",
+      "advanced": true
+    },
+    "captureAgents": {
+      "label": "Capture Agents",
+      "help": "Agent IDs whose conversations are eligible for auto-capture. Defaults to main; agents outside this list skip smart extraction entirely.",
       "advanced": true
     },
     "captureAssistantAgents": {
       "label": "Assistant Capture Agents",
-      "help": "Agent IDs whose assistant replies are eligible for auto-capture. Defaults to main.",
+      "help": "Deprecated alias for Capture Agents.",
       "advanced": true
     },
     "retrieval.mode": {

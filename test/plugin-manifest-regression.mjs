@@ -136,7 +136,7 @@ assertSchemaDefault("feedbackLoop.preventiveLessons.pendingConfidence", 0.45);
 assertSchemaDefault("feedbackLoop.preventiveLessons.confirmedConfidence", 0.72);
 assertSchemaDefault("feedbackLoop.preventiveLessons.maxLearnPerScan", 3);
 assertSchemaDefault("autoCapture", true);
-assertSchemaDefault("captureAssistantAgents", ["main"]);
+assertSchemaDefault("captureAgents", ["main"]);
 assertSchemaDefault("captureMaxMessages", 10);
 assertSchemaDefault("sessionCompression.enabled", true);
 assertSchemaDefault("extractionThrottle.skipLowValue", true);

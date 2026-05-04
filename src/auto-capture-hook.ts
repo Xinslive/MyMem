@@ -33,6 +33,19 @@ function formatConversationForSmartExtraction(items: CaptureItem[]): string {
     .join("\n\n");
 }
 
+function resolveCaptureAgents(config: PluginConfig): string[] {
+  const legacyCaptureAgents = (config as { captureAssistantAgents?: string[] }).captureAssistantAgents;
+  return config.captureAgents ?? legacyCaptureAgents ?? ["main"];
+}
+
+function clearPendingIngressForSession(
+  pendingIngressTexts: Map<string, string[]>,
+  sessionKey: string,
+): void {
+  const conversationKey = buildAutoCaptureConversationKeyFromSessionKey(sessionKey);
+  if (conversationKey) pendingIngressTexts.delete(conversationKey);
+}
+
 export function registerAutoCaptureHook(params: {
   api: OpenClawPluginApi;
   config: PluginConfig;
@@ -63,6 +76,15 @@ export function registerAutoCaptureHook(params: {
 
     const backgroundRun = (async () => {
       try {
+        const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
+        const agentId = resolveHookAgentId(ctx?.agentId, sessionKey);
+        const captureAgents = resolveCaptureAgents(config);
+        if (!captureAgents.includes(agentId)) {
+          clearPendingIngressForSession(params.autoCapturePendingIngressTexts, sessionKey);
+          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
+          return;
+        }
+
         if (extractionRateLimiter.isRateLimited()) {
           api.logger.debug(
             `mymem: auto-capture skipped (rate limited: ${extractionRateLimiter.getRecentCount()} extractions in last hour)`,
@@ -70,20 +92,10 @@ export function registerAutoCaptureHook(params: {
           return;
         }
 
-        const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
-
-        const legacyCaptureAgents = (config as { captureAssistantAgents?: string[] }).captureAssistantAgents;
-        const captureAgents = config.captureAgents ?? legacyCaptureAgents ?? ["main"];
-        const captureAssistantForAgent = captureAgents.includes(agentId);
-        if (!captureAssistantForAgent) {
-          api.logger.debug(`mymem: assistant auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
-        }
-
         const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
         const defaultScope = isSystemBypassId(agentId)
           ? config.scopes?.default ?? "global"
           : scopeManager.getDefaultScope(agentId);
-        const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
 
         api.logger.debug(
           `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, ${summarizeAgentEndMessages(event.messages)})`,
@@ -97,7 +109,6 @@ export function registerAutoCaptureHook(params: {
           const rawRole = msgObj.role;
           if (rawRole !== "user" && rawRole !== "assistant") continue;
           const role = rawRole;
-          if (role === "assistant" && !captureAssistantForAgent) continue;
 
           const content = msgObj.content;
           if (typeof content === "string") {

@@ -64,6 +64,7 @@ function createMockApi(dbPath, embeddingBaseURL, llmBaseURL, logs) {
     pluginConfig: {
       dbPath,
       autoCapture: true,
+      captureAgents: ["main", "life"],
       autoRecall: false,
       smartExtraction: true,
       extractMinMessages: 2,

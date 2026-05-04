@@ -46,7 +46,7 @@ export interface PluginConfig {
   /** Agent IDs included in auto-recall injection (whitelist mode). */
   autoRecallIncludeAgents?: string[];
   reasoningStrategyRecall?: ReasoningStrategyRecallConfig;
-  /** Agent IDs whose assistant replies are eligible for auto-capture. User text remains eligible for all agents. */
+  /** Agent IDs whose user/assistant conversations are eligible for auto-capture. */
   captureAgents?: string[];
   /** Recent user/assistant messages sent to the smart extraction LLM during auto-capture. Default: 10. */
   captureMaxMessages?: number;
