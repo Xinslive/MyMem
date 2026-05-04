@@ -180,7 +180,10 @@ function numberParam(url: URL, name: string, fallback: number, min: number, max:
 
 function resolveFilter(url: URL): DashboardFilter {
   const scope = singleParam(url, "scope");
-  const category = singleParam(url, "category");
+  const rawCategory = singleParam(url, "category");
+  const category = rawCategory && MEMORY_CATEGORY_KEYS.includes(rawCategory)
+    ? rawCategory
+    : undefined;
   const quality = normalizeQualityFilter(singleParam(url, "quality"));
   return {
     scopeFilter: scope ? [scope] : undefined,

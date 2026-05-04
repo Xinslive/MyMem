@@ -1,3 +1,6 @@
+import { normalizeCategory } from "./memory-categories.js";
+import { parseSmartMetadata } from "./smart-metadata.js";
+
 export function parseReflectionMetadata(metadataRaw: string | undefined): Record<string, unknown> {
   if (!metadataRaw) return {};
   try {
@@ -17,6 +20,8 @@ export function isReflectionEntry(entry: { category: string; metadata?: string }
 }
 
 export function getDisplayCategoryTag(entry: { category: string; scope: string; metadata?: string }): string {
-  if (!isReflectionEntry(entry)) return `${entry.category}:${entry.scope}`;
-  return `reflection:${entry.scope}`;
+  if (isReflectionEntry(entry)) return `reflection:${entry.scope}`;
+  const meta = parseSmartMetadata(entry.metadata, entry as Parameters<typeof parseSmartMetadata>[1]);
+  const category = normalizeCategory(meta.memory_category) ?? entry.category;
+  return `${category}:${entry.scope}`;
 }

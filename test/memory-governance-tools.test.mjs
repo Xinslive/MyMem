@@ -4,6 +4,11 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { registerAllMemoryTools } = jiti("../src/tools.ts");
+const {
+  buildSmartMetadata,
+  parseSmartMetadata,
+  stringifySmartMetadata,
+} = jiti("../src/smart-metadata.ts");
 
 function createToolSet(context) {
   const creators = new Map();
@@ -164,5 +169,112 @@ describe("memory governance tools", () => {
     const explainRes = await explain.execute(null, { query: "tavily", limit: 3 });
     assert.match(explainRes.content[0].text, /state=confirmed/);
     assert.match(explainRes.content[0].text, /layer=working/);
+  });
+
+  it("lists by smart memory_category and rejects legacy list categories", async () => {
+    const entries = [
+      {
+        id: "p1111111-1111-4111-8111-111111111111",
+        text: "Prefer concise answers",
+        category: "preference",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({ l0_abstract: "Prefer concise answers", memory_category: "preferences" }),
+      },
+      {
+        id: "c2222222-2222-4222-8222-222222222222",
+        text: "Debugged the cache issue",
+        category: "fact",
+        scope: "global",
+        importance: 0.7,
+        timestamp: Date.now() - 1000,
+        metadata: JSON.stringify({ l0_abstract: "Debugged the cache issue", memory_category: "cases" }),
+      },
+    ];
+
+    const context = {
+      agentId: "main",
+      workspaceDir: "/tmp",
+      mdMirror: null,
+      scopeManager: {
+        getAccessibleScopes: () => ["global"],
+        isAccessible: () => true,
+        getDefaultScope: () => "global",
+      },
+      retriever: {
+        async retrieve() { return []; },
+        getConfig() { return { mode: "hybrid" }; },
+      },
+      store: {
+        async list() { return entries; },
+      },
+      embedder: { async embedPassage() { return [0.1, 0.2, 0.3]; } },
+    };
+
+    const list = createToolSet(context).get("mymem_list");
+    const filtered = await list.execute(null, { category: "preferences" });
+    assert.equal(filtered.details.count, 1);
+    assert.equal(filtered.details.memories[0].id, entries[0].id);
+    assert.equal(filtered.details.memories[0].category, "preferences:global");
+
+    const rejected = await list.execute(null, { category: "preference" });
+    assert.equal(rejected.details.error, "invalid_category");
+  });
+
+  it("updates smart memory_category while deriving the storage category", async () => {
+    const entry = {
+      id: "11111111-2222-4333-8444-555555555555",
+      text: "Use tavily first",
+      vector: [0.1, 0.2, 0.3],
+      category: "fact",
+      scope: "global",
+      importance: 0.7,
+      timestamp: Date.now(),
+      metadata: stringifySmartMetadata(
+        buildSmartMetadata(
+          { text: "Use tavily first", category: "fact", importance: 0.7 },
+          {
+            l0_abstract: "Use tavily first",
+            l1_overview: "- Use tavily first",
+            l2_content: "Use tavily first",
+            memory_category: "cases",
+          },
+        ),
+      ),
+    };
+
+    const context = {
+      agentId: "main",
+      workspaceDir: "/tmp",
+      mdMirror: null,
+      scopeManager: {
+        getAccessibleScopes: () => ["global"],
+        isAccessible: () => true,
+        getDefaultScope: () => "global",
+      },
+      retriever: {
+        async retrieve() { return []; },
+        getConfig() { return { mode: "hybrid" }; },
+      },
+      store: {
+        async count() { return 1; },
+        async getById() { return entry; },
+        async update(_id, updates) {
+          Object.assign(entry, updates);
+          return entry;
+        },
+      },
+      embedder: { async embedPassage() { return [0.1, 0.2, 0.3]; } },
+    };
+
+    const update = createToolSet(context).get("mymem_update");
+    const updated = await update.execute(null, { memoryId: entry.id, category: "patterns" });
+    assert.equal(updated.details.action, "updated");
+    assert.equal(updated.details.category, "other");
+    assert.equal(parseSmartMetadata(entry.metadata, entry).memory_category, "patterns");
+
+    const rejected = await update.execute(null, { memoryId: entry.id, category: "other" });
+    assert.equal(rejected.details.error, "invalid_category");
   });
 });

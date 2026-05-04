@@ -35,6 +35,12 @@ import {
   formatRetrievalExplainText,
 } from "./src/retrieval-explain.js";
 import { startMemoryDashboardServer } from "./src/dashboard-server.js";
+import {
+  filterEntriesByMemoryCategory,
+  filterResultsByMemoryCategory,
+  toMemoryCategory,
+} from "./src/tools-shared.js";
+import { getDisplayCategoryTag } from "./src/reflection-metadata.js";
 
 /**
  * Ensure metadata string has memory_category (new-format) or inject it.
@@ -795,17 +801,20 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     scopeFilter?: string[],
     category?: string,
   ) => {
+    if (category && !toMemoryCategory(category)) {
+      throw new Error(`Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`);
+    }
     lastSearchDiagnostics = null;
     const retriever = getSearchRetriever();
     let results;
     try {
       results = await retriever.retrieve({
         query,
-        limit,
+        limit: category ? limit * 4 : limit,
         scopeFilter,
-        category,
         source: "cli",
       });
+      results = filterResultsByMemoryCategory(results, category).slice(0, limit);
       captureSearchDiagnostics(retriever);
     } catch (error) {
       captureSearchDiagnostics(retriever);
@@ -818,11 +827,11 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
       try {
         results = await retryRetriever.retrieve({
           query,
-          limit,
+          limit: category ? limit * 4 : limit,
           scopeFilter,
-          category,
           source: "cli",
         });
+        results = filterResultsByMemoryCategory(results, category).slice(0, limit);
         captureSearchDiagnostics(retryRetriever);
       } catch (error) {
         captureSearchDiagnostics(retryRetriever);
@@ -846,6 +855,9 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     scopeFilter?: string[],
     category?: string,
   ) => {
+    if (category && !toMemoryCategory(category)) {
+      throw new Error(`Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`);
+    }
     const retriever = getSearchRetriever();
     try {
       return await explainMemoryRetrieval(retriever, {
@@ -1125,22 +1137,27 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         if (options.scope) {
           scopeFilter = [options.scope];
         }
+        if (options.category && !toMemoryCategory(options.category)) {
+          throw new Error(`Invalid memory category: ${options.category}. Use one of: profile, preferences, entities, events, cases, patterns.`);
+        }
 
         const memories = await context.store.list(
           scopeFilter,
-          options.category,
-          limit,
-          offset
+          undefined,
+          options.category ? Math.min(1000, limit + offset) : limit,
+          options.category ? 0 : offset
         );
+        const filteredMemories = filterEntriesByMemoryCategory(memories, options.category)
+          .slice(options.category ? offset : 0, options.category ? offset + limit : limit);
 
         if (options.json) {
-          console.log(formatJson(memories));
+          console.log(formatJson(filteredMemories));
         } else {
-          if (memories.length === 0) {
+          if (filteredMemories.length === 0) {
             console.log("No memories found.");
           } else {
-            console.log(`Found ${memories.length} memories:\n`);
-            memories.forEach((memory, i) => {
+            console.log(`Found ${filteredMemories.length} memories:\n`);
+            filteredMemories.forEach((memory, i) => {
               console.log(formatMemory(memory, offset + i));
             });
           }
@@ -1198,7 +1215,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
               if (result.sources.reranked) sources.push("reranked");
 
               console.log(
-                `${i + 1}. [${result.entry.id}] [${result.entry.category}:${result.entry.scope}] ${result.entry.text} ` +
+                `${i + 1}. [${result.entry.id}] [${getDisplayCategoryTag(result.entry)}] ${result.entry.text} ` +
                 `(${(result.score * 100).toFixed(0)}%, ${sources.join('+')})`
               );
             });
@@ -1425,22 +1442,26 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         if (options.scope) {
           scopeFilter = [options.scope];
         }
+        if (options.category && !toMemoryCategory(options.category)) {
+          throw new Error(`Invalid memory category: ${options.category}. Use one of: profile, preferences, entities, events, cases, patterns.`);
+        }
 
         const memories = await context.store.list(
           scopeFilter,
-          options.category,
+          undefined,
           1000 // Large limit for export
         );
+        const filteredMemories = filterEntriesByMemoryCategory(memories, options.category);
 
         const exportData = {
           version: "1.0",
           exportedAt: new Date().toISOString(),
-          count: memories.length,
+          count: filteredMemories.length,
           filters: {
             scope: options.scope,
             category: options.category,
           },
-          memories: memories.map(m => ({
+          memories: filteredMemories.map(m => ({
             ...m,
             vector: undefined, // Exclude vectors to reduce size
           })),

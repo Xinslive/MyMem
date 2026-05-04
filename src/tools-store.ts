@@ -10,11 +10,11 @@ import {
   resolveToolContext,
   memoryCategoryEnum,
   clamp01,
-  deriveManualMemoryCategory,
   deriveManualMemoryLayer,
   fallbackToolLogger,
-  toLegacyMemoryCategory,
+  toMemoryCategory,
 } from "./tools-shared.js";
+import { mapToStoreCategory } from "./smart-extractor-handlers.js";
 import { stripEnvelopeMetadata } from "./smart-extractor.js";
 import { isNoise } from "./noise-filter.js";
 import { isSystemBypassId } from "./scopes.js";
@@ -59,7 +59,7 @@ export function registerMemoryStoreTool(
         const {
           text,
           importance = 0.7,
-          category = "other",
+          category = "patterns",
           scope,
         } = params as {
           text: string;
@@ -154,7 +154,19 @@ export function registerMemoryStoreTool(
           }
 
           const safeImportance = clamp01(importance, 0.7);
-          const storeCategory = toLegacyMemoryCategory(category) ?? "other";
+          const memoryCategory = toMemoryCategory(category);
+          if (!memoryCategory) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`,
+                },
+              ],
+              details: { error: "invalid_category", category },
+            };
+          }
+          const storeCategory = mapToStoreCategory(memoryCategory);
           const manualStrategyFields = detectLessonReasoningStrategy(stripped);
           const vector = await runtimeContext.embedder.embedPassage(stripped);
 
@@ -166,8 +178,7 @@ export function registerMemoryStoreTool(
           // Fail-open by design: dedup must never block a legitimate memory write.
           // excludeInactive: superseded historical records must not block new writes.
           // Align with TEMPORAL_VERSIONED_CATEGORIES: only preference and entity
-          // are semantically version-controlled. "fact"/"other" can reverse-map
-          // to unrelated semantic categories, risking cross-supersede.
+          // are semantically version-controlled.
           const SUPERSEDE_ELIGIBLE: ReadonlySet<string> = new Set([
             "preference", "entity",
           ]);
@@ -231,7 +242,7 @@ export function registerMemoryStoreTool(
                 source: "manual",
                 ...(manualStrategyFields ?? {}),
                 state: "confirmed",
-                memory_layer: deriveManualMemoryLayer(storeCategory),
+                memory_layer: deriveManualMemoryLayer(oldMeta.memory_category),
                 last_confirmed_use_at: now,
                 bad_recall_count: 0,
                 suppressed_until_turn: 0,
@@ -304,7 +315,8 @@ export function registerMemoryStoreTool(
                 id: newEntry.id,
                 supersededId: oldEntry.id,
                 scope: newEntry.scope,
-                category: newEntry.category,
+                category: oldMeta.memory_category,
+                rawCategory: newEntry.category,
                 importance: newEntry.importance,
                 similarity: supersedeCandidate.score,
               },
@@ -328,11 +340,11 @@ export function registerMemoryStoreTool(
                   l0_abstract: text,
                   l1_overview: `- ${text}`,
                   l2_content: text,
-                  memory_category: deriveManualMemoryCategory(storeCategory, text),
+                  memory_category: memoryCategory,
                   source: "manual",
                   ...(manualStrategyFields ?? {}),
                   state: "confirmed",
-                  memory_layer: deriveManualMemoryLayer(storeCategory),
+                  memory_layer: deriveManualMemoryLayer(memoryCategory),
                   last_confirmed_use_at: Date.now(),
                   bad_recall_count: 0,
                   suppressed_until_turn: 0,
@@ -368,7 +380,8 @@ export function registerMemoryStoreTool(
               action: "created",
               id: entry.id,
               scope: entry.scope,
-              category: entry.category,
+              category: memoryCategory,
+              rawCategory: entry.category,
               importance: entry.importance,
             },
           };

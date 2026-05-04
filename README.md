@@ -113,18 +113,11 @@ MyMem 内部有两套层级：
 
 治理模块只更新已有主记忆。反思写入独立 reflection 库，只供反思上下文注入使用，不参与普通 `mymem_recall`。
 
-### OpenClaw 工具 category 兼容层
+### OpenClaw 工具 category
 
-OpenClaw 工具参数里的 `category` 是兼容旧版的分类，不是 MyMem 内部的完整 6 类模型。MyMem 在写入时保留顶层 `category` 以兼容，同时在 `metadata` 里写入真正的 `memory_category`：
+OpenClaw 工具参数里的 `category` 直接使用 MyMem 的 6 类模型：`profile`、`preferences`、`entities`、`events`、`cases`、`patterns`。工具层不再接受旧版 `preference`、`fact`、`decision`、`entity`、`other` 分类。
 
-| 内部分类 | 工具层 category |
-|---------|----------------|
-| profile | fact |
-| preferences | preference |
-| entities | entity |
-| events | decision |
-| cases | fact |
-| patterns | other |
+为兼容既有存储表结构，底层顶层 `category` 列仍可能保留内部派生值；工具查询、列表、解释和返回结果均以 `metadata.memory_category` 为准。
 
 ---
 

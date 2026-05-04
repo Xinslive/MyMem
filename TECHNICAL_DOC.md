@@ -226,18 +226,11 @@ interface SmartMemoryMetadata {
 }
 ```
 
-### 3.5 OpenClaw 兼容层
+### 3.5 OpenClaw 工具 category
 
-OpenClaw 工具参数中的 `category` 是旧版兼容分类，MyMem 在写入时保留顶层 `category` 以兼容，同时在 `metadata` 里写入真正的 `memory_category`：
+OpenClaw 工具参数中的 `category` 直接使用 MyMem 的 6 类分类：`profile`、`preferences`、`entities`、`events`、`cases`、`patterns`。工具层不再兼容旧版 `preference`、`fact`、`decision`、`entity`、`other` 分类。
 
-| 内部分类 | → 工具层 category |
-|---------|------------------|
-| profile | fact |
-| preferences | preference |
-| entities | entity |
-| events | decision |
-| cases | fact |
-| patterns | other |
+为兼容既有存储表结构，底层顶层 `category` 列仍可能保留内部派生值；工具查询、列表、解释和返回结果均以 `metadata.memory_category` 为准。
 
 ---
 
@@ -364,8 +357,8 @@ interface ChunkerConfig {
 
 ```typescript
 // 全局并发限制：所有 Embedder 实例共享
-const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;
-const EMBED_TIMEOUT_MS = 20_000;  // 20 秒超时
+const GLOBAL_EMBED_CONCURRENCY_LIMIT = 20;
+const EMBED_TIMEOUT_MS = 3_000;  // 3 秒超时
 ```
 
 Embedding 结果通过 LRU 缓存（`src/embedding-cache.ts`）避免重复计算，默认 256 条目、30 分钟 TTL。
@@ -1099,8 +1092,8 @@ CI 编排通过 `scripts/run-ci-tests.mjs` 和 `scripts/ci-test-manifest.mjs` �
 
 ```typescript
 // src/concurrency-limiter.ts
-const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;  // 全局 Embedding 并发
-const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
+const GLOBAL_EMBED_CONCURRENCY_LIMIT = 20;  // 全局 Embedding 并发
+const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 ```
 
 ### 19.2 文件锁

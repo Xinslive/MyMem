@@ -10,8 +10,12 @@ import { join } from "node:path";
 import type { MemoryRetriever, RetrievalContext, RetrievalResult } from "./retriever.js";
 import type { MemoryStore } from "./store.js";
 import type { Embedder } from "./embedder.js";
-import { reverseMapLegacyCategory } from "./smart-metadata.js";
-import type { MemoryCategory } from "./memory-categories.js";
+import { parseSmartMetadata } from "./smart-metadata.js";
+import {
+  MEMORY_CATEGORIES,
+  normalizeCategory,
+  type MemoryCategory,
+} from "./memory-categories.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { parseAgentIdFromSessionKey, type MemoryScopeManager } from "./scopes.js";
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
@@ -22,15 +26,6 @@ import type { ExtractionTelemetrySummary } from "./telemetry.js";
 // Types
 // ============================================================================
 
-export const MEMORY_CATEGORIES = [
-  "preference",
-  "fact",
-  "decision",
-  "entity",
-  "reflection",
-  "other",
-] as const;
-
 export function stringEnum<T extends readonly [string, ...string[]]>(values: T) {
   return Type.Unsafe<T[number]>({
     type: "string",
@@ -39,10 +34,10 @@ export function stringEnum<T extends readonly [string, ...string[]]>(values: T) 
 }
 
 const TOOL_CATEGORY_DESCRIPTION =
-  "OpenClaw/storage compatibility category: preference, fact, decision, entity, reflection, other. MyMem also writes smart metadata memory_category: profile, preferences, entities, events, cases, patterns.";
+  "MyMem memory category: profile, preferences, entities, events, cases, patterns.";
 
 export function memoryCategoryEnum() {
-  return Type.Unsafe<(typeof MEMORY_CATEGORIES)[number]>({
+  return Type.Unsafe<MemoryCategory>({
     type: "string",
     enum: [...MEMORY_CATEGORIES],
     description: TOOL_CATEGORY_DESCRIPTION,
@@ -107,23 +102,52 @@ export function truncateText(text: string, maxChars: number): string {
   return `${clipped}…`;
 }
 
-export function isLegacyMemoryCategory(category: string): category is (typeof MEMORY_CATEGORIES)[number] {
-  return (MEMORY_CATEGORIES as readonly string[]).includes(category);
+export function toMemoryCategory(category: string | undefined): MemoryCategory | undefined {
+  return typeof category === "string" ? normalizeCategory(category) ?? undefined : undefined;
 }
 
-export function toLegacyMemoryCategory(category: string): (typeof MEMORY_CATEGORIES)[number] | undefined {
-  return isLegacyMemoryCategory(category) ? category : undefined;
-}
-
-export function deriveManualMemoryCategory(category: string, text: string): MemoryCategory {
-  return reverseMapLegacyCategory(toLegacyMemoryCategory(category), text);
-}
-
-export function deriveManualMemoryLayer(category: string): "durable" | "working" {
-  if (category === "preference" || category === "decision" || category === "fact") {
+export function deriveManualMemoryLayer(category: MemoryCategory): "durable" | "working" {
+  if (category === "profile" || category === "preferences" || category === "events") {
     return "durable";
   }
   return "working";
+}
+
+export function getEntryMemoryCategory(entry: {
+  text?: string;
+  category?: string;
+  importance?: number;
+  timestamp?: number;
+  metadata?: string;
+}): MemoryCategory {
+  const metadata = parseSmartMetadata(entry.metadata, entry as Parameters<typeof parseSmartMetadata>[1]);
+  return normalizeCategory(metadata.memory_category) ?? "patterns";
+}
+
+export function filterResultsByMemoryCategory<T extends {
+  entry: {
+    text?: string;
+    category?: string;
+    importance?: number;
+    timestamp?: number;
+    metadata?: string;
+  };
+}>(results: T[], category?: string): T[] {
+  const memoryCategory = toMemoryCategory(category);
+  if (!memoryCategory) return results;
+  return results.filter((result) => getEntryMemoryCategory(result.entry) === memoryCategory);
+}
+
+export function filterEntriesByMemoryCategory<T extends {
+  text?: string;
+  category?: string;
+  importance?: number;
+  timestamp?: number;
+  metadata?: string;
+}>(entries: T[], category?: string): T[] {
+  const memoryCategory = toMemoryCategory(category);
+  if (!memoryCategory) return entries;
+  return entries.filter((entry) => getEntryMemoryCategory(entry) === memoryCategory);
 }
 
 export function sanitizeMemoryForSerialization(results: RetrievalResult[]) {

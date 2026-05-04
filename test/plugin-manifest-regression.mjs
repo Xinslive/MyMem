@@ -58,6 +58,22 @@ function assertAnyOfTypes(pathExpression, expectedTypes) {
   assert.deepEqual(actual, [...expectedTypes].sort(), `${pathExpression} should allow ${expectedTypes.join(" or ")}`);
 }
 
+function assertToolCategoryEnum(toolDefinition, toolName) {
+  const categorySchema = toolDefinition.parameters.properties.category;
+  assert.ok(categorySchema, `${toolName} should expose a category parameter`);
+  assert.deepEqual(
+    categorySchema.enum,
+    ["profile", "preferences", "entities", "events", "cases", "patterns"],
+    `${toolName} category enum should use MyMem's 6-category model`,
+  );
+  for (const legacyCategory of ["preference", "fact", "decision", "entity", "other", "reflection"]) {
+    assert.ok(
+      !categorySchema.enum.includes(legacyCategory),
+      `${toolName} category enum should not include legacy category ${legacyCategory}`,
+    );
+  }
+}
+
 function createMockApi(pluginConfig, options = {}) {
   return {
     pluginConfig,
@@ -237,6 +253,7 @@ try {
     /cross-turn synthesis/,
     "mymem_store text parameter should guide agents toward curated cross-turn memories",
   );
+  assertToolCategoryEnum(storeToolDefinition, "mymem_store");
   const recallToolDefinition = api.toolFactories.mymem_recall({
     agentId: "main",
     sessionKey: "agent:main:test",
@@ -246,6 +263,7 @@ try {
     /auto-recall did not provide enough context/,
     "mymem_recall description should teach agents to use manual recall when auto-recall is insufficient",
   );
+  assertToolCategoryEnum(recallToolDefinition, "mymem_recall");
   const updateToolDefinition = api.toolFactories.mymem_update({
     agentId: "main",
     sessionKey: "agent:main:test",
@@ -255,6 +273,12 @@ try {
     /wrong, stale, incomplete, or superseded/,
     "mymem_update description should emphasize correction and supersede use cases",
   );
+  assertToolCategoryEnum(updateToolDefinition, "mymem_update");
+  const listToolDefinition = api.toolFactories.mymem_list({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assertToolCategoryEnum(listToolDefinition, "mymem_list");
   const forgetToolDefinition = api.toolFactories.mymem_forget({
     agentId: "main",
     sessionKey: "agent:main:test",

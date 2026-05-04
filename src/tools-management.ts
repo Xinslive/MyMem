@@ -16,6 +16,8 @@ import {
   retrieveWithRetry,
   sanitizeMemoryForSerialization,
   resolveMemoryId,
+  filterEntriesByMemoryCategory,
+  toMemoryCategory,
 } from "./tools-shared.js";
 import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
@@ -367,6 +369,18 @@ export function registerMemoryExplainTool(
               }
             }
 
+            if (category && !toMemoryCategory(category)) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`,
+                  },
+                ],
+                details: { error: "invalid_category", category },
+              };
+            }
+
             const report = await explainMemoryRetrieval(runtimeContext.retriever, {
               query,
               limit: safeLimit,
@@ -440,6 +454,17 @@ export function registerMemoryListTool(
         try {
           const safeLimit = clampInt(limit, 1, 50);
           const safeOffset = clampInt(offset, 0, 1000);
+          if (category && !toMemoryCategory(category)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`,
+                },
+              ],
+              details: { error: "invalid_category", category },
+            };
+          }
           const agentId = resolveRuntimeAgentId(runtimeContext.agentId, runtimeCtx, runtimeContext.logger);
 
           // Determine accessible scopes
@@ -462,12 +487,14 @@ export function registerMemoryListTool(
 
           const entries = await runtimeContext.store.list(
             scopeFilter,
-            category,
-            safeLimit,
-            safeOffset,
+            undefined,
+            category ? Math.min(200, safeLimit + safeOffset) : safeLimit,
+            category ? 0 : safeOffset,
           );
+          const filteredEntries = filterEntriesByMemoryCategory(entries, category)
+            .slice(category ? safeOffset : 0, category ? safeOffset + safeLimit : safeLimit);
 
-          if (entries.length === 0) {
+          if (filteredEntries.length === 0) {
             return {
               content: [{ type: "text", text: "No memories found." }],
               details: {
@@ -482,7 +509,7 @@ export function registerMemoryListTool(
             };
           }
 
-          const text = entries
+          const text = filteredEntries
             .map((entry, i) => {
               const date = new Date(entry.timestamp)
                 .toISOString()
@@ -496,12 +523,12 @@ export function registerMemoryListTool(
             content: [
               {
                 type: "text",
-                text: `Recent memories (showing ${entries.length}):\n\n${text}`,
+                text: `Recent memories (showing ${filteredEntries.length}):\n\n${text}`,
               },
             ],
             details: {
-              count: entries.length,
-              memories: entries.map((e) => ({
+              count: filteredEntries.length,
+              memories: filteredEntries.map((e) => ({
                 id: e.id,
                 text: e.text,
                 category: getDisplayCategoryTag(e),

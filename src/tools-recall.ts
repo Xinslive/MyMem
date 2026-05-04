@@ -14,6 +14,8 @@ import {
   truncateText,
   sanitizeMemoryForSerialization,
   retrieveWithRetry,
+  filterResultsByMemoryCategory,
+  toMemoryCategory,
 } from "./tools-shared.js";
 import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
@@ -87,6 +89,17 @@ export function registerMemoryRecallTool(
             ? clampInt(limit, 1, 20)
             : clampInt(limit, 1, 6);
           const safeCharsPerItem = clampInt(maxCharsPerItem, 60, 1000);
+          if (category && !toMemoryCategory(category)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`,
+                },
+              ],
+              details: { error: "invalid_category", category },
+            };
+          }
           const agentId = runtimeContext.agentId;
 
           // Determine accessible scopes
@@ -111,23 +124,23 @@ export function registerMemoryRecallTool(
             query,
             limit: safeLimit,
             scopeFilter,
-            category,
             source: "manual",
           }, () => runtimeContext.store.count()), runtimeContext.workspaceBoundary);
+          const categoryFilteredResults = filterResultsByMemoryCategory(rawResults, category);
 
           const typeFilter: MemoryType | undefined =
             type === "knowledge" || type === "experience" ? type : undefined;
           const results = typeFilter
-            ? rawResults.filter(
+            ? categoryFilteredResults.filter(
                 (r) =>
                   parseSmartMetadata(r.entry.metadata, r.entry).memory_type === typeFilter,
               )
-            : rawResults;
+            : categoryFilteredResults;
 
           if (results.length === 0) {
             return {
               content: [{ type: "text", text: "No relevant memories found." }],
-              details: { count: 0, query, scopes: scopeFilter, type: typeFilter ?? "both" },
+              details: { count: 0, query, scopes: scopeFilter, category, type: typeFilter ?? "both" },
             };
           }
 
@@ -187,6 +200,7 @@ export function registerMemoryRecallTool(
               scopes: scopeFilter,
               retrievalMode: runtimeContext.retriever.getConfig().mode,
               recallMode: includeFullText ? "full" : "summary",
+              category,
               type: typeFilter ?? "both",
             },
           };

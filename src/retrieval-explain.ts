@@ -5,6 +5,7 @@ import type {
   RetrievalResult,
 } from "./retriever.js";
 import type { RetrievalTrace, RetrievalStageResult } from "./retrieval-trace.js";
+import { filterResultsByMemoryCategory } from "./tools-shared.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
@@ -78,6 +79,8 @@ function stageLabel(name: string): string {
       return "recency scoring";
     case "fallback_scoring":
       return "fallback scoring";
+    case "memory_category_filter":
+      return "memory category filter";
     default:
       return name;
   }
@@ -269,16 +272,33 @@ export async function explainMemoryRetrieval(
   const safeLimit = clampInt(options.limit ?? 5, 1, 20);
   const { results, trace } = await retriever.retrieveWithTrace({
     query: options.query,
-    limit: safeLimit,
+    limit: options.category ? safeLimit * 4 : safeLimit,
     scopeFilter: options.scopeFilter,
-    category: options.category,
     source: options.source ?? "manual",
   });
+  const filteredResults = filterResultsByMemoryCategory(results, options.category).slice(0, safeLimit);
+  if (options.category) {
+    const beforeIds = results.map((result) => result.entry.id);
+    trace.stages.push({
+      name: "memory_category_filter",
+      inputCount: beforeIds.length,
+      outputCount: filteredResults.length,
+      droppedIds: beforeIds.filter((id) => !filteredResults.some((result) => result.entry.id === id)),
+      scoreRange: filteredResults.length > 0
+        ? [
+            Math.min(...filteredResults.map((result) => result.score)),
+            Math.max(...filteredResults.map((result) => result.score)),
+          ]
+        : null,
+      durationMs: 0,
+    });
+    trace.finalCount = filteredResults.length;
+  }
   const diagnostics = typeof retriever.getLastDiagnostics === "function"
     ? retriever.getLastDiagnostics()
     : null;
   const explanation = buildRetrievalExplanation({
-    results,
+    results: filteredResults,
     trace,
     diagnostics,
     config: retriever.getConfig(),
@@ -288,8 +308,8 @@ export async function explainMemoryRetrieval(
   });
   const details = {
     query: options.query,
-    count: results.length,
-    results: serializeExplainResults(results),
+    count: filteredResults.length,
+    results: serializeExplainResults(filteredResults),
     trace,
     diagnostics,
     explanation,

@@ -7,7 +7,8 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerMemoryDoctorTool } from "./memory-doctor-tool.js";
 
 // Re-export shared types and utilities
-export { MEMORY_CATEGORIES, _resetWarnedMissingAgentIdState } from "./tools-shared.js";
+export { MEMORY_CATEGORIES } from "./memory-categories.js";
+export { _resetWarnedMissingAgentIdState } from "./tools-shared.js";
 export type { MdMirrorWriter, ToolContext } from "./tools-shared.js";
 
 // Re-export self-improvement tools

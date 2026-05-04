@@ -14,6 +14,7 @@ import {
   fallbackToolLogger,
   retrieveWithRetry,
   sanitizeMemoryForSerialization,
+  toMemoryCategory,
 } from "./tools-shared.js";
 import type { MemoryEntry } from "./store.js";
 import { isNoise } from "./noise-filter.js";
@@ -26,7 +27,11 @@ import {
   stringifySmartMetadata,
 } from "./smart-metadata.js";
 import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
-import { TEMPORAL_VERSIONED_CATEGORIES } from "./memory-categories.js";
+import {
+  TEMPORAL_VERSIONED_CATEGORIES,
+  type MemoryCategory,
+} from "./memory-categories.js";
+import { mapToStoreCategory } from "./smart-extractor-handlers.js";
 
 export function registerMemoryUpdateTool(
   api: OpenClawPluginApi,
@@ -143,11 +148,24 @@ export function registerMemoryUpdateTool(
           }
 
           // Fetch existing entry once when we may need it (text change, or
-          // importance-only change that still needs metadata sync). Shared by
-          // the temporal supersede guard and the normal-path metadata rebuild.
+          // importance/category-only changes that still need metadata sync).
+          // Shared by the temporal supersede guard and the normal-path metadata
+          // rebuild.
           let existing: MemoryEntry | null = null;
-          if (text || importance !== undefined) {
+          if (text || importance !== undefined || category) {
             existing = await runtimeContext.store.getById(resolvedId, scopeFilter);
+          }
+          const requestedMemoryCategory = toMemoryCategory(category);
+          if (category && !requestedMemoryCategory) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid memory category: ${category}. Use one of: profile, preferences, entities, events, cases, patterns.`,
+                },
+              ],
+              details: { error: "invalid_category", category },
+            };
           }
 
           // --- Temporal supersede guard ---
@@ -184,7 +202,9 @@ export function registerMemoryUpdateTool(
                 const newEntry = await runtimeContext.store.store({
                   text,
                   vector: newVector,
-                  category: category ? (category as MemoryEntry["category"]) : existing.category,
+                  category: requestedMemoryCategory
+                    ? mapToStoreCategory(requestedMemoryCategory)
+                    : existing.category,
                   scope: existing.scope,
                   importance:
                     importance !== undefined
@@ -239,18 +259,23 @@ export function registerMemoryUpdateTool(
           if (newVector) updates.vector = newVector;
           if (importance !== undefined)
             updates.importance = clamp01(importance, 0.7);
-          if (category) updates.category = category;
+          if (requestedMemoryCategory) updates.category = mapToStoreCategory(requestedMemoryCategory);
 
-          // Rebuild smart metadata when text or importance changes (#544)
-          if (text && existing) {
+          // Rebuild smart metadata when text, importance, or memory category changes (#544)
+          if ((text || requestedMemoryCategory) && existing) {
             const meta = parseSmartMetadata(existing.metadata, existing);
-            const effectiveCategory = (category ?? meta.memory_category) as "profile" | "preferences" | "entities" | "events" | "cases" | "patterns";
+            const effectiveCategory: MemoryCategory = requestedMemoryCategory ?? meta.memory_category;
             const updatedMeta = buildSmartMetadata(existing, {
-              l0_abstract: text,
-              l1_overview: `- ${text}`,
-              l2_content: text,
-              fact_key: deriveFactKey(effectiveCategory, text),
-              memory_temporal_type: classifyTemporal(text),
+              ...(text
+                ? {
+                    l0_abstract: text,
+                    l1_overview: `- ${text}`,
+                    l2_content: text,
+                    memory_temporal_type: classifyTemporal(text),
+                  }
+                : {}),
+              memory_category: effectiveCategory,
+              fact_key: deriveFactKey(effectiveCategory, text ?? meta.l0_abstract),
               confidence:
                 importance !== undefined
                   ? clamp01(importance, 0.7)
@@ -259,7 +284,7 @@ export function registerMemoryUpdateTool(
             // Re-derive valid_until from the new text. Explicit override
             // (not via patch.valid_until) so the absence of a new expiry
             // clears any stale value inherited from the previous text.
-            updatedMeta.valid_until = inferExpiry(text);
+            if (text) updatedMeta.valid_until = inferExpiry(text);
             updates.metadata = stringifySmartMetadata(updatedMeta);
           } else if (importance !== undefined && existing) {
             // Sync confidence for importance-only changes

@@ -418,7 +418,7 @@ describe("recall text cleanup", () => {
     retrieverModuleForMock.createRetriever = origCreateRetriever;
     embedderModuleForMock.createEmbedder = origCreateEmbedder;
     currentMockRetrieve = null;
-    rmSync(workspaceDir, { recursive: true, force: true });
+    rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   });
 
   it("removes retrieval metadata from memory_recall content text but preserves details fields", async () => {
@@ -426,8 +426,8 @@ describe("recall text cleanup", () => {
     const res = await tool.execute(null, { query: "test" });
 
     assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
-      "1. [m1] [fact:global] remember this",
-      "2. [m2] [preference:global] prefer concise diffs",
+      "1. [m1] [cases:global] remember this",
+      "2. [m2] [preferences:global] prefer concise diffs",
     ]);
 
     assert.equal(typeof res.details.memories[0].score, "number");
@@ -451,6 +451,24 @@ describe("recall text cleanup", () => {
       assert.doesNotMatch(line, /\d+%/);
       assert.doesNotMatch(line, /\bvector\b|\bBM25\b|\breranked\b/);
     }
+  });
+
+  it("filters memory_recall category by smart memory_category", async () => {
+    const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeResults()));
+    const res = await tool.execute(null, { query: "test", category: "preferences" });
+
+    assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
+      "1. [m2] [preferences:global] prefer concise diffs",
+    ]);
+    assert.equal(res.details.category, "preferences");
+  });
+
+  it("rejects legacy memory_recall categories", async () => {
+    const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeResults()));
+    const res = await tool.execute(null, { query: "test", category: "preference" });
+
+    assert.equal(res.details.error, "invalid_category");
+    assert.match(res.content[0].text, /Invalid memory category: preference/);
   });
 
   it("removes retrieval metadata from auto-recall injected text", async () => {
@@ -984,8 +1002,8 @@ describe("recall text cleanup", () => {
     const res = await tool.execute(null, { query: "addressing" });
 
     assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
-      "1. [m1] [fact:global] remember this",
-      "2. [m2] [preference:global] prefer concise diffs",
+      "1. [m1] [cases:global] remember this",
+      "2. [m2] [preferences:global] prefer concise diffs",
     ]);
     assert.equal(res.details.memories.length, 2);
     assert.doesNotMatch(res.content[0].text, /称呼偏好：宙斯/);
@@ -1105,8 +1123,8 @@ describe("recall text cleanup", () => {
     const res = await tool.execute(null, { query: "legacy addressing" });
 
     assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
-      "1. [m1] [fact:global] remember this",
-      "2. [m2] [preference:global] prefer concise diffs",
+      "1. [m1] [cases:global] remember this",
+      "2. [m2] [preferences:global] prefer concise diffs",
     ]);
     assert.equal(res.details.memories.length, 2);
     assert.doesNotMatch(res.content[0].text, /希望在主会话中被称呼为“宙斯”/);

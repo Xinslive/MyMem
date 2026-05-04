@@ -138,7 +138,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "I like Rust", category: "preference" });
+    const res = await tool.execute(null, { text: "I like Rust", category: "preferences" });
 
     assert.equal(res.details.action, "superseded", "should auto-supersede");
     assert.equal(res.details.supersededId, oldId);
@@ -156,7 +156,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "I like coffee", category: "preference" });
+    const res = await tool.execute(null, { text: "I like coffee", category: "preferences" });
 
     const updatedOld = store._entries.get(oldId);
     const oldMeta = parseSmartMetadata(updatedOld.metadata, updatedOld);
@@ -175,7 +175,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "My favorite color is green", category: "preference" });
+    const res = await tool.execute(null, { text: "My favorite color is green", category: "preferences" });
 
     const newEntry = store._entries.get(res.details.id);
     const newMeta = parseSmartMetadata(newEntry.metadata, newEntry);
@@ -199,7 +199,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "I prefer light mode", category: "preference" });
+    const res = await tool.execute(null, { text: "I prefer light mode", category: "preferences" });
 
     const newEntry = store._entries.get(res.details.id);
     const newMeta = parseSmartMetadata(newEntry.metadata, newEntry);
@@ -219,15 +219,15 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "Decided to use Vue", category: "decision" });
+    const res = await tool.execute(null, { text: "Decided to use Vue", category: "events" });
 
     assert.equal(res.details.action, "created", "decisions should not be superseded");
     console.log("  ✅ decisions are not auto-superseded");
   }
 
-  // Test 6: reflection category is NOT auto-superseded
+  // Test 6: legacy/non-6-category tool category is rejected
   {
-    console.log("Test 6: reflection category is NOT auto-superseded...");
+    console.log("Test 6: legacy/non-6-category tool category is rejected...");
     const store = makeMockStore();
     const oldId = "old-ref-1";
     const oldEntry = makeOldEntry(oldId, "Team meeting went well", "reflection");
@@ -237,8 +237,8 @@ async function runTests() {
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
     const res = await tool.execute(null, { text: "Team meeting was productive", category: "reflection" });
 
-    assert.equal(res.details.action, "created", "reflections should not be superseded");
-    console.log("  ✅ reflections are not auto-superseded");
+    assert.equal(res.details.error, "invalid_category", "reflection is not a public tool category");
+    console.log("  ✅ legacy/non-6-category values are rejected");
   }
 
   // Test 7: entity category IS eligible for auto-supersede
@@ -251,7 +251,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "Alice works at Microsoft", category: "entity" });
+    const res = await tool.execute(null, { text: "Alice works at Microsoft", category: "entities" });
 
     assert.equal(res.details.action, "superseded", "entities should be superseded");
     assert.equal(res.details.supersededId, oldId);
@@ -269,7 +269,7 @@ async function runTests() {
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
     // Store as "entity" not "preference" → different category
-    const res = await tool.execute(null, { text: "I enjoy hiking", category: "entity" });
+    const res = await tool.execute(null, { text: "I enjoy hiking", category: "entities" });
 
     assert.equal(res.details.action, "created", "cross-category should not supersede");
     console.log("  ✅ cross-category similarities do not trigger supersede");
@@ -285,7 +285,7 @@ async function runTests() {
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: "The API endpoint is /v2/users", category: "fact" });
+    const res = await tool.execute(null, { text: "The API endpoint is /v2/users", category: "cases" });
 
     assert.equal(res.details.action, "created", "facts should not be auto-superseded");
     console.log("  ✅ facts are not auto-superseded (only preference/entity)");
@@ -299,7 +299,7 @@ async function runTests() {
 
     const lessonText = "Pitfall: timeout hid the real failure. Cause: logs were truncated. Fix: rerun the focused test with verbose logs. Prevention: verify the abort path before broad changes.";
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: lessonText, category: "fact" });
+    const res = await tool.execute(null, { text: lessonText, category: "cases" });
 
     assert.equal(res.details.action, "created");
     const entry = store._entries.get(res.details.id);
@@ -323,7 +323,7 @@ async function runTests() {
 
     const lessonText = "Decision principle (tests): Trigger: parser behavior changes. Action: run the focused parser suite before broad refactors.";
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    const res = await tool.execute(null, { text: lessonText, category: "decision" });
+    const res = await tool.execute(null, { text: lessonText, category: "events" });
 
     assert.equal(res.details.action, "created");
     const entry = store._entries.get(res.details.id);
