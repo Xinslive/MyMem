@@ -26,12 +26,12 @@ export function registerSelfImprovementLogTool(api: OpenClawPluginApi, context: 
     (toolCtx) => ({
       name: "self_improvement_log",
       label: "Self-Improvement Log",
-      description: "Log structured learning/error entries into .learnings for governance and later distillation.",
+      description: "Log a structured agent learning or recurring error into .learnings when a workflow mistake, tool failure, correction, or best practice should be reviewed later. This is a governance backlog entry, not normal user memory; use mymem_store for durable cross-turn user/project memory.",
       parameters: Type.Object({
         type: stringEnum(["learning", "error"]),
-        summary: Type.String({ description: "One-line summary" }),
-        details: Type.Optional(Type.String({ description: "Detailed context or error output" })),
-        suggestedAction: Type.Optional(Type.String({ description: "Concrete action to prevent recurrence" })),
+        summary: Type.String({ description: "One-line learning/error summary focused on the reusable lesson." }),
+        details: Type.Optional(Type.String({ description: "Detailed context, root cause, failed command/tool output, or correction evidence." })),
+        suggestedAction: Type.Optional(Type.String({ description: "Concrete prevention or recovery action for future agents." })),
         category: Type.Optional(Type.String({ description: "learning category (correction/best_practice/knowledge_gap) when type=learning" })),
         area: Type.Optional(Type.String({ description: "frontend|backend|infra|tests|docs|config or custom area" })),
         priority: Type.Optional(Type.String({ description: "low|medium|high|critical" })),
@@ -156,7 +156,7 @@ export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, 
     (toolCtx) => ({
       name: "self_improvement_extract_skill",
       label: "Extract Skill From Learning",
-      description: "Create a new skill scaffold from a learning entry and mark the source learning as promoted_to_skill.",
+      description: "Create a reusable SKILL.md scaffold from an approved learning/error entry when the lesson represents a repeatable workflow, tool integration, or domain procedure. Do not use for one-off memories or unreviewed backlog items.",
       parameters: Type.Object({
         learningId: Type.String({ description: "Learning ID like LRN-YYYYMMDD-001" }),
         skillName: Type.String({ description: "Skill folder name, lowercase with hyphens" }),
@@ -282,7 +282,7 @@ export function registerSelfImprovementReviewTool(api: OpenClawPluginApi, contex
     (toolCtx) => ({
       name: "self_improvement_review",
       label: "Self-Improvement Review",
-      description: "Summarize governance backlog from .learnings files (pending/high-priority/promoted counts).",
+      description: "Review the .learnings governance backlog before distilling rules or extracting skills. Use when deciding which recurring mistakes, corrections, or best practices deserve promotion.",
       parameters: Type.Object({}),
       async execute() {
         try {
@@ -338,13 +338,13 @@ export function registerSelfImprovementDistillTool(api: OpenClawPluginApi, conte
     (toolCtx) => ({
       name: "self_improvement_distill",
       label: "Distill Self-Improvement Rules",
-      description: "Distill pending .learnings backlog into candidate long-term rules. Safe by default: returns a patch proposal unless apply=true.",
+      description: "Distill reviewed .learnings backlog into candidate long-term behavior rules for AGENTS.md/SOUL.md/TOOLS.md. Safe by default: returns a patch proposal; only use apply=true after explicit human approval.",
       parameters: Type.Object({
         targetFile: Type.Optional(stringEnum(["AGENTS.md", "SOUL.md", "TOOLS.md"])),
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Max pending/high-priority entries to distill" })),
         minPriority: Type.Optional(stringEnum(["low", "medium", "high", "critical"])),
         includeErrors: Type.Optional(Type.Boolean({ description: "Include ERRORS.md entries as prevention rules" })),
-        apply: Type.Optional(Type.Boolean({ description: "When true, append the distilled rules to targetFile and mark entries promoted. Default false." })),
+        apply: Type.Optional(Type.Boolean({ description: "When true, append distilled rules to targetFile and mark entries promoted; requires explicit human approval. Default false." })),
       }),
       async execute(_toolCallId, params) {
         const {

@@ -25,17 +25,17 @@ export function registerMemoryForgetTool(
         name: "mymem_forget",
       label: "Memory Forget",
       description:
-        "Delete specific memories. Supports both search-based and direct ID-based deletion.",
+        "Permanently delete a memory only when the user explicitly asks to forget/remove it, it is sensitive, or it is clearly invalid and should not be retained. Prefer mymem_archive for stale or low-value memories where history should remain available.",
       parameters: Type.Object({
         query: Type.Optional(
-          Type.String({ description: "Search query to find memory to delete" }),
+          Type.String({ description: "Search query to find the exact memory to delete; use when the ID is unknown." }),
         ),
         memoryId: Type.Optional(
-          Type.String({ description: "Specific memory ID to delete" }),
+          Type.String({ description: "Specific memory ID or prefix to permanently delete." }),
         ),
         scope: Type.Optional(
           Type.String({
-            description: "Scope to search/delete from (optional)",
+            description: "Scope to search/delete from when the target memory belongs to a known agent/project scope.",
           }),
         ),
       }),

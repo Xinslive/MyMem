@@ -33,10 +33,10 @@ export function registerMemoryRecallTool(
       name: "mymem_recall",
       label: "Memory Recall",
       description:
-        "Search through long-term memories using hybrid retrieval (vector + keyword search). Use when you need context about user preferences, past decisions, or previously discussed topics. Pass type=\"knowledge\" for static/reference facts (profile, preferences, entities, patterns) or type=\"experience\" for past interactions and outcomes (events, cases).",
+        "Explicitly search long-term memory when auto-recall did not provide enough context, before answering questions like \"what do you remember about...\", or when prior user preferences, project decisions, entities, lessons, or past outcomes could change the answer. Do not use for facts already present in the current prompt. Pass type=\"knowledge\" for stable/reference facts (profile, preferences, entities, patterns) or type=\"experience\" for past interactions and outcomes (events, cases).",
       parameters: Type.Object({
         query: Type.String({
-          description: "Search query for finding relevant memories",
+          description: "Concrete memory search query; include user/project/entity names and the decision, preference, or past outcome you need.",
         }),
         limit: Type.Optional(
           Type.Number({
@@ -45,7 +45,7 @@ export function registerMemoryRecallTool(
         ),
         includeFullText: Type.Optional(
           Type.Boolean({
-            description: "Return full memory text when true (default: false returns summary previews)",
+            description: "Return full memory text when exact wording matters; default false returns compact summary previews.",
           }),
         ),
         maxCharsPerItem: Type.Optional(
@@ -55,7 +55,7 @@ export function registerMemoryRecallTool(
         ),
         scope: Type.Optional(
           Type.String({
-            description: "Specific memory scope to search in (optional)",
+            description: "Specific memory scope to search in when the expected memory belongs to a known agent/project scope.",
           }),
         ),
         category: Type.Optional(memoryCategoryEnum()),

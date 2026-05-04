@@ -166,7 +166,7 @@ const myMemPlugin = {
       `[mymem] mymem_recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
       `  - Plugin memory (LanceDB) = primary recall source for semantic search\n` +
       `  - MEMORY.md / memory/YYYY-MM-DD.md = startup context / journal only\n` +
-      `  - Use mymem_store or auto-capture for recallable memories.\n`
+      `  - Auto-capture handles single-turn facts; use mymem_store for explicit cross-turn synthesis, corrections, and durable lessons.\n`
     );
 
     // Health status for memory runtime stub (reflects actual plugin health)

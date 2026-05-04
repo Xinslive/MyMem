@@ -218,6 +218,79 @@ try {
     manifest.contracts.tools.toSorted(),
     "contracts.tools should list every tool registered by the default plugin configuration",
   );
+  const storeToolDefinition = api.toolFactories.mymem_store({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    storeToolDefinition.description,
+    /ONLY when auto-capture's single-turn extraction is insufficient/,
+    "mymem_store description should emphasize that manual writes complement auto-capture's single-turn limit",
+  );
+  assert.match(
+    storeToolDefinition.description,
+    /DO NOT use this tool to duplicate a single message/,
+    "mymem_store description should discourage duplicating auto-captured current-turn facts",
+  );
+  assert.match(
+    storeToolDefinition.parameters.properties.text.description,
+    /cross-turn synthesis/,
+    "mymem_store text parameter should guide agents toward curated cross-turn memories",
+  );
+  const recallToolDefinition = api.toolFactories.mymem_recall({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    recallToolDefinition.description,
+    /auto-recall did not provide enough context/,
+    "mymem_recall description should teach agents to use manual recall when auto-recall is insufficient",
+  );
+  const updateToolDefinition = api.toolFactories.mymem_update({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    updateToolDefinition.description,
+    /wrong, stale, incomplete, or superseded/,
+    "mymem_update description should emphasize correction and supersede use cases",
+  );
+  const forgetToolDefinition = api.toolFactories.mymem_forget({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    forgetToolDefinition.description,
+    /Prefer mymem_archive/,
+    "mymem_forget description should steer stale cleanup toward archive instead of permanent deletion",
+  );
+  const doctorToolDefinition = api.toolFactories.mymem_doctor({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    doctorToolDefinition.description,
+    /memory seems broken, missing, slow, empty/,
+    "mymem_doctor description should advertise diagnostic triggers",
+  );
+  const archiveToolDefinition = api.toolFactories.mymem_archive({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    archiveToolDefinition.description,
+    /stale, low-value, noisy, or superseded/,
+    "mymem_archive description should advertise cleanup triggers",
+  );
+  const selfImprovementLogDefinition = api.toolFactories.self_improvement_log({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    selfImprovementLogDefinition.description,
+    /not normal user memory/,
+    "self_improvement_log description should distinguish governance backlog from user memory",
+  );
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
   const originalSetInterval = globalThis.setInterval;

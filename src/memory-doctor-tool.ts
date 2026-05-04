@@ -110,10 +110,10 @@ export function registerMemoryDoctorTool(api: OpenClawPluginApiLike, context: Do
         name: "mymem_doctor",
         label: "Memory Doctor",
         description:
-          "Run read-only diagnostics for storage, embedding, retrieval, scopes, and optional rerank configuration.",
+          "Run read-only health diagnostics when memory seems broken, missing, slow, empty, scoped incorrectly, or embedding/rerank configuration may be failing. Use before changing config or after repeated poor recall.",
         parameters: Type.Object({
-          query: Type.Optional(Type.String({ description: "Optional retrieval probe query (default: test query)" })),
-          testEmbedding: Type.Optional(Type.Boolean({ description: "When true, call the embedding provider with a probe text." })),
+          query: Type.Optional(Type.String({ description: "Optional retrieval probe query that reproduces the suspected recall problem." })),
+          testEmbedding: Type.Optional(Type.Boolean({ description: "When true, call the embedding provider with a probe text; useful for config/API failures." })),
         }),
         async execute(_toolCallId: unknown, params: unknown, _signal: unknown, _onUpdate: unknown, runtimeCtx: unknown) {
           const { query, testEmbedding } = params as { query?: string; testEmbedding?: boolean };

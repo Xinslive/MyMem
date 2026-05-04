@@ -39,19 +39,19 @@ export function registerMemoryUpdateTool(
         name: "mymem_update",
       label: "Memory Update",
       description:
-        "Update an existing memory. For preferences/entities, changing text creates a new version (supersede) to preserve history. Metadata-only changes (importance, category) update in-place.",
+        "Correct or revise an existing memory when the user says a memory is wrong, stale, incomplete, or superseded by newer information. Use mymem_recall or mymem_list first when you need to identify the target. For preferences/entities, changing text creates a superseding version to preserve history; metadata-only changes update in-place.",
       parameters: Type.Object({
         memoryId: Type.String({
           description:
-            "ID of the memory to update (full UUID or 8+ char prefix)",
+            "Target memory ID or 8+ char prefix; non-ID text is treated as a search query to locate the memory.",
         }),
         text: Type.Optional(
           Type.String({
-            description: "New text content (triggers re-embedding)",
+            description: "Corrected canonical memory text; use for stale/wrong/incomplete memories, not ordinary current-turn facts.",
           }),
         ),
         importance: Type.Optional(
-          Type.Number({ description: "New importance score 0-1" }),
+          Type.Number({ description: "New importance score 0-1; raise durable rules/preferences, lower marginal or uncertain memories." }),
         ),
         category: Type.Optional(memoryCategoryEnum()),
       }),

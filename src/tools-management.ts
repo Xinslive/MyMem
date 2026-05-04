@@ -40,11 +40,11 @@ export function registerMemoryStatsTool(
       return {
         name: "mymem_stats",
       label: "Memory Statistics",
-      description: "Get statistics about memory usage, scopes, and categories.",
+      description: "Inspect memory inventory and health signals when you need a quick overview of counts, scopes, categories, lifecycle state, retrieval quality, or whether memory is growing/noisy.",
       parameters: Type.Object({
         scope: Type.Optional(
           Type.String({
-            description: "Specific scope to get stats for (optional)",
+            description: "Specific scope to inspect when diagnosing a project/agent-specific memory set.",
           }),
         ),
       }),
@@ -220,14 +220,14 @@ export function registerMemoryDebugTool(
         name: "mymem_debug",
         label: "Memory Debug",
         description:
-          "Debug memory retrieval: search with full pipeline trace showing per-stage drop info, score ranges, and timing.",
+          "Debug a specific bad or empty recall by running the full retrieval pipeline with trace details: stage drops, score ranges, selected sources, and timing.",
         parameters: Type.Object({
-          query: Type.String({ description: "Search query to debug" }),
+          query: Type.String({ description: "Problem query that returned poor, surprising, or zero memory results." }),
           limit: Type.Optional(
             Type.Number({ description: "Max results to return (default: 5, max: 20)" }),
           ),
           scope: Type.Optional(
-            Type.String({ description: "Specific memory scope to search in (optional)" }),
+            Type.String({ description: "Specific scope to test when scope filtering may explain the recall issue." }),
           ),
         }),
         async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
@@ -334,14 +334,14 @@ export function registerMemoryExplainTool(
         name: "mymem_explain",
         label: "Memory Explain",
         description:
-          "Explain why memory retrieval matched or returned no results, including stage drops and likely corrective actions.",
+          "Explain why a recall query matched certain memories or returned no results, with likely corrective actions. Prefer this for human-readable diagnosis; use mymem_debug when you need raw pipeline trace.",
         parameters: Type.Object({
-          query: Type.String({ description: "Search query to explain" }),
+          query: Type.String({ description: "Recall query whose ranking, empty result, or mismatch needs explanation." }),
           limit: Type.Optional(
             Type.Number({ description: "Max results to return (default: 5, max: 20)" }),
           ),
           scope: Type.Optional(
-            Type.String({ description: "Specific memory scope to search in (optional)" }),
+            Type.String({ description: "Specific scope to explain when the issue may be scope-related." }),
           ),
           category: Type.Optional(memoryCategoryEnum()),
         }),
@@ -407,7 +407,7 @@ export function registerMemoryListTool(
         name: "mymem_list",
       label: "Memory List",
       description:
-        "List recent memories with optional filtering by scope and category.",
+        "List recent stored memories for audit, cleanup, or to find an ID before update/archive/forget. Use when you need inventory, not semantic search; use mymem_recall for relevance-ranked lookup.",
       parameters: Type.Object({
         limit: Type.Optional(
           Type.Number({
@@ -415,7 +415,7 @@ export function registerMemoryListTool(
           }),
         ),
         scope: Type.Optional(
-          Type.String({ description: "Filter by specific scope (optional)" }),
+          Type.String({ description: "Filter by specific scope when auditing a project/agent memory set." }),
         ),
         category: Type.Optional(memoryCategoryEnum()),
         offset: Type.Optional(
@@ -547,13 +547,13 @@ export function registerMemoryPromoteTool(
         name: "mymem_promote",
         label: "Memory Promote",
         description:
-          "Promote a memory into confirmed/durable governance state so it can participate in conservative auto-recall.",
+          "Mark a useful auto-captured or pending memory as confirmed/durable after user confirmation or repeated evidence, so conservative recall treats it as trusted. Use for stable preferences, project rules, and proven lessons.",
         parameters: Type.Object({
           memoryId: Type.Optional(
-            Type.String({ description: "Memory id (UUID/prefix). Optional when query is provided." }),
+            Type.String({ description: "Memory id or prefix to promote; omit when using query to locate it." }),
           ),
           query: Type.Optional(
-            Type.String({ description: "Search query to locate a memory when memoryId is omitted." }),
+            Type.String({ description: "Search query to locate the memory to promote when the ID is unknown." }),
           ),
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
           state: Type.Optional(Type.Union([
@@ -672,12 +672,12 @@ export function registerMemoryArchiveTool(
         name: "mymem_archive",
         label: "Memory Archive",
         description:
-          "Archive a memory to remove it from default auto-recall while preserving history.",
+          "Archive stale, low-value, noisy, or superseded memory so default recall stops surfacing it while preserving history and audit trail. Prefer this over mymem_forget unless the user wants deletion or the memory is sensitive/invalid.",
         parameters: Type.Object({
           memoryId: Type.Optional(Type.String({ description: "Memory id (UUID/prefix)." })),
-          query: Type.Optional(Type.String({ description: "Search query when memoryId is omitted." })),
+          query: Type.Optional(Type.String({ description: "Search query to locate the memory to archive when the ID is unknown." })),
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
-          reason: Type.Optional(Type.String({ description: "Archive reason for audit trail." })),
+          reason: Type.Optional(Type.String({ description: "Archive reason for audit trail, such as stale, duplicate, superseded, noisy, or user_request." })),
         }),
         async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
           const { memoryId, query, scope, reason = "manual_archive" } = params as {
@@ -753,11 +753,11 @@ export function registerMemoryCompactTool(
         name: "mymem_compact",
         label: "Memory Compact",
         description:
-          "Compact duplicate low-value memories by archiving redundant entries and linking them to a canonical memory.",
+          "Find and optionally archive exact/near-duplicate low-value memories, linking redundant entries to a canonical memory. Use after noisy auto-capture periods or when stats/list show duplicate buildup. Defaults to dry-run preview.",
         parameters: Type.Object({
-          scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
-          dryRun: Type.Optional(Type.Boolean({ description: "Preview compaction only (default true)." })),
-          limit: Type.Optional(Type.Number({ description: "Max entries to scan (default 200)." })),
+          scope: Type.Optional(Type.String({ description: "Optional scope filter for targeted cleanup." })),
+          dryRun: Type.Optional(Type.Boolean({ description: "Preview compaction only by default; set false only when you intend to archive duplicates." })),
+          limit: Type.Optional(Type.Number({ description: "Max entries to scan (default 200; larger values cost more time)." })),
         }),
         async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
           const { scope, dryRun = true, limit = 200 } = params as {
@@ -851,9 +851,9 @@ export function registerMemoryExplainRankTool(
         name: "mymem_explain_rank",
         label: "Memory Explain Rank",
         description:
-          "Run recall and explain why each memory was ranked, including governance metadata (state/layer/source/suppression).",
+          "Run recall and explain why each result ranked where it did, including vector/BM25/rerank scores and governance metadata. Use when a memory appears too high/low or suppression/state/layer may affect ranking.",
         parameters: Type.Object({
-          query: Type.String({ description: "Query used for ranking analysis." }),
+          query: Type.String({ description: "Query whose memory ranking needs analysis." }),
           limit: Type.Optional(Type.Number({ description: "How many items to explain (default 5)." })),
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
         }),

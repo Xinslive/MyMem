@@ -40,9 +40,11 @@ export function registerMemoryStoreTool(
       name: "mymem_store",
       label: "Memory Store",
       description:
-        "Save important information in long-term memory. Use for preferences, facts, decisions, and other notable information.",
+        "Manually write a curated long-term memory ONLY when auto-capture's single-turn extraction is insufficient. Auto-capture already handles ordinary facts, preferences, decisions, and notable details from the current conversation; DO NOT use this tool to duplicate a single message or anything already visible in the latest turn. Use it for explicit user instructions to remember something, cross-turn or cross-session synthesis, canonical summaries, corrections, supersedes, durable project lessons, and other high-confidence consolidated memories.",
       parameters: Type.Object({
-        text: Type.String({ description: "Information to remember" }),
+        text: Type.String({
+          description: "Curated memory text: a cross-turn synthesis, explicit remember request, correction, supersede, canonical summary, or durable lesson.",
+        }),
         importance: Type.Optional(
           Type.Number({ description: "Importance score 0-1 (default: 0.7)" }),
         ),
