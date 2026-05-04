@@ -33,7 +33,7 @@
 
 ### 1.1 定位
 
-MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是一个简单的笔记本或聊天记录存储，而是一套完整的记忆工程闭环：
+MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是简单的笔记本或聊天记录存储，而是一套完整的记忆工程闭环：
 
 ```
 对话 → 自动捕获 → 智能提取 → 去重/准入 → 持久化 → 混合检索 → 上下文注入 → 反思沉淀 → 生命周期维护 → 自我改进
@@ -43,23 +43,28 @@ MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是
 
 | 层面 | 技术选型 |
 |------|---------|
-| 语言 | TypeScript (ESM, `"type": "module"`) |
+| 语言 | TypeScript (ESM, `"type": "module"`, target ES2022) |
 | 向量数据库 | LanceDB (v0.27.2, 本地嵌入式) |
-| Embedding API | OpenAI 兼容接口 (支持 Jina/OpenAI/Google/本地模型) |
+| Embedding API | OpenAI 兼容接口 (支持 OpenAI/Jina/Google/本地模型) |
 | Rerank API | Jina / SiliconFlow / Voyage / Pinecone / DashScope / TEI |
 | LLM API | OpenAI 兼容接口 (用于智能提取/反思/压缩) |
 | 运行时 | Node.js + OpenClaw 插件系统 |
+| 类型验证 | @sinclair/typebox (运行时 schema 验证) |
 | 文件锁 | proper-lockfile (跨进程互斥) |
 | CLI | commander.js |
+| 测试 | Node.js 内置测试运行器 + jiti |
 
 ### 1.3 项目结构
 
 ```
 MyMem-main/
-├── index.ts                 # 插件入口 (1154 行), 注册所有生命周期钩子
-├── cli.ts                   # CLI 子命令 (openclaw mymem ...)
+├── index.ts                 # 插件入口 (632 行), 注册所有生命周期钩子、工具和 CLI
+├── cli.ts                   # CLI 子命令 (2035 行, openclaw mymem ...)
 ├── openclaw.plugin.json     # 插件清单 (配置 schema, 工具定义, Hook 定义)
-├── src/
+├── package.json             # npm 包定义, 脚本, 依赖
+├── tsconfig.json            # TypeScript 编译选项
+├── eslint.config.js         # ESLint 规则 (typescript-eslint strict)
+├── src/                     # 114 个 TypeScript 源文件 (核心引擎)
 │   ├── store.ts             # LanceDB 存储层
 │   ├── embedder.ts          # Embedding 抽象层
 │   ├── retriever.ts         # 混合检索引擎
@@ -69,10 +74,11 @@ MyMem-main/
 │   ├── noise-filter.ts      # 正则噪声过滤
 │   ├── scopes.ts            # 多作用域访问控制
 │   ├── tools.ts             # 工具注册总入口
-│   └── ... (100+ 模块)
-├── test/                    # 测试套件
+│   └── ... (104 个模块)
+├── test/                    # 98 个测试文件
 ├── scripts/                 # CI/版本同步脚本
-└── benchmark/               # 性能基准
+├── benchmark/               # 性能基准
+└── lesson/                  # /lesson 技能定义
 ```
 
 ---
@@ -107,14 +113,14 @@ MyMem-main/
 │  │  │         │                 │                  │         │ │ │
 │  │  │  ┌──────▼─────────────────▼──────────────────▼───────┐ │ │ │
 │  │  │  │           Subsystems                                │ │ │ │
-│  │  │  │  Embedder │ DecayEngine │ TierManager │ NoiseBank  │ │ │ │
-│  │  │  │  Reranker │ RRF Fusion  │ MMR         │ Scopes     │ │ │ │
+│  │  │  │  Embedder │ DecayEngine │ TierManager │ Scopes     │ │ │ │
+│  │  │  │  Reranker │ RRF Fusion  │ MMR         │ NoiseFilter│ │ │ │
 │  │  │  └───────────────────────────────────────────────────┘ │ │ │
 │  │  └────────────────────────────────────────────────────────┘ │ │
 │  │  ┌────────────────────────────────────────────────────────┐ │ │
 │  │  │           Lifecycle & Maintenance                       │ │ │
 │  │  │  Compactor │ LifecycleMaintainer │ PreferenceDistiller │ │ │
-│  │  │  ExperienceCompiler │ ReflectionStore │ FeedbackLoop   │ │ │
+│  │  │  GovernanceRules │ FeedbackLoop │ ReflectionStore      │ │ │
 │  │  └────────────────────────────────────────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
@@ -127,6 +133,7 @@ MyMem-main/
 3. **闭环学习**：用户纠正、工具失败、坏召回都会反馈回系统改进自身
 4. **多层隔离**：作用域隔离、知识/经验分离、三层摘要粒度
 5. **性能优先**：混合检索 + RRF 融合 + MMR 多样性 + 并发控制
+6. **单例模式**：重型资源（LanceDB 连接、Embedder、Retriever 等）只初始化一次，防止重复 `register()` 调用导致的内存增长
 
 ---
 
@@ -134,16 +141,16 @@ MyMem-main/
 
 ### 3.1 六类记忆分类
 
-MyMem 使用 6 类记忆来组织个人助理的长期上下文（`src/memory-categories.ts`）：
+MyMem 使用 6 类记忆来组织长期上下文（`src/memory-categories.ts`）：
 
-| 类别 | 中文名 | 语义 | 写入策略 | 通道 |
-|------|--------|------|---------|------|
-| `profile` | 用户画像 | 身份信息、长期目标、生活方式 | 始终合并 (ALWAYS_MERGE) | knowledge |
-| `preferences` | 偏好约束 | 沟通方式、饮食偏好、工具选择 | 支持 MERGE，时间版本化 | knowledge |
-| `entities` | 关键实体 | 家人朋友、同事客户、项目设备 | 支持 MERGE，时间版本化 | knowledge |
-| `events` | 事件轨迹 | 一次安排、一次沟通、一次旅行 | 仅追加 (APPEND_ONLY) | experience |
-| `cases` | 具体案例 | 某次问题处理、某次任务完成 | 仅追加 (APPEND_ONLY) | experience |
-| `patterns` | 可复用模式 | 反复有效的方法、避坑经验 | 支持 MERGE | knowledge |
+| 类别 | 语义 | 写入策略 | 通道 |
+|------|------|---------|------|
+| `profile` | 身份信息、长期目标、生活方式 | 始终合并 (ALWAYS_MERGE) | knowledge |
+| `preferences` | 沟通方式、饮食偏好、工具选择 | 支持 MERGE，时间版本化 | knowledge |
+| `entities` | 家人朋友、同事客户、项目设备 | 支持 MERGE，时间版本化 | knowledge |
+| `events` | 一次安排、一次沟通、一次旅行 | 仅追加 (APPEND_ONLY) | experience |
+| `cases` | 某次问题处理、某次任务完成 | 仅追加 (APPEND_ONLY) | experience |
+| `patterns` | 反复有效的方法、避坑经验 | 支持 MERGE | knowledge |
 
 ```typescript
 // src/memory-categories.ts
@@ -168,7 +175,7 @@ export const APPEND_ONLY_CATEGORIES = new Set<MemoryCategory>(["events", "cases"
 
 ### 3.3 三层摘要结构 (L0/L1/L2)
 
-每条智能记忆都带有三层表达（`src/smart-metadata.ts` 中的 `SmartMemoryMetadata`）：
+每条智能记忆都带有三层表达：
 
 | 层级 | 字段 | 用途 |
 |------|------|------|
@@ -252,7 +259,7 @@ class MemoryStore {
   private _batchBuffer: MemoryEntry[] = [];
   private _batchActive = false;
 
-  // 进程序列化链 (Issue #598)
+  // 进程序列化链
   private _serialChain: Promise<void> = Promise.resolve();
 }
 ```
@@ -305,7 +312,7 @@ async runSerializedUpdate(fn: () => Promise<void>): Promise<void> {
 }
 ```
 
-同时，LanceDB 的 `mergeInsert` 操作提供原子性 upsert，避免了旧版 delete+add 的竞态问题。
+LanceDB 的 `mergeInsert` 操作提供原子性 upsert，避免了旧版 delete+add 的竞态问题。
 
 ### 4.5 批量写入优化
 
@@ -324,6 +331,7 @@ Embedding 层（`src/embedder.ts`）抽象了 OpenAI 兼容的 Embedding API，�
 - **Google**：text-embedding-004, gemini-embedding-001
 - **本地模型**：nomic-embed-text, all-MiniLM-L6-v2 等
 - **Azure OpenAI**
+- **DashScope**：text-embedding-v4 等
 
 ### 5.2 多密钥轮转与故障转移
 
@@ -375,7 +383,7 @@ Embedding 结果通过 LRU 缓存（`src/embedding-cache.ts`）避免重复计�
 MyMem 的检索不是简单向量搜索，而是一条完整的检索链路。意图分析在自动召回 Hook（`src/auto-recall-hook.ts`）中完成，检索引擎（`src/retriever.ts`）负责后续的融合与排序：
 
 ```
-用户消息 → 意图分析 (auto-recall-hook) → 查询扩展 → [向量检索 ∥ BM25检索] → RRF 融合 → 时间增强 → 重要性加权 → 衰减增强 → 长度归一化 → 时间衰减 → 重排序 → MMR 多样性过滤 → 结果输出
+用户消息 → 意图分析 (auto-recall-hook) → 查询扩展 → [向量检索 ∥ BM25检索] → RRF 融合 → 时间增强 → 重要性加权 → 衰减增强 → 长度归一化 → 时间衰减 → 重排序 → 噪声过滤 → MMR 多样性过滤 → 结果输出
 ```
 
 ### 6.2 向量检索 (Vector Search)
@@ -495,6 +503,10 @@ const INTENT_RULES: IntentRule[] = [
 - **通道提升**：knowledge 或 experience 通道加权
 - **召回深度**：L0（仅摘要）/ L1（概览）/ full（全文）
 
+### 6.10 自适应检索
+
+`src/adaptive-retrieval.ts` 根据查询特征动态调整检索策略参数，实现查询级别的自适应优化。
+
 ---
 
 ## 7. 智能提取管线
@@ -535,6 +547,7 @@ type CandidateMemory = {
   abstract: string;           // L0: 一句话索引
   overview: string;           // L1: 结构化概览
   content: string;            // L2: 完整叙事
+  worth_storing?: boolean;    // LLM 判断是否值得存储
 };
 ```
 
@@ -574,6 +587,8 @@ type DedupDecision =
 - `preferences` / `entities`：支持 supersede（时间版本化替换）
 - `events` / `cases`：仅 create 或 skip（追加式）
 - `patterns`：支持 merge
+
+去重决策的执行由 `src/smart-extractor-handlers.ts` 负责。
 
 ### 7.7 准入控制 (Admission Control)
 
@@ -679,23 +694,26 @@ Working ──(age > 60 days, low access)──→ Peripheral
 
 ## 9. 噪声过滤系统
 
-### 9.1 双层噪声检测
+### 9.1 正则噪声过滤
 
-MyMem 使用静态噪声过滤：
-
-**正则噪声过滤**（`src/noise-filter.ts`）
+`src/noise-filter.ts` 使用静态正则模式检测四类噪声：
 
 ```typescript
-// 四类噪声模式
-const DENIAL_PATTERNS = [...];      // Agent 否认（"I don't recall"）
-const META_QUESTION_PATTERNS = [...]; // 元问题（"你还记得吗"）
-const BOILERPLATE_PATTERNS = [...];   // 会话模板（"Hello"）
+const DENIAL_PATTERNS = [...];              // Agent 否认（"I don't recall"）
+const META_QUESTION_PATTERNS = [...];       // 元问题（"你还记得吗"）
+const BOILERPLATE_PATTERNS = [...];         // 会话模板（"Hello"）
 const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 ```
 
-提取是否写入记忆由 LLM 和准入控制判断；系统不再维护会自我学习的向量噪声原型库。
+### 9.2 捕获检测
 
-### 9.2 噪声过滤边界
+`src/capture-detector.ts` 和 `src/capture-detection.ts` 负责判断对话内容是否值得进入提取管线，包括信号强度评估和文本预览摘要。
+
+### 9.3 召回抑制
+
+`src/recall-suppression.ts` 在召回阶段对低质量或被抑制的记忆进行过滤，避免污染上下文注入。
+
+### 9.4 噪声过滤边界
 
 `src/noise-filter.ts` 只处理明显模板噪声；非模板内容是否值得记忆交给 LLM 提取和 admission-control 治理。
 
@@ -744,6 +762,10 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 | `workspaceDrift` | 检测工作区内容与记忆之间的漂移 |
 | `stalenessConfirmation` | 对陈旧记忆注入时提示 Agent 确认时效性 |
 
+### 10.4 Hook 去重
+
+`src/hook-dedup.ts` 使用 TTL-based Map 防止同一事件被重复处理。
+
 ---
 
 ## 11. 反思系统
@@ -771,6 +793,14 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 - `item-invariant`：不变量切片条目
 - `item-derived`：派生切片条目
 - `combined-legacy`：兼容旧版的合并格式
+
+反思存储由多个专用模块负责：
+- `src/reflection-event-store.ts`：反思事件存储
+- `src/reflection-item-store.ts`：反思条目存储
+- `src/reflection-ranking.ts`：反思排名评分
+- `src/reflection-metadata.ts`：反思元数据解析
+- `src/reflection-mapped-metadata.ts`：反思映射元数据
+- `src/reflection-retry.ts`：反思瞬态错误重试
 
 ### 11.4 反思注入
 
@@ -823,6 +853,10 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 - `minStabilityScore`：最低稳定性分数 0.6
 - `maxRulesPerRun`：每次最多蒸馏 5 条规则
 
+### 13.2 时间分类器
+
+`src/temporal-classifier.ts` 对记忆的时间特征进行分类，区分静态事实和动态事实，支持时间版本化替换。
+
 ---
 
 ## 14. 多作用域隔离
@@ -853,6 +887,10 @@ const SCOPE_PATTERNS = {
 
 `src/clawteam-scope.ts` 支持团队协作场景下的作用域解析和应用。
 
+### 14.4 身份寻址
+
+`src/identity-addressing.ts` 实现基于身份的记忆寻址，支持跨 Agent 的记忆共享和隔离。
+
 ---
 
 ## 15. Hook 系统与自动捕获/召回
@@ -870,6 +908,8 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 - `captureAgents`：允许自动捕获的 Agent 白名单（默认 `["main"]`）；不在列表中的 Agent 会话不会进入 SmartExtractor
 - `extractionThrottle.maxExtractionsPerHour`：每小时最大提取次数
 
+捕获清理由 `src/auto-capture-cleanup.ts` 负责文本规范化，`src/auto-capture-utils.ts` 提供工具函数。
+
 ### 15.2 自动召回 (Auto-Recall)
 
 `src/auto-recall-hook.ts` 注册 `agent_start` 事件钩子：
@@ -885,9 +925,17 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 - `autoRecallMaxChars`：注入总字符上限
 - `autoRecallTimeoutMs`：召回超时（默认 20 秒）
 
-### 15.3 Hook 去重
+### 15.3 会话记忆 Hook
 
-`src/hook-dedup.ts` 使用 TTL-based Map 防止同一事件被重复处理。
+`src/session-memory-hook.ts` 注册会话生命周期事件，在会话开始和结束时执行记忆相关的维护操作。
+
+### 15.4 自我改进 Hook
+
+`src/self-improvement-hook.ts` 注册自我改进相关的生命周期事件，在会话结束时触发学习文件的更新和技能提取。
+
+### 15.5 插件注册与网关维护
+
+`src/plugin-registration.ts` 负责注册网关维护任务，包括生命周期维护、衰减评分和层级转换的定时执行。
 
 ---
 
@@ -900,7 +948,7 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 | `mymem_recall` | `tools-recall.ts` | 混合检索记忆 |
 | `mymem_store` | `tools-store.ts` | 存储新记忆 |
 | `mymem_forget` | `tools-forget.ts` | 删除/归档记忆 |
-| `mymem_update` | `tools-update.ts` | 更新已有记忆 |
+| `mymem_update` | `tools-update.ts` | 更新已有记忆（时间版本化） |
 
 ### 16.2 管理工具
 
@@ -909,11 +957,14 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 | `mymem_stats` | `tools-management.ts` | 记忆库统计 |
 | `mymem_doctor` | `memory-doctor-tool.ts` | 诊断记忆健康状态（索引、配置、存储） |
 | `mymem_debug` | `tools-management.ts` | 调试信息 |
+| `mymem_explain` | `tools-management.ts` | 解释记忆内容 |
 | `mymem_list` | `tools-management.ts` | 列出记忆 |
 | `mymem_promote` | `tools-management.ts` | 手动升级记忆 |
 | `mymem_archive` | `tools-management.ts` | 手动归档记忆 |
 | `mymem_compact` | `tools-management.ts` | 触发手动压缩 |
 | `mymem_explain_rank` | `tools-management.ts` | 解释检索排名 |
+
+管理工具随 `enableManagementTools` 启用（默认 `true`）。
 
 ### 16.3 自我改进工具
 
@@ -924,9 +975,41 @@ Agent 会话开始 → 分析用户消息 → 意图识别 → 混合检索 → 
 | `self_improvement_review` | `tools-self-improvement.ts` | 审阅学习记录 |
 | `self_improvement_distill` | `tools-self-improvement.ts` | 蒸馏学习结论 |
 
-注：`self_improvement_log` 始终启用；后三个工具随 `enableManagementTools` 启用（默认 `true`）。
+`self_improvement_log` 始终启用；后三个工具随 `selfImprovement.enabled` 启用（默认 `true`）。
 
-### 16.4 工具 schema 验证
+### 16.4 工具注册总入口
+
+`src/tools.ts` 提供 `registerAllMemoryTools()` 函数，统一注册所有工具：
+
+```typescript
+export function registerAllMemoryTools(
+  api: OpenClawPluginApi,
+  context: ToolContext,
+  options: { enableManagementTools?: boolean; enableSelfImprovementTools?: boolean }
+) {
+  // 核心工具（始终注册）
+  registerMemoryRecallTool(api, context);
+  registerMemoryStoreTool(api, context);
+  registerMemoryForgetTool(api, context);
+  registerMemoryUpdateTool(api, context);
+
+  // 管理工具
+  if (options.enableManagementTools) {
+    registerMemoryStatsTool(api, context);
+    registerMemoryDoctorTool(api, context);
+    // ... 其他管理工具
+  }
+
+  // 自我改进工具
+  if (options.enableSelfImprovementTools) {
+    registerSelfImprovementLogTool(api, context);
+    registerSelfImprovementExtractSkillTool(api, context);
+    // ... 其他自我改进工具
+  }
+}
+```
+
+### 16.5 工具 schema 验证
 
 所有工具参数使用 `@sinclair/typebox` 进行运行时类型验证。
 
@@ -970,16 +1053,27 @@ function applyTuningPreset(
 
 ### 18.1 命令结构
 
-`cli.ts` 提供 `openclaw mymem <command>` 子命令：
+`cli.ts`（2035 行）提供 `openclaw mymem <command>` 子命令：
 
 ```
-openclaw mymem stats          # 显示记忆库统计
-openclaw mymem list           # 列出所有记忆
-openclaw mymem search <query> # 搜索记忆
-openclaw mymem forget <id>    # 删除记忆
-openclaw mymem compact        # 触发手动压缩
-openclaw mymem doctor         # 诊断记忆健康状态
-openclaw mymem migrate        # 数据迁移
+openclaw mymem stats              # 显示记忆库统计
+openclaw mymem list               # 列出所有记忆
+openclaw mymem search <query>     # 搜索记忆
+openclaw mymem explain <id>       # 解释单条记忆
+openclaw mymem forget <id>        # 删除记忆
+openclaw mymem delete-bulk        # 批量删除
+openclaw mymem export             # 导出记忆
+openclaw mymem import             # 导入记忆
+openclaw mymem import-markdown    # 从 Markdown 导入
+openclaw mymem reembed            # 重新生成向量嵌入
+openclaw mymem upgrade            # 升级记忆格式
+openclaw mymem migrate            # 数据迁移 (check/run/verify)
+openclaw mymem auth               # OAuth 认证 (login/status/logout)
+openclaw mymem reindex-fts        # 重建全文索引
+openclaw mymem repair-summaries   # 修复摘要
+openclaw mymem compact            # 触发手动压缩
+openclaw mymem doctor             # 诊断记忆健康状态
+openclaw mymem dashboard          # 启动可视化管理台
 ```
 
 ### 18.2 测试框架
@@ -987,12 +1081,15 @@ openclaw mymem migrate        # 数据迁移
 测试使用 Node.js 内置测试运行器 + `jiti`（无需预编译即可导入 .ts 文件）：
 
 ```bash
-npm test                        # 全部测试
-npm run test:cli-smoke          # CLI 冒烟测试
-npm run test:core-regression    # 核心回归测试
-npm run test:storage-and-schema # 存储和 schema 测试
-npm run test:llm-clients-and-auth # LLM 客户端测试
+npm test                            # 全部测试
+npm run test:cli-smoke              # CLI 冒烟测试
+npm run test:core-regression        # 核心回归测试
+npm run test:storage-and-schema     # 存储和 schema 测试
+npm run test:llm-clients-and-auth   # LLM 客户端测试
+npm run test:packaging-and-workflow # 打包和工作流测试
 ```
+
+CI 编排通过 `scripts/run-ci-tests.mjs` 和 `scripts/ci-test-manifest.mjs` 实现。代码覆盖率通过 `c8` 配置，阈值为 60% 行覆盖率 / 50% 分支覆盖率。
 
 ---
 
@@ -1028,6 +1125,14 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 ### 19.5 会话恢复
 
 `src/session-recovery.ts` + `src/session-recovery-utils.ts` 在会话中断后恢复对话内容，确保反思不会因中断而丢失。
+
+### 19.6 自动备份
+
+`src/auto-backup.ts` 提供记忆数据库的自动备份机制，防止数据丢失。
+
+### 19.7 Embedding 错误处理
+
+`src/embedding-error-utils.ts` 封装 Embedding 相关的错误处理逻辑，区分瞬态错误和永久性错误，支持自动重试和降级。
 
 ---
 
@@ -1068,6 +1173,8 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `smart-extractor-handlers.ts` | 去重决策执行器 |
 | `extraction-prompts.ts` | 提取 Prompt 构建 |
 | `extraction-rate-limiter.ts` | 提取速率限制 |
+| `admission-control.ts` | 准入控制评分 |
+| `admission-stats.ts` | 准入统计 |
 
 ### 20.4 噪声与过滤
 
@@ -1076,6 +1183,7 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `noise-filter.ts` | 正则噪声模式检测 |
 | `capture-detector.ts` | 捕获决策检测 |
 | `capture-detection.ts` | 捕获信号分析 |
+| `recall-suppression.ts` | 召回抑制过滤 |
 
 ### 20.5 生命周期
 
@@ -1086,18 +1194,22 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `preference-distiller.ts` | 偏好蒸馏器 |
 | `memory-upgrader.ts` | 记忆格式升级 |
 | `governance-rules.ts` | 治理规则推断与冲突检测 |
+| `temporal-classifier.ts` | 时间特征分类 |
 
 ### 20.6 反思系统
 
 | 模块 | 功能 |
 |------|------|
+| `reflection-hook.ts` | 反思 Hook 注册 |
 | `reflection-store.ts` | 反思存储到 LanceDB |
 | `reflection-slices.ts` | 反思切片（invariant/derived） |
 | `reflection-event-store.ts` | 反思事件存储 |
 | `reflection-item-store.ts` | 反思条目存储 |
 | `reflection-ranking.ts` | 反思排名评分 |
 | `reflection-metadata.ts` | 反思元数据解析 |
-| `reflection-hook.ts` | 反思 Hook 注册 |
+| `reflection-mapped-metadata.ts` | 反思映射元数据 |
+| `reflection-retry.ts` | 反思瞬态错误重试 |
+| `reflection-cli.ts` | 反思 CLI 命令 |
 
 ### 20.7 反馈与改进
 
@@ -1108,14 +1220,77 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `self-improvement-files.ts` | 学习文件持久化 |
 | `hook-enhancements.ts` | Hook 级增强（10 种软干预） |
 | `hook-dedup.ts` | Hook 事件去重 |
+| `preference-slots.ts` | 偏好槽位管理 |
+| `auto-recall-metadata-accumulator.ts` | 自动召回元数据累积 |
 
-### 20.8 基础设施
+### 20.8 Hook 注册
+
+| 模块 | 功能 |
+|------|------|
+| `auto-recall-hook.ts` | 自动召回 Hook（agent_start） |
+| `auto-capture-hook.ts` | 自动捕获 Hook（agent_end） |
+| `auto-capture-cleanup.ts` | 捕获文本规范化 |
+| `auto-capture-utils.ts` | 捕获工具函数 |
+| `session-memory-hook.ts` | 会话记忆 Hook |
+| `session-compressor.ts` | 会话压缩器 |
+| `plugin-registration.ts` | 插件注册与网关维护 |
+
+### 20.9 工具层
+
+| 模块 | 功能 |
+|------|------|
+| `tools.ts` | 工具注册总入口 |
+| `tools-recall.ts` | mymem_recall 工具 |
+| `tools-store.ts` | mymem_store 工具 |
+| `tools-forget.ts` | mymem_forget 工具 |
+| `tools-update.ts` | mymem_update 工具 |
+| `tools-management.ts` | 管理工具集 (stats/debug/explain/list/promote/archive/compact/explain_rank) |
+| `tools-self-improvement.ts` | 自我改进工具集 |
+| `tools-shared.ts` | 工具共享类型和工具函数 |
+| `memory-doctor-tool.ts` | mymem_doctor 诊断工具 |
+
+### 20.10 Embedding 基础设施
+
+| 模块 | 功能 |
+|------|------|
+| `embedding-cache.ts` | Embedding LRU 缓存 |
+| `embedding-provider.ts` | Provider 自动检测 |
+| `embedding-error-utils.ts` | Embedding 错误处理 |
+| `chunker.ts` | 自动分块 |
+| `concurrency-limiter.ts` | 全局并发限制 |
+
+### 20.11 存储基础设施
+
+| 模块 | 功能 |
+|------|------|
+| `store-types.ts` | 存储层类型定义 |
+| `store-sql-utils.ts` | SQL 工具函数 |
+| `store-row-mappers.ts` | 行映射器 |
+| `lancedb-loader.ts` | LanceDB 加载器 |
+| `storage-path.ts` | 存储路径管理 |
+| `migrate.ts` | 数据迁移 |
+
+### 20.12 检索基础设施
+
+| 模块 | 功能 |
+|------|------|
+| `retriever-types.ts` | 检索器类型定义 |
+| `retriever-utils.ts` | 检索器工具函数 |
+| `retrieval-explain.ts` | 检索解释 |
+| `retrieval-stats.ts` | 检索统计 |
+| `retrieval-trace.ts` | 检索追踪 |
+| `recency-engine.ts` | 新近性引擎 |
+| `access-tracker.ts` | 访问追踪 |
+
+### 20.13 基础设施与工具
 
 | 模块 | 功能 |
 |------|------|
 | `config-utils.ts` | 配置解析，环境变量解析 |
 | `plugin-config-parser.ts` | 插件配置解析 |
 | `plugin-singleton.ts` | 插件单例状态管理 |
+| `plugin-types.ts` | 插件类型定义 |
+| `plugin-constants.ts` | 插件常量 |
 | `path-utils.ts` | 路径工具 |
 | `file-utils.ts` | 文件工具 |
 | `session-utils.ts` | 会话工具（密钥脱敏、消息摘要） |
@@ -1126,6 +1301,25 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `utils.ts` | 通用工具（余弦相似度、clamp 等） |
 | `version-utils.ts` | 版本同步 |
 | `telemetry.ts` | 遥测存储 |
+| `llm-client.ts` | LLM 客户端 |
+| `llm-oauth.ts` | OAuth 认证 |
+| `auto-backup.ts` | 自动备份 |
+| `identity-addressing.ts` | 身份寻址 |
+| `reasoning-strategy.ts` | 推理策略 |
+| `clawteam-scope.ts` | 团队协作作用域 |
+| `agent-config-utils.ts` | Agent 配置工具 |
+| `openclaw-extension-utils.ts` | OpenClaw 扩展工具 |
+| `session-recovery.ts` | 会话恢复 |
+| `session-recovery-utils.ts` | 会话恢复工具 |
+| `dashboard-server.ts` | 本地可视化管理台 (127.0.0.1:1314) |
+| `memory-categories.ts` | 6 类记忆分类定义 |
+
+### 20.14 类型声明
+
+| 模块 | 功能 |
+|------|------|
+| `openclaw-plugin-sdk.d.ts` | OpenClaw 插件 SDK 类型声明 |
+| `proper-lockfile.d.ts` | proper-lockfile 类型声明 |
 
 ---
 
@@ -1184,10 +1378,27 @@ const EMBED_TIMEOUT_MS = 20_000;             // Embedding 超时
 | `OPENCLAW_CLI=1` | CLI 模式标识 |
 | `${EMBEDDING_API_KEY}` | Embedding API 密钥 |
 | `${LLM_API_KEY}` | LLM API 密钥 |
+| `${LLM_API_URL}` | LLM API 端点 |
+| `${LLM_API_MODEL}` | LLM 模型名 |
 | `${RERANK_API_KEY}` | Rerank API 密钥 |
+| `${DASHSCOPE_API_KEY}` | 阿里云百炼 API 密钥 |
 
 配置值中可以使用 `${ENV_VAR}` 语法引用环境变量，运行时由 `resolveEnvVars()` 解析。
 
 ---
 
-*文档版本：2026.4.30 | 基于 MyMem v2026.4.26 源码分析*
+## 附录 C：关键依赖
+
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| `@lancedb/lancedb` | ^0.27.2 | 本地嵌入式向量数据库 |
+| `@sinclair/typebox` | 0.34.48 | 运行时类型验证 |
+| `apache-arrow` | 18.1.0 | Arrow 列式格式 (LanceDB 依赖) |
+| `json5` | ^2.2.3 | JSON5 配置解析 |
+| `openai` | ^6.21.0 | OpenAI 兼容 API 客户端 |
+| `proper-lockfile` | ^4.1.2 | 跨进程文件锁 |
+| `stream-json` | ^1.9.1 | 流式 JSON 解析 |
+
+---
+
+*文档版本：2026.5.4 | 基于 MyMem v2026.5.4 源码*
