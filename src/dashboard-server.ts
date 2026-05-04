@@ -1121,40 +1121,9 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       display: grid;
       gap: 16px;
     }
-    .kpis {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(140px, 1fr));
-      gap: 12px;
-    }
-    .metric {
-      min-height: 104px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      box-shadow: var(--shadow);
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }
-    .metric-label {
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .metric-value {
-      font-size: 28px;
-      font-weight: 780;
-      line-height: 1;
-      margin-top: 12px;
-    }
-    .metric-foot {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 12px;
-    }
     .grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+      grid-template-columns: minmax(420px, 0.95fr) minmax(500px, 1.05fr);
       gap: 16px;
       align-items: start;
     }
@@ -1386,6 +1355,40 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       margin-top: 14px;
       display: grid;
       gap: 12px;
+      min-height: 420px;
+    }
+    .explain-columns {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+    .preview-card {
+      min-height: 318px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 12px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      min-width: 0;
+    }
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .preview-head .chart-title {
+      margin-bottom: 0;
+    }
+    .muted-preview {
+      color: var(--muted);
+    }
+    .preview-memory {
+      color: var(--muted);
     }
     .diagnosis {
       border-left: 4px solid var(--teal);
@@ -1393,6 +1396,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       padding: 12px;
       border-radius: 8px;
     }
+    .diagnosis.placeholder { border-left-color: var(--line); background: var(--panel-soft); }
     .diagnosis.empty { border-left-color: var(--amber); background: #fffaf0; }
     .diagnosis.degraded { border-left-color: var(--red); background: #fff6f5; }
     .diagnosis-title {
@@ -1408,42 +1412,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     .stage-list {
       display: grid;
       gap: 8px;
-    }
-    .stage-toggle {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-soft);
-      padding: 0;
-      overflow: hidden;
-    }
-    .stage-toggle summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 42px;
-      padding: 0 12px;
-      cursor: pointer;
-      user-select: none;
-      list-style: none;
-    }
-    .stage-toggle summary::-webkit-details-marker {
-      display: none;
-    }
-    .stage-toggle summary::after {
-      content: "展开";
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .stage-toggle[open] summary {
-      border-bottom: 1px solid var(--line);
-    }
-    .stage-toggle[open] summary::after {
-      content: "收起";
-    }
-    .stage-toggle .stage-list {
-      padding: 12px;
     }
     .stage {
       display: grid;
@@ -1483,11 +1451,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin-top: 14px;
-    }
-    .feedback-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
     }
     .config-item {
       border: 1px solid var(--line);
@@ -1590,7 +1553,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     @keyframes spin { to { transform: rotate(360deg); } }
 
     @media (max-width: 1080px) {
-      .kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
       .grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
@@ -1616,21 +1578,20 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         flex: 1 1 100%;
       }
       .layout { padding: 12px; }
-      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .charts { grid-template-columns: 1fr; }
       .chart-card.wide { grid-column: auto; }
       .category-grid { grid-template-columns: 1fr; }
       .explain-form { grid-template-columns: 1fr; }
+      .explain-columns { grid-template-columns: 1fr; }
+      .explain-output { min-height: 0; }
+      .preview-card { min-height: 220px; }
       .masonry-list { column-count: 2; }
       .memory-stats { grid-template-columns: 1fr; }
       .config-grid { grid-template-columns: 1fr; }
-      .feedback-grid { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: 1fr; }
       .stage { grid-template-columns: 1fr 70px 70px; }
     }
     @media (max-width: 440px) {
-      .kpis { grid-template-columns: 1fr; }
-      .metric { min-height: 92px; }
       .masonry-list { column-count: 1; }
     }
   </style>
@@ -1655,34 +1616,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     </header>
 
     <main class="layout">
-      <section class="kpis" aria-label="总览" data-view-section="dashboard">
-        <div class="metric">
-          <div class="metric-label">可见记忆</div>
-          <div class="metric-value" id="kpiTotal">--</div>
-          <div class="metric-foot" id="kpiRecent">--</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">记忆范围</div>
-          <div class="metric-value" id="kpiScopes">--</div>
-          <div class="metric-foot" id="kpiAgents">--</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">召回模式</div>
-          <div class="metric-value" id="kpiMode">--</div>
-          <div class="metric-foot" id="kpiFts">--</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">质量信号</div>
-          <div class="metric-value" id="kpiQuality">--</div>
-          <div class="metric-foot">差召回 / 已抑制 / 低置信</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">候选池</div>
-          <div class="metric-value" id="kpiPool">--</div>
-          <div class="metric-foot" id="kpiThresholds">--</div>
-        </div>
-      </section>
-
       <section class="grid" data-view-section="dashboard">
         <div class="column">
           <section class="panel">
@@ -1707,15 +1640,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
               </div>
             </div>
           </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">反馈循环</h2>
-              <span class="subtle" id="feedbackHint">--</span>
-            </div>
-            <div class="panel-body" id="feedbackLoopPanel">
-              <div class="empty-state">正在读取反馈循环状态...</div>
-            </div>
-          </section>
         </div>
 
         <aside class="column">
@@ -1735,7 +1659,47 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
                 <button class="primary" id="explainBtn">诊断</button>
               </div>
               <div class="explain-output" id="explainOutput">
-                <div class="empty-state">暂无召回诊断。</div>
+                <div class="explain-columns">
+                  <section class="preview-card">
+                    <div class="preview-head">
+                      <div class="chart-title">处理阶段</div>
+                      <span class="subtle">待诊断</span>
+                    </div>
+                    <div class="stage-list">
+                      <div class="stage muted-preview"><div>混合候选</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
+                      <div class="stage muted-preview"><div>过滤与重排</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
+                      <div class="stage muted-preview"><div>多样性处理</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>
+                    </div>
+                  </section>
+                  <section class="preview-card">
+                    <div class="preview-head">
+                      <div class="chart-title">命中结果</div>
+                      <span class="subtle">待诊断</span>
+                    </div>
+                    <div class="diagnosis placeholder">
+                      <div class="diagnosis-title">未生成诊断</div>
+                      <div class="subtle">状态：待查询</div>
+                    </div>
+                    <div class="memory-list">
+                      <article class="memory-item preview-memory">
+                        <div class="memory-meta">
+                          <span class="chip">类别</span>
+                          <span class="chip">范围</span>
+                          <span class="chip">得分</span>
+                        </div>
+                        <div class="memory-text">暂无命中结果</div>
+                      </article>
+                      <article class="memory-item preview-memory">
+                        <div class="memory-meta">
+                          <span class="chip">类别</span>
+                          <span class="chip">范围</span>
+                          <span class="chip">得分</span>
+                        </div>
+                        <div class="memory-text">暂无过滤原因</div>
+                      </article>
+                    </div>
+                  </section>
+                </div>
               </div>
             </div>
           </section>
@@ -1822,31 +1786,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       return Number.isFinite(n) ? n.toFixed(digits) : "--";
     }
 
-    function countValue(value) {
-      const n = Number(value);
-      return Number.isFinite(n) ? String(n) : "0";
-    }
-
-    function retrievalModeLabel(mode) {
-      return ({
-        hybrid: "混合检索",
-        vector: "向量",
-        bm25: "关键词",
-        keyword: "关键词",
-        fallback: "降级"
-      })[mode] || mode || "未知";
-    }
-
-    function rerankLabel(value) {
-      return ({
-        none: "关闭重排",
-        "cross-encoder": "交叉重排",
-        lightweight: "轻量重排",
-        llm: "大模重排",
-        heuristic: "规则重排"
-      })[value] || value || "未知";
-    }
-
     function qualityLabel(value) {
       return ({
         bad_recall: "差召回",
@@ -1896,19 +1835,8 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       select.value = previous;
     }
 
-    function renderKpis(summary) {
+    function renderOverviewSummary(summary) {
       const memory = summary.memory;
-      const retrieval = summary.retrieval;
-      const quality = memory.healthSignals || {};
-      $("kpiTotal").textContent = memory.totalCount;
-      $("kpiRecent").textContent = "1 天内 " + memory.recentActivity.last24h + "，7 天内 " + memory.recentActivity.last7d;
-      $("kpiScopes").textContent = summary.scopes.totalScopes;
-      $("kpiAgents").textContent = summary.scopes.agentsWithCustomAccess + " 个自定义权限主体";
-      $("kpiMode").textContent = retrievalModeLabel(retrieval.mode);
-      $("kpiFts").textContent = retrieval.hasFtsSupport ? "关键词索引可用" : "关键词索引不可用";
-      $("kpiQuality").textContent = [quality.badRecall || 0, quality.suppressed || 0, quality.lowConfidence || 0].join(" / ");
-      $("kpiPool").textContent = retrieval.candidatePoolSize;
-      $("kpiThresholds").textContent = "最低 " + fixed(retrieval.minScore, 2) + "，硬阈值 " + fixed(retrieval.hardMinScore, 2);
       $("distributionHint").textContent = memory.totalCount + " 条可见";
     }
 
@@ -1970,36 +1898,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         "1 月内": summary.display.recentActivity["1 月内"],
         "全部": summary.display.recentActivity["全部"]
       }, "", { preserveOrder: true });
-    }
-
-    function timeLabel(timestamp) {
-      const n = Number(timestamp);
-      if (!Number.isFinite(n) || n <= 0) return "尚未运行";
-      return new Date(n).toLocaleString("zh-CN");
-    }
-
-    function renderFeedbackLoop(summary) {
-      const status = summary.feedbackLoop;
-      if (!status) {
-        $("feedbackHint").textContent = "未启用";
-        $("feedbackLoopPanel").innerHTML = '<div class="empty-state">当前运行环境没有反馈循环状态。</div>';
-        return;
-      }
-      const prior = status.priorAdaptation || {};
-      const lessons = status.preventiveLessons || {};
-      $("feedbackHint").textContent = status.enabled && !status.disposed ? "运行中" : "已停止";
-      $("feedbackLoopPanel").innerHTML =
-        '<div class="feedback-grid">' +
-          '<div class="config-item"><div class="config-label">预防教训</div><div class="config-value">' + countValue(lessons.learned) + '</div><div class="subtle">更新 ' + countValue(lessons.updated) + '，确认 ' + countValue(lessons.promoted) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">待处理证据</div><div class="config-value">' + countValue(lessons.bufferedEvidence) + '</div><div class="subtle">错误 / 修正</div></div>' +
-          '<div class="config-item"><div class="config-label">先验自适应</div><div class="config-value">' + countValue(prior.cycles) + '</div><div class="subtle">观测准入 ' + countValue(prior.observedAdmitted) + '</div></div>' +
-        '</div>' +
-        '<div class="config-grid">' +
-          '<div class="config-item"><div class="config-label">最近扫描</div><div class="config-value">' + escapeHtml(timeLabel(lessons.lastScanAt)) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">扫描轮次</div><div class="config-value">' + countValue(lessons.scanCycles) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">最近自适应</div><div class="config-value">' + escapeHtml(timeLabel(prior.lastAdaptedAt)) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">教训跳过</div><div class="config-value">' + countValue(lessons.skipped) + '</div></div>' +
-        '</div>';
     }
 
     function statusChip(status) {
@@ -2111,16 +2009,21 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       )).join("") || '<div class="empty-state">没有最终命中的记忆。</div>';
 
       $("explainOutput").innerHTML =
-        '<div class="diagnosis' + diagnosisClass + '">' +
-          '<div class="diagnosis-title">' + escapeHtml(explanation.summary || "暂无诊断") + '</div>' +
-          (reasons ? '<ul class="plain-list">' + reasons + '</ul>' : "") +
-          (suggestions ? '<ul class="plain-list">' + suggestions + '</ul>' : "") +
-        '</div>' +
-        '<details class="stage-toggle">' +
-          '<summary><span class="chart-title">处理阶段</span><span class="subtle">' + traceStages.length + ' 个阶段</span></summary>' +
-          '<div class="stage-list">' + stages + '</div>' +
-        '</details>' +
-        '<div><div class="chart-title">命中结果</div><div class="memory-list">' + results + '</div></div>';
+        '<div class="explain-columns">' +
+          '<section class="preview-card">' +
+            '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">' + traceStages.length + ' 个阶段</span></div>' +
+            '<div class="stage-list">' + stages + '</div>' +
+          '</section>' +
+          '<section class="preview-card">' +
+            '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">' + report.count + ' 条</span></div>' +
+            '<div class="diagnosis' + diagnosisClass + '">' +
+              '<div class="diagnosis-title">' + escapeHtml(explanation.summary || "暂无诊断") + '</div>' +
+              (reasons ? '<ul class="plain-list">' + reasons + '</ul>' : "") +
+              (suggestions ? '<ul class="plain-list">' + suggestions + '</ul>' : "") +
+            '</div>' +
+            '<div class="memory-list">' + results + '</div>' +
+          '</section>' +
+        '</div>';
     }
 
     function renderDetail(memory) {
@@ -2220,9 +2123,8 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         const summary = await fetchJson("/api/summary" + queryString(filters));
         state.summary = summary;
         renderScopeOptions(summary.scopes.available, filters.scope);
-        renderKpis(summary);
+        renderOverviewSummary(summary);
         renderCharts(summary);
-        renderFeedbackLoop(summary);
         $("lastUpdated").textContent = "更新时间 " + new Date(summary.generatedAt).toLocaleString("zh-CN");
         if (isMemoriesView()) await loadMemories({ reset: true });
       } catch (error) {
@@ -2236,7 +2138,26 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     async function explain() {
       const query = $("queryInput").value.trim();
       if (!query) {
-        $("explainOutput").innerHTML = '<div class="empty-state">暂无召回诊断。</div>';
+        $("explainCount").textContent = "尚未查询";
+        $("explainOutput").innerHTML =
+          '<div class="explain-columns">' +
+            '<section class="preview-card">' +
+              '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">待诊断</span></div>' +
+              '<div class="stage-list">' +
+                '<div class="stage muted-preview"><div>混合候选</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview"><div>过滤与重排</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview"><div>多样性处理</div><div class="stage-flow">等待查询</div><div class="stage-time">--</div></div>' +
+              '</div>' +
+            '</section>' +
+            '<section class="preview-card">' +
+              '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">待诊断</span></div>' +
+              '<div class="diagnosis placeholder"><div class="diagnosis-title">未生成诊断</div><div class="subtle">状态：待查询</div></div>' +
+              '<div class="memory-list">' +
+                '<article class="memory-item preview-memory"><div class="memory-meta"><span class="chip">类别</span><span class="chip">范围</span><span class="chip">得分</span></div><div class="memory-text">暂无命中结果</div></article>' +
+                '<article class="memory-item preview-memory"><div class="memory-meta"><span class="chip">类别</span><span class="chip">范围</span><span class="chip">得分</span></div><div class="memory-text">暂无过滤原因</div></article>' +
+              '</div>' +
+            '</section>' +
+          '</div>';
         return;
       }
       $("explainBtn").disabled = true;
