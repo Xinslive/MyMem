@@ -2094,17 +2094,14 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       }, "", { preserveOrder: true });
     }
 
-    function statusChip(status) {
-      if (status === "active") return '<span class="chip green">有效</span>';
-      if (status === "archived") return '<span class="chip amber">已归档</span>';
-      if (status === "expired") return '<span class="chip red">已过期</span>';
-      return '<span class="chip amber">已失效</span>';
-    }
-
     function qualityChips(memory) {
       return (memory.qualityFlags || []).map((flag) =>
         '<span class="chip quality">' + escapeHtml(qualityLabel(flag)) + '</span>'
       ).join("");
+    }
+
+    function accessChip(memory) {
+      return '<span class="chip">访问 ' + escapeHtml(memory.accessCount) + '</span>';
     }
 
     function renderMemoryCards(memories) {
@@ -2113,7 +2110,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="memory-meta">' +
             '<span class="chip teal">' + escapeHtml(memory.categoryLabel) + '</span>' +
             '<span class="chip">' + escapeHtml(memory.scopeLabel) + '</span>' +
-            statusChip(memory.status) +
+            accessChip(memory) +
             qualityChips(memory) +
             '<span class="chip">' + escapeHtml(memory.ageLabel) + '</span>' +
           '</div>' +
@@ -2121,7 +2118,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="memory-stats">' +
             '<span>重要性 ' + pct(memory.importance) + '</span>' +
             '<span>置信度 ' + pct(memory.confidence) + '</span>' +
-            '<span>访问 ' + escapeHtml(memory.accessCount) + '</span>' +
           '</div>' +
           '<div class="memory-actions">' +
             '<button class="danger" data-action="delete" data-id="' + escapeHtml(memory.id) + '">删除</button>' +
