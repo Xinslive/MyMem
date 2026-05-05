@@ -75,9 +75,11 @@ ${conversationText}
 
 Each memory contains two fields:
 
-**abstract**: One-liner summary/index
-- Merge types (preferences/entities/profile/patterns): \`[Merge key]: [Description]\`
-- Independent types (events/cases): Specific description
+**abstract**: One complete sentence that summarizes the memory.
+- It should be concise but information-preserving: usually 18-60 Chinese characters, not a single word or vague topic.
+- It must stand alone in the list view: include the key subject and the durable fact/preference/lesson.
+- Do NOT start with label prefixes like "Skill:", "Pattern:", "Scene:", "Case:", "Pitfall:", "Preference:".
+- Do NOT output a bare topic such as "安全审计与Skill管理" or "需要"; write the actual point in one sentence.
 
 **content**: LLM-refined full narrative with background and details
 
@@ -108,7 +110,7 @@ Each memory contains two fields:
 {
   "category": "cases",
   "worth_storing": true,
-  "abstract": "LanceDB BigInt 数值处理问题",
+  "abstract": "LanceDB 返回 BigInt 时，算术运算前要先用 Number(...) 转换。",
   "content": "当 LanceDB 返回 BigInt 数值时，做算术运算前要先用 Number(...) 包裹转换。"
 }
 \`\`\`
@@ -142,7 +144,7 @@ Return JSON:
     {
       "category": "profile|preferences|entities|events|cases|patterns",
       "worth_storing": true,
-      "abstract": "中文单行索引",
+      "abstract": "信息完整的中文一句话概述",
       "content": "中文完整叙述"
     }
   ]
@@ -150,6 +152,9 @@ Return JSON:
 
 Notes:
 - "worth_storing" is REQUIRED for every candidate. Set to true only for genuinely valuable long-term memories.
+- abstract must be one complete, information-rich sentence. It is not a title, tag, merge key, or ultra-short label.
+- abstract 不要追求过度简洁；它应该是一句话概述，保留关键主体、事实和约束，不要只写标题、标签或一个词。
+- Never begin abstract with "Skill:", "Pattern:", "Scene:", "Case:", "Pitfall:", "Preference:" or similar labels.
 - Output abstract and content in Simplified Chinese by default, even when the conversation contains English.
 - 默认用简体中文生成 abstract、content；即使对话是英文，也把普通叙述翻译成中文。
 - Preserve code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns exactly.
@@ -226,6 +231,8 @@ ${newContent}
 Requirements:
 - Output abstract and content in Simplified Chinese by default.
 - 默认用简体中文输出 abstract、content。
+- abstract must be one complete, information-rich sentence; do not output a bare topic, keyword, or label-prefixed title.
+- abstract 是一句话概述，不要过度压缩导致信息丢失，也不要以 Skill/Pattern/Scene/Case/Pitfall 等标签开头。
 - If existing or new memory text is English, translate ordinary prose to Simplified Chinese.
 - 如果旧记忆或新信息是英文，普通叙述翻译成简体中文。
 - Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.
@@ -236,7 +243,7 @@ Requirements:
 
 Return JSON:
   {
-    "abstract": "合并后的中文单行摘要",
+    "abstract": "合并后的中文一句话概述",
     "content": "合并后的中文完整内容"
   } `;
 }

@@ -81,7 +81,7 @@ function createContext() {
     timestamp: Date.now() - 1000,
     metadata: JSON.stringify({
       memory_category: "profile",
-      summary: "Stale profile note.",
+      summary: "Scene: stale profile note",
       content: "A legacy fact stores a stale profile-like note.",
       state: "confirmed",
       confidence: 0.21,
@@ -91,14 +91,32 @@ function createContext() {
       source: "auto",
     }),
   };
-  const entries = [entry, lowConfidenceEntry];
+  const labelPrefixedEntry = {
+    id: "dashboard_3",
+    text: "Skill: 需要\n- OpenClaw web_search 需要 MiniMax Coding Plan key，不是普通 API key。\n- MiniMax Search API 需要 MINIMAX_CODE_PLAN_KEY。",
+    category: "other",
+    scope: "global",
+    importance: 0.72,
+    timestamp: Date.now() - 2000,
+    metadata: JSON.stringify({
+      memory_category: "patterns",
+      summary: "Skill: 需要",
+      content: "Skill: 需要\n- OpenClaw web_search 需要 MiniMax Coding Plan key，不是普通 API key。\n- MiniMax Search API 需要 MINIMAX_CODE_PLAN_KEY。",
+      state: "confirmed",
+      confidence: 0.7,
+      access_count: 1,
+      memory_layer: "working",
+      source: "auto",
+    }),
+  };
+  const entries = [entry, lowConfidenceEntry, labelPrefixedEntry];
 
   return {
     store: {
       hasFtsSupport: true,
       getFtsStatus: () => ({ available: true, lastError: null }),
       getIndexStatus: async () => ({
-        totalRows: 2,
+        totalRows: 3,
         totalIndices: 3,
         names: ["text_idx", "vector_idx"],
         available: { fts: true, vector: true, scalar: ["scope", "category"] },
@@ -107,12 +125,12 @@ function createContext() {
         vectorIndexPending: false,
       }),
       stats: async () => ({
-        totalCount: 2,
-        scopeCounts: { global: 2 },
-        categoryCounts: { preference: 1, fact: 1 },
-        memoryCategoryCounts: { preferences: 1, profile: 1 },
-        recentActivity: { last24h: 2, last7d: 2, last30d: 2 },
-        tierDistribution: { durable: 1, working: 1 },
+        totalCount: 3,
+        scopeCounts: { global: 3 },
+        categoryCounts: { preference: 1, fact: 1, other: 1 },
+        memoryCategoryCounts: { preferences: 1, profile: 1, patterns: 1 },
+        recentActivity: { last24h: 3, last7d: 3, last30d: 3 },
+        tierDistribution: { durable: 1, working: 2 },
         healthSignals: { badRecall: 1, suppressed: 0, lowConfidence: 1 },
       }),
       list: async (_scopeFilter, category, limit = 20, offset = 0) => {
@@ -249,15 +267,15 @@ test("dashboard server serves page and read-only APIs", async () => {
 
     const summary = await requestJson(server.url + "/api/summary");
     assert.equal(summary.statusCode, 200);
-    assert.equal(summary.body.memory.totalCount, 2);
+    assert.equal(summary.body.memory.totalCount, 3);
     assert.equal(summary.body.retrieval.hasFtsSupport, true);
     assert.deepEqual(summary.body.scopes.available, ["global"]);
     assert.equal(summary.body.scopes.labels.global, "全局");
     assert.equal(summary.body.display.categoryCounts["用户偏好"], 1);
     assert.equal(summary.body.display.categoryCounts["用户画像"], 1);
-    assert.equal(summary.body.display.recentActivity["1 天内"], 2);
-    assert.equal(summary.body.display.recentActivity["1 月内"], 2);
-    assert.equal(summary.body.display.recentActivity["全部"], 2);
+    assert.equal(summary.body.display.recentActivity["1 天内"], 3);
+    assert.equal(summary.body.display.recentActivity["1 月内"], 3);
+    assert.equal(summary.body.display.recentActivity["全部"], 3);
     assert.equal(summary.body.display.tierDistribution["长期记忆"], 1);
     assert.equal(summary.body.feedbackLoop.preventiveLessons.updated, 3);
     assert.equal(summary.body.feedbackLoop.priorAdaptation.cycles, 10);
@@ -266,6 +284,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(memories.statusCode, 200);
     assert.equal(memories.body.memories[0].categoryLabel, "用户偏好");
     assert.equal(memories.body.memories[0].scopeLabel, "全局");
+    assert.equal(memories.body.memories[0].preview, "The user likes clear dashboards.");
     assert.equal(memories.body.memories[0].details.summary, "The user likes clear dashboards.");
     assert.deepEqual(memories.body.memories[0].learning, {
       kind: "memory",
@@ -279,6 +298,12 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(profileMemories.statusCode, 200);
     assert.deepEqual(profileMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
     assert.equal(profileMemories.body.memories[0].categoryLabel, "用户画像");
+    assert.equal(profileMemories.body.memories[0].preview, "A legacy fact stores a stale profile-like note.");
+
+    const patternMemories = await requestJson(server.url + "/api/memories?category=patterns&limit=10");
+    assert.equal(patternMemories.statusCode, 200);
+    assert.equal(patternMemories.body.memories[0].preview, "OpenClaw web_search 需要 MiniMax Coding Plan key，不是普通 API key。");
+    assert.doesNotMatch(patternMemories.body.memories[0].preview, /^Skill:/);
 
     const lowConfidenceMemories = await requestJson(server.url + "/api/memories?quality=low_confidence&limit=10");
     assert.equal(lowConfidenceMemories.statusCode, 200);

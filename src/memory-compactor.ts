@@ -353,7 +353,7 @@ function buildRefinementPrompt(members: CompactionEntry[]): string {
     "Preserve durable user-relevant facts, preferences, decisions, and patterns. Remove repetition, obsolete wording, and low-signal noise.",
     "Return only JSON with keys: abstract, content, category, importance, reason.",
     "category must be one of the smart memory categories: profile, preferences, entities, events, cases, patterns. importance must be a number from 0 to 1.",
-    "abstract should be one concise sentence. content should be the canonical memory text.",
+    "abstract should be one complete, information-rich sentence. It must not be a bare topic, keyword, or label-prefixed title such as Skill:, Pattern:, Scene:, Case:, or Pitfall:. content should be the canonical memory text.",
     "Output abstract, content, and reason in Simplified Chinese by default; translate ordinary English prose to Simplified Chinese.",
     "默认用简体中文输出 abstract、content 和 reason；英文普通叙述翻译成简体中文。",
     "Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.",

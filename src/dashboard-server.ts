@@ -242,6 +242,50 @@ function truncateText(text: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(1, maxChars - 3)).trimEnd()}...`;
 }
 
+function stripMemoryLabelPrefix(text: string): string {
+  return text
+    .replace(/^(?:skill|pattern|scene|case|pitfall|preference|entity|profile|event|decision)\s*[:：]\s*/i, "")
+    .replace(/^(?:需要|问题|风险|偏好|背景|详情|记录|计划|总结)\s*[-—:：]\s*/u, "")
+    .replace(/^(?:需要|问题|风险|偏好|背景|详情|记录|计划|总结)\s+(?=.{8,})/u, "")
+    .trim();
+}
+
+function firstBulletLine(text: string): string {
+  const lines = text
+    .split(/\r?\n/u)
+    .map((line) => stripMemoryLabelPrefix(line.replace(/^\s*[-*•]\s*/u, "")))
+    .filter((line) => line.length >= 12);
+  return lines[0] ?? "";
+}
+
+function firstMeaningfulSentence(text: string): string {
+  const bullet = firstBulletLine(text);
+  if (bullet) return bullet;
+  const normalized = stripMemoryLabelPrefix(text.replace(/^[\s-]+/gm, "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim());
+  const match = normalized.match(/^.{12,160}?[。！？.!?](?=\s|$)/u);
+  return (match?.[0] ?? normalized).trim();
+}
+
+function isLowSignalSummary(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const stripped = stripMemoryLabelPrefix(normalized);
+  if (!stripped) return true;
+  if (/^(?:skill|pattern|scene|case|pitfall|preference|entity|profile|event|decision)\s*[:：]/i.test(normalized)) return true;
+  if (/^(?:需要|问题|风险|偏好|背景|详情|记录|计划|总结)$/u.test(stripped)) return true;
+  if (stripped.length < 14 && !/[：:，,。！？.!?、]/u.test(stripped)) return true;
+  return stripped.length < 10 && !/[。！？.!?，,、]/u.test(stripped);
+}
+
+function buildMemoryPreview(summary: string, content: string, text: string): string {
+  const cleanSummary = displayMemoryText(summary);
+  const cleanContent = displayMemoryText(content);
+  const cleanText = displayMemoryText(text);
+  const source = cleanSummary && !isLowSignalSummary(cleanSummary)
+    ? cleanSummary
+    : firstMeaningfulSentence(cleanContent || cleanText);
+  return truncateText(source || cleanText, 180);
+}
+
 function ageLabel(timestamp: number, now = Date.now()): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "未知";
   const diffMs = Math.max(0, now - timestamp);
@@ -495,6 +539,8 @@ function buildDashboardExplanation(
 function serializeMemory(entry: MemoryEntry): DashboardMemory {
   const meta = parseSmartMetadata(entry.metadata, entry);
   const safeText = displayMemoryText(entry.text);
+  const summary = displayMemoryText(meta.summary);
+  const content = displayMemoryText(meta.content);
   const status = memoryStatus(meta);
   const tier = String(meta.memory_tier || meta.tier || meta.memory_layer || "working");
   const source = String(meta.source || "unknown");
@@ -507,7 +553,7 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
   return {
     id: entry.id,
     text: safeText,
-    preview: truncateText(safeText, 180),
+    preview: buildMemoryPreview(summary, content, safeText),
     category: String(meta.memory_category),
     categoryLabel: displayCategory(String(meta.memory_category)),
     rawCategory: entry.category,
@@ -541,8 +587,8 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
     },
     qualityFlags,
     details: {
-      summary: displayMemoryText(meta.summary),
-      content: displayMemoryText(meta.content),
+      summary,
+      content,
       ...(meta.fact_key ? { factKey: meta.fact_key } : {}),
       validFrom: meta.valid_from,
       ...(meta.invalidated_at ? { invalidatedAt: meta.invalidated_at } : {}),

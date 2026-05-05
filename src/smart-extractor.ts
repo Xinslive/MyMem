@@ -63,6 +63,42 @@ export {
 // ============================================================================
 
 const MAX_MEMORIES_PER_EXTRACTION = 5;
+const LABEL_PREFIX_RE = /^(?:skill|pattern|scene|case|pitfall|preference|entity|profile|event|decision)\s*[:：]\s*/i;
+
+function stripCandidateLabelPrefix(text: string): string {
+  return text
+    .replace(LABEL_PREFIX_RE, "")
+    .replace(/^(?:需要|问题|风险|偏好|背景|详情|记录|计划|总结)\s*[-—:：]\s*/u, "")
+    .replace(/^(?:需要|问题|风险|偏好|背景|详情|记录|计划|总结)\s+(?=.{8,})/u, "")
+    .trim();
+}
+
+function firstCandidateBulletLine(text: string): string {
+  const lines = text
+    .split(/\r?\n/u)
+    .map((line) => stripCandidateLabelPrefix(line.replace(/^\s*[-*•]\s*/u, "")))
+    .filter((line) => line.length >= 12);
+  return lines[0] ?? "";
+}
+
+function firstCandidateSentence(text: string): string {
+  const bullet = firstCandidateBulletLine(text);
+  if (bullet) return bullet;
+  const normalized = stripCandidateLabelPrefix(text.replace(/^[\s-]+/gm, "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim());
+  const match = normalized.match(/^.{12,160}?[。！？.!?](?=\s|$)/u);
+  return (match?.[0] ?? normalized).trim();
+}
+
+function normalizeCandidateAbstract(rawAbstract: string, content: string): string {
+  const abstract = rawAbstract.trim();
+  const stripped = stripCandidateLabelPrefix(abstract);
+  const isLabelPrefixed = LABEL_PREFIX_RE.test(abstract);
+  const isTooSparse = stripped.length < 10 && !/[。！？.!?，,、]/u.test(stripped);
+  if ((isLabelPrefixed || isTooSparse) && content.trim()) {
+    return firstCandidateSentence(content);
+  }
+  return stripped || firstCandidateSentence(content);
+}
 
 // ============================================================================
 // Smart Extractor
@@ -445,8 +481,8 @@ export class SmartExtractor {
         continue;
       }
 
-      const abstract = (raw.abstract ?? "").trim();
       const content = (raw.content ?? "").trim();
+      const abstract = normalizeCandidateAbstract(raw.abstract ?? "", content);
 
       // Skip empty or noise
       if (!abstract || abstract.length < 5) {
