@@ -24,9 +24,10 @@ import { resolveScopeFilter } from "./scopes.js";
 import {
   parseSmartMetadata,
 } from "./smart-metadata.js";
-import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { explainMemoryRetrieval } from "./retrieval-explain.js";
 import type { StoreIndexStatus } from "./store.js";
+import { buildUtilityPatch } from "./learning-memory.js";
 
 type StoreWithOptionalIndexStatus = ToolContext["store"] & {
   getIndexStatus?: () => Promise<StoreIndexStatus>;
@@ -295,7 +296,7 @@ export function registerMemoryDebugTool(
               if (r.sources.vector) sources.push("vector");
               if (r.sources.bm25) sources.push("BM25");
               if (r.sources.reranked) sources.push("reranked");
-              const categoryTag = getDisplayCategoryTag(r.entry);
+              const categoryTag = getSmartDisplayCategoryTag(r.entry);
               return `${i + 1}. [${r.entry.id}] [${categoryTag}] ${r.entry.text.slice(0, 120)}${r.entry.text.length > 120 ? "..." : ""} (${(r.score * 100).toFixed(1)}%${sources.length > 0 ? `, ${sources.join("+")}` : ""})`;
             });
 
@@ -514,7 +515,7 @@ export function registerMemoryListTool(
               const date = new Date(entry.timestamp)
                 .toISOString()
                 .split("T")[0];
-              const categoryTag = getDisplayCategoryTag(entry);
+              const categoryTag = getSmartDisplayCategoryTag(entry);
               return `${safeOffset + i + 1}. [${entry.id}] [${categoryTag}] ${entry.text.slice(0, 100)}${entry.text.length > 100 ? "..." : ""} (${date})`;
             })
             .join("\n");
@@ -531,7 +532,7 @@ export function registerMemoryListTool(
               memories: filteredEntries.map((e) => ({
                 id: e.id,
                 text: e.text,
-                category: getDisplayCategoryTag(e),
+                category: getSmartDisplayCategoryTag(e),
                 rawCategory: e.category,
                 scope: e.scope,
                 importance: e.importance,
@@ -659,6 +660,7 @@ export function registerMemoryPromoteTool(
               last_confirmed_use_at: state === "confirmed" ? now : undefined,
               bad_recall_count: 0,
               suppressed_until_turn: 0,
+              ...buildUtilityPatch(parseSmartMetadata(before.metadata, before), "positive", runtimeContext.retriever.getConfig().learningMemory, now),
             },
             scopeFilter,
           );
@@ -923,10 +925,18 @@ export function registerMemoryExplainRankTool(
             if (r.sources.vector) sourceBreakdown.push(`vec=${r.sources.vector.score.toFixed(3)}`);
             if (r.sources.bm25) sourceBreakdown.push(`bm25=${r.sources.bm25.score.toFixed(3)}`);
             if (r.sources.reranked) sourceBreakdown.push(`rerank=${r.sources.reranked.score.toFixed(3)}`);
+            if (r.sources.learning) {
+              sourceBreakdown.push(
+                `learn=${r.sources.learning.finalScore.toFixed(3)}` +
+                `/u=${r.sources.learning.utility.toFixed(2)}` +
+                `/explore=${r.sources.learning.explorationBoost.toFixed(3)}` +
+                `/bad=-${r.sources.learning.badRecallPenalty.toFixed(3)}`,
+              );
+            }
             return [
               `${idx + 1}. [${r.entry.id}] score=${r.score.toFixed(3)} ${sourceBreakdown.join(" ")}`.trim(),
               `   state=${meta.state} layer=${meta.memory_layer} source=${meta.source} tier=${meta.tier}`,
-              `   access=${meta.access_count} injected=${meta.injected_count} badRecall=${meta.bad_recall_count} suppressedUntilTurn=${meta.suppressed_until_turn}`,
+              `   kind=${meta.memory_kind} access=${meta.access_count} injected=${meta.injected_count} utility=${meta.utility_score.toFixed(2)} badRecall=${meta.bad_recall_count} suppressedUntilTurn=${meta.suppressed_until_turn}`,
               `   text=${truncateText(normalizeInlineText(meta.l0_abstract || r.entry.text), 180)}`,
             ].join("\n");
           });

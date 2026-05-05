@@ -166,7 +166,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const retriever = createRetriever(
     store,
     embedder,
-    { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval },
+    { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval, learningMemory: config.learningMemory },
     { decayEngine, recencyEngine, tierManager, logger: api.logger },
   );
   const statsCollector = new RetrievalStatsCollector(config.telemetry?.maxRecords ?? 1000);

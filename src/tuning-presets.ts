@@ -24,6 +24,7 @@ type PresetOverlay = Pick<
   memoryCompaction?: NonNullable<PluginConfig["memoryCompaction"]>;
   lifecycleMaintenance?: NonNullable<PluginConfig["lifecycleMaintenance"]>;
   preferenceDistiller?: NonNullable<PluginConfig["preferenceDistiller"]>;
+  learningMemory?: NonNullable<PluginConfig["learningMemory"]>;
 };
 
 const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
@@ -85,6 +86,40 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.6,
       maxRulesPerRun: 5,
     },
+    learningMemory: {
+      enabled: true,
+      sceneMemory: {
+        enabled: true,
+        maxScenesPerRun: 8,
+        maxSceneMembers: 8,
+        maxExpandedSceneMembers: 2,
+      },
+      utilityLearning: {
+        enabled: true,
+        positiveReward: 0.12,
+        negativeReward: 0.18,
+        smoothing: 0.25,
+      },
+      exploration: {
+        enabled: true,
+        weight: 0.08,
+        minTrialsBeforeDecay: 3,
+      },
+      casePatternDistillation: {
+        enabled: true,
+        minCaseClusterSize: 2,
+        maxPatternsPerRun: 4,
+      },
+      autoSkills: {
+        enabled: true,
+        maxSkillsPerRecall: 2,
+        maxSkillChars: 600,
+        minConfidence: 0.72,
+      },
+      llmQuality: "high",
+      cooldownHours: 4,
+      maxMemoriesToScan: 300,
+    },
   },
   "low-latency": {
     autoRecallMaxItems: 4,
@@ -143,6 +178,17 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minEvidenceCount: 2,
       minStabilityScore: 0.65,
       maxRulesPerRun: 4,
+    },
+    learningMemory: {
+      enabled: true,
+      sceneMemory: { enabled: true, maxScenesPerRun: 4, maxSceneMembers: 6, maxExpandedSceneMembers: 1 },
+      utilityLearning: { enabled: true, positiveReward: 0.1, negativeReward: 0.18, smoothing: 0.3 },
+      exploration: { enabled: true, weight: 0.04, minTrialsBeforeDecay: 4 },
+      casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 2 },
+      autoSkills: { enabled: true, maxSkillsPerRecall: 1, maxSkillChars: 360, minConfidence: 0.76 },
+      llmQuality: "medium",
+      cooldownHours: 12,
+      maxMemoriesToScan: 180,
     },
   },
   "high-recall": {
@@ -203,6 +249,17 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.55,
       maxRulesPerRun: 6,
     },
+    learningMemory: {
+      enabled: true,
+      sceneMemory: { enabled: true, maxScenesPerRun: 12, maxSceneMembers: 10, maxExpandedSceneMembers: 2 },
+      utilityLearning: { enabled: true, positiveReward: 0.12, negativeReward: 0.16, smoothing: 0.25 },
+      exploration: { enabled: true, weight: 0.12, minTrialsBeforeDecay: 2 },
+      casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 6 },
+      autoSkills: { enabled: true, maxSkillsPerRecall: 2, maxSkillChars: 700, minConfidence: 0.68 },
+      llmQuality: "high",
+      cooldownHours: 4,
+      maxMemoriesToScan: 420,
+    },
   },
   "high-precision": {
     autoRecallMaxItems: 4,
@@ -262,6 +319,17 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
       minStabilityScore: 0.7,
       maxRulesPerRun: 4,
     },
+    learningMemory: {
+      enabled: true,
+      sceneMemory: { enabled: true, maxScenesPerRun: 6, maxSceneMembers: 8, maxExpandedSceneMembers: 2 },
+      utilityLearning: { enabled: true, positiveReward: 0.1, negativeReward: 0.22, smoothing: 0.25 },
+      exploration: { enabled: true, weight: 0.04, minTrialsBeforeDecay: 4 },
+      casePatternDistillation: { enabled: true, minCaseClusterSize: 3, maxPatternsPerRun: 3 },
+      autoSkills: { enabled: true, maxSkillsPerRecall: 2, maxSkillChars: 520, minConfidence: 0.78 },
+      llmQuality: "high",
+      cooldownHours: 8,
+      maxMemoriesToScan: 240,
+    },
   },
 };
 
@@ -270,6 +338,7 @@ const PRESET_OBJECT_KEYS = [
   "memoryCompaction",
   "lifecycleMaintenance",
   "preferenceDistiller",
+  "learningMemory",
 ] as const;
 
 export function isTuningPreset(value: unknown): value is TuningPreset {

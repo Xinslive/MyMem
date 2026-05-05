@@ -21,6 +21,22 @@ export function isReflectionEntry(entry: { category: string; metadata?: string }
 
 export function getDisplayCategoryTag(entry: { category: string; scope: string; metadata?: string }): string {
   if (isReflectionEntry(entry)) return `reflection:${entry.scope}`;
+  const metadata = parseReflectionMetadata(entry.metadata);
+  const category = typeof metadata.memory_category === "string"
+    ? normalizeCategory(metadata.memory_category) ?? entry.category
+    : entry.category;
+  return `${category}:${entry.scope}`;
+}
+
+export function getSmartDisplayCategoryTag(entry: {
+  text?: string;
+  category: string;
+  scope: string;
+  importance?: number;
+  timestamp?: number;
+  metadata?: string;
+}): string {
+  if (isReflectionEntry(entry)) return `reflection:${entry.scope}`;
   const meta = parseSmartMetadata(entry.metadata, entry as Parameters<typeof parseSmartMetadata>[1]);
   const category = normalizeCategory(meta.memory_category) ?? entry.category;
   return `${category}:${entry.scope}`;

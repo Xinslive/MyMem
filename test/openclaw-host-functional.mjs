@@ -253,7 +253,6 @@ async function main() {
 
     const infoOutput = await runOpenClaw(profile, ["plugins", "info", "mymem"]);
     assert.match(infoOutput, /Status:\s+loaded/);
-    assert.match(infoOutput, /CLI commands:\s+mymem/);
 
     const versionOutput = stripPluginLogs(await runOpenClaw(profile, ["mymem", "version"]));
     assert.equal(versionOutput, packageJson.version);

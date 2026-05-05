@@ -16,7 +16,7 @@ import {
   normalizeCategory,
   type MemoryCategory,
 } from "./memory-categories.js";
-import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { parseAgentIdFromSessionKey, type MemoryScopeManager } from "./scopes.js";
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { AggregateStats } from "./retrieval-stats.js";
@@ -154,12 +154,26 @@ export function sanitizeMemoryForSerialization(results: RetrievalResult[]) {
   return results.map((r) => ({
     id: r.entry.id,
     text: r.entry.text,
-    category: getDisplayCategoryTag(r.entry),
+    category: getSmartDisplayCategoryTag(r.entry),
     rawCategory: r.entry.category,
     scope: r.entry.scope,
     importance: r.entry.importance,
     score: r.score,
     sources: r.sources,
+    metadata: (() => {
+      const meta = parseSmartMetadata(r.entry.metadata, r.entry);
+      return {
+        memory_kind: meta.memory_kind,
+        utility_score: meta.utility_score,
+        utility_success_count: meta.utility_success_count,
+        utility_failure_count: meta.utility_failure_count,
+        utility_trial_count: meta.utility_trial_count,
+        scene_id: meta.scene_id,
+        scene_title: meta.scene_title,
+        skill_name: meta.skill_name,
+        skill_enabled: meta.skill_enabled,
+      };
+    })(),
   }));
 }
 

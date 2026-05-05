@@ -21,8 +21,9 @@ import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import type { MemoryType } from "./memory-categories.js";
-import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
+import { buildUtilityPatch } from "./learning-memory.js";
 
 export function registerMemoryRecallTool(
   api: OpenClawPluginApi,
@@ -156,6 +157,7 @@ export function registerMemoryRecallTool(
                   last_confirmed_use_at: now,
                   bad_recall_count: 0,
                   suppressed_until_turn: 0,
+                  ...buildUtilityPatch(meta, "positive", runtimeContext.retriever.getConfig().learningMemory, now),
                 },
                 scopeFilter,
               );
@@ -164,7 +166,7 @@ export function registerMemoryRecallTool(
 
           const text = results
             .map((r, i) => {
-              const categoryTag = getDisplayCategoryTag(r.entry);
+              const categoryTag = getSmartDisplayCategoryTag(r.entry);
               const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
               const base = includeFullText
                 ? (metadata.l2_content || metadata.l1_overview || r.entry.text)

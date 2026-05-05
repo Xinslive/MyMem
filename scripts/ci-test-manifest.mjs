@@ -45,6 +45,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/issue601_behavioral.mjs" },
   { group: "packaging-and-workflow", runner: "node", file: "test/jsonl-distill-slash-filter.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/knowledge-experience-decoupling.test.mjs", args: ["--test"] },
+  { group: "core-regression", runner: "node", file: "test/learning-memory.test.mjs", args: ["--test"] },
   { group: "cli-smoke", runner: "node", file: "test/llm-api-key-client.test.mjs", args: ["--test"] },
   { group: "cli-smoke", runner: "node", file: "test/llm-oauth-client.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/lock-recovery.test.mjs", args: ["--test"] },

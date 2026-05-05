@@ -4,7 +4,7 @@ export const MAX_EMBED_DEPTH = 3;
 /** Global timeout for a single embedding operation (ms). */
 export const EMBED_TIMEOUT_MS = 3_000;
 /** Global cap for concurrent provider-bound embedding requests across all Embedder instances. */
-export const GLOBAL_EMBED_CONCURRENCY_LIMIT = 20;
+export const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;
 
 /**
  * Strictly decreasing character limit for forced truncation.

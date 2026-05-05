@@ -28,6 +28,7 @@ import {
 import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
 import { isUserMdExclusiveMemory } from "./workspace-boundary.js";
 import { detectLessonReasoningStrategy } from "./reasoning-strategy.js";
+import { defaultLearningKindPatch } from "./learning-memory.js";
 
 export function registerMemoryStoreTool(
   api: OpenClawPluginApi,
@@ -238,6 +239,7 @@ export function registerMemoryStoreTool(
                 l1_overview: oldMeta.l1_overview || `- ${text}`,
                 l2_content: text,
                 memory_category: oldMeta.memory_category,
+                ...defaultLearningKindPatch(oldMeta.memory_category),
                 tier: oldMeta.tier,
                 source: "manual",
                 ...(manualStrategyFields ?? {}),
@@ -341,6 +343,7 @@ export function registerMemoryStoreTool(
                   l1_overview: `- ${text}`,
                   l2_content: text,
                   memory_category: memoryCategory,
+                  ...defaultLearningKindPatch(memoryCategory),
                   source: "manual",
                   ...(manualStrategyFields ?? {}),
                   state: "confirmed",

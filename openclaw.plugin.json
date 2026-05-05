@@ -638,6 +638,69 @@
           }
         }
       },
+      "learningMemory": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Default-on learned memory layer: utility-aware ranking, scene memories, case/pattern distillation, and auto-enabled learned skills.",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "sceneMemory": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "maxScenesPerRun": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
+              "maxSceneMembers": { "type": "integer", "minimum": 2, "maximum": 24, "default": 8 },
+              "maxExpandedSceneMembers": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 }
+            }
+          },
+          "utilityLearning": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "positiveReward": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.12 },
+              "negativeReward": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.18 },
+              "smoothing": { "type": "number", "minimum": 0.01, "maximum": 1, "default": 0.25 }
+            }
+          },
+          "exploration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "weight": { "type": "number", "minimum": 0, "maximum": 0.5, "default": 0.08 },
+              "minTrialsBeforeDecay": { "type": "integer", "minimum": 0, "maximum": 50, "default": 3 }
+            }
+          },
+          "casePatternDistillation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "minCaseClusterSize": { "type": "integer", "minimum": 2, "maximum": 20, "default": 2 },
+              "maxPatternsPerRun": { "type": "integer", "minimum": 1, "maximum": 20, "default": 4 }
+            }
+          },
+          "autoSkills": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "maxSkillsPerRecall": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
+              "maxSkillChars": { "type": "integer", "minimum": 120, "maximum": 2000, "default": 600 },
+              "minConfidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.72 }
+            }
+          },
+          "llmQuality": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "default": "high"
+          },
+          "cooldownHours": { "type": "integer", "minimum": 1, "default": 4 },
+          "maxMemoriesToScan": { "type": "integer", "minimum": 20, "maximum": 2000, "default": 300 }
+        }
+      },
       "decay": {
         "type": "object",
         "additionalProperties": false,
@@ -1988,6 +2051,16 @@
     "preferenceDistiller.gatewayBackfill": {
       "label": "Distiller Backfill",
       "help": "Also run preference distillation from recent memory state at gateway startup.",
+      "advanced": true
+    },
+    "learningMemory.enabled": {
+      "label": "Learning Memory",
+      "help": "Enable utility-aware ranking, scene memories, and learned skills.",
+      "advanced": true
+    },
+    "learningMemory.autoSkills.enabled": {
+      "label": "Learned Skills",
+      "help": "Inject auto-enabled reusable skills distilled from prior cases.",
       "advanced": true
     },
     "sessionCompression.enabled": {

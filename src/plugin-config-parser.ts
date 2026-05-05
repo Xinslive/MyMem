@@ -448,6 +448,84 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         maxRulesPerRun: clampInt(parsePositiveInt(raw?.maxRulesPerRun) ?? 5, 1, 20),
       };
     })(),
+    learningMemory: (() => {
+      const raw =
+        typeof cfg.learningMemory === "object" && cfg.learningMemory !== null
+          ? (cfg.learningMemory as Record<string, unknown>)
+          : null;
+      const sceneRaw =
+        typeof raw?.sceneMemory === "object" && raw.sceneMemory !== null
+          ? raw.sceneMemory as Record<string, unknown>
+          : null;
+      const utilityRaw =
+        typeof raw?.utilityLearning === "object" && raw.utilityLearning !== null
+          ? raw.utilityLearning as Record<string, unknown>
+          : null;
+      const explorationRaw =
+        typeof raw?.exploration === "object" && raw.exploration !== null
+          ? raw.exploration as Record<string, unknown>
+          : null;
+      const distillRaw =
+        typeof raw?.casePatternDistillation === "object" && raw.casePatternDistillation !== null
+          ? raw.casePatternDistillation as Record<string, unknown>
+          : null;
+      const skillsRaw =
+        typeof raw?.autoSkills === "object" && raw.autoSkills !== null
+          ? raw.autoSkills as Record<string, unknown>
+          : null;
+      const llmQuality = raw?.llmQuality === "low" || raw?.llmQuality === "medium" || raw?.llmQuality === "high"
+        ? raw.llmQuality
+        : "high";
+      return {
+        enabled: raw?.enabled !== false,
+        sceneMemory: {
+          enabled: sceneRaw?.enabled !== false,
+          maxScenesPerRun: clampInt(parsePositiveInt(sceneRaw?.maxScenesPerRun) ?? 8, 1, 50),
+          maxSceneMembers: clampInt(parsePositiveInt(sceneRaw?.maxSceneMembers) ?? 8, 2, 24),
+          maxExpandedSceneMembers: clampInt(parsePositiveInt(sceneRaw?.maxExpandedSceneMembers) ?? 2, 0, 5),
+        },
+        utilityLearning: {
+          enabled: utilityRaw?.enabled !== false,
+          positiveReward:
+            typeof utilityRaw?.positiveReward === "number"
+              ? Math.max(0, Math.min(1, utilityRaw.positiveReward))
+              : 0.12,
+          negativeReward:
+            typeof utilityRaw?.negativeReward === "number"
+              ? Math.max(0, Math.min(1, utilityRaw.negativeReward))
+              : 0.18,
+          smoothing:
+            typeof utilityRaw?.smoothing === "number"
+              ? Math.max(0.01, Math.min(1, utilityRaw.smoothing))
+              : 0.25,
+        },
+        exploration: {
+          enabled: explorationRaw?.enabled !== false,
+          weight:
+            typeof explorationRaw?.weight === "number"
+              ? Math.max(0, Math.min(0.5, explorationRaw.weight))
+              : 0.08,
+          minTrialsBeforeDecay: clampInt(parsePositiveInt(explorationRaw?.minTrialsBeforeDecay) ?? 3, 0, 50),
+        },
+        casePatternDistillation: {
+          enabled: distillRaw?.enabled !== false,
+          minCaseClusterSize: clampInt(parsePositiveInt(distillRaw?.minCaseClusterSize) ?? 2, 2, 20),
+          maxPatternsPerRun: clampInt(parsePositiveInt(distillRaw?.maxPatternsPerRun) ?? 4, 1, 20),
+        },
+        autoSkills: {
+          enabled: skillsRaw?.enabled !== false,
+          maxSkillsPerRecall: clampInt(parsePositiveInt(skillsRaw?.maxSkillsPerRecall) ?? 2, 0, 5),
+          maxSkillChars: clampInt(parsePositiveInt(skillsRaw?.maxSkillChars) ?? 600, 120, 2000),
+          minConfidence:
+            typeof skillsRaw?.minConfidence === "number"
+              ? Math.max(0, Math.min(1, skillsRaw.minConfidence))
+              : 0.72,
+        },
+        llmQuality,
+        cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
+        maxMemoriesToScan: clampInt(parsePositiveInt(raw?.maxMemoriesToScan) ?? 300, 20, 2000),
+      };
+    })(),
     sessionCompression:
       typeof cfg.sessionCompression === "object" && cfg.sessionCompression !== null
         ? {

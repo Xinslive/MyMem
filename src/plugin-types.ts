@@ -8,6 +8,41 @@ import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { AdmissionControlConfig } from "./admission-control.js";
 import type { TuningPreset } from "./tuning-presets.js";
 
+export interface LearningMemoryConfig {
+  enabled?: boolean;
+  sceneMemory?: {
+    enabled?: boolean;
+    maxScenesPerRun?: number;
+    maxSceneMembers?: number;
+    maxExpandedSceneMembers?: number;
+  };
+  utilityLearning?: {
+    enabled?: boolean;
+    positiveReward?: number;
+    negativeReward?: number;
+    smoothing?: number;
+  };
+  exploration?: {
+    enabled?: boolean;
+    weight?: number;
+    minTrialsBeforeDecay?: number;
+  };
+  casePatternDistillation?: {
+    enabled?: boolean;
+    minCaseClusterSize?: number;
+    maxPatternsPerRun?: number;
+  };
+  autoSkills?: {
+    enabled?: boolean;
+    maxSkillsPerRecall?: number;
+    maxSkillChars?: number;
+    minConfidence?: number;
+  };
+  llmQuality?: "low" | "medium" | "high";
+  cooldownHours?: number;
+  maxMemoriesToScan?: number;
+}
+
 export interface PluginConfig {
   tuningPreset?: TuningPreset;
   embedding: {
@@ -78,6 +113,7 @@ export interface PluginConfig {
     reinforcementFactor?: number;
     maxHalfLifeMultiplier?: number;
     tagPrefixes?: string[];
+    learningMemory?: LearningMemoryConfig;
   };
   decay?: {
     recencyHalfLifeDays?: number;
@@ -171,6 +207,7 @@ export interface PluginConfig {
     hardDeleteReasons?: string[];
   };
   preferenceDistiller?: PreferenceDistillerConfig;
+  learningMemory?: LearningMemoryConfig;
   sessionCompression?: {
     enabled?: boolean;
     minScoreToKeep?: number;

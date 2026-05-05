@@ -4,6 +4,17 @@
 
 import type { MemorySearchResult } from "./store.js";
 import type { Logger } from "./logger.js";
+import type { LearningMemoryConfig } from "./plugin-types.js";
+
+export interface LearningScoreBreakdown {
+  originalScore: number;
+  utility: number;
+  utilityBoost: number;
+  explorationBoost: number;
+  sceneBoost: number;
+  badRecallPenalty: number;
+  finalScore: number;
+}
 
 // ============================================================================
 // Types & Configuration
@@ -78,6 +89,8 @@ export interface RetrievalConfig {
    *  Queries containing these prefixes (e.g. "proj:AIF") will use BM25-only + mustContain
    *  to avoid semantic false positives from vector search. */
   tagPrefixes: string[];
+  /** Learned utility / scene / skill ranking policy. */
+  learningMemory?: LearningMemoryConfig;
 }
 
 export const fallbackRetrieverLogger: Pick<Logger, "debug" | "warn"> = {
@@ -113,6 +126,7 @@ export interface RetrievalResult extends MemorySearchResult {
     bm25?: { score: number; rank: number };
     fused?: { score: number };
     reranked?: { score: number };
+    learning?: LearningScoreBreakdown;
   };
   /**
    * Confidence score (0-1) indicating overall result quality.
@@ -155,6 +169,7 @@ export interface RetrievalDiagnostics {
     afterImportance: number;
     afterLengthNorm: number;
     afterTimeDecay: number;
+    afterLearningPolicy: number;
     afterHardMinScore: number;
     afterNoiseFilter: number;
     afterDiversity: number;
@@ -168,6 +183,7 @@ export interface RetrievalDiagnostics {
       | "importanceWeight"
       | "lengthNorm"
       | "timeDecay"
+      | "learningPolicy"
       | "hardMinScore"
       | "noiseFilter"
       | "diversity"

@@ -32,6 +32,10 @@ import {
   shouldRunPreferenceDistiller,
   recordPreferenceDistillerRun,
 } from "./preference-distiller.js";
+import {
+  runLearningMemoryMaintenance,
+  type LearningMaintenanceResult,
+} from "./learning-memory.js";
 
 /** Context object passed to extracted registration functions. */
 export interface PluginRegistrationContext {
@@ -56,6 +60,7 @@ type GatewayMaintenanceDeps = {
   runCompaction: typeof runCompaction;
   shouldRunCompaction: typeof shouldRunCompaction;
   recordCompactionRun: typeof recordCompactionRun;
+  runLearningMemoryMaintenance: typeof runLearningMemoryMaintenance;
 };
 
 const defaultGatewayMaintenanceDeps: GatewayMaintenanceDeps = {
@@ -68,6 +73,7 @@ const defaultGatewayMaintenanceDeps: GatewayMaintenanceDeps = {
   runCompaction,
   shouldRunCompaction,
   recordCompactionRun,
+  runLearningMemoryMaintenance,
 };
 
 async function runGatewayMaintenanceOnce(
@@ -78,6 +84,7 @@ async function runGatewayMaintenanceOnce(
   const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
   const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
   const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
+  const learningStateFile = join(dirname(resolvedDbPath), ".learning-memory-state.json");
 
   const compactionCfg: CompactionConfig | null = config.memoryCompaction?.enabled ? {
     enabled: true,
@@ -118,17 +125,21 @@ async function runGatewayMaintenanceOnce(
     },
   };
 
-  const [runDistiller, runLifecycle, runCompact] = await Promise.all([
+  const [runDistiller, runLifecycle, runCompact, runLearning] = await Promise.all([
     config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill
       ? deps.shouldRunPreferenceDistiller(distillerStateFile, config.preferenceDistiller.cooldownHours ?? 4)
       : Promise.resolve(false),
     lifecycleCfg.enabled ? deps.shouldRunLifecycleMaintenance(lifecycleStateFile, lifecycleCfg.cooldownHours) : Promise.resolve(false),
     compactionCfg ? deps.shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours) : Promise.resolve(false),
+    config.learningMemory?.enabled
+      ? deps.shouldRunCompaction(learningStateFile, config.learningMemory.cooldownHours ?? 4)
+      : Promise.resolve(false),
   ]);
 
   let distillResult: Awaited<ReturnType<typeof runPreferenceDistiller>> | null = null;
   let lifecycleResult: Awaited<ReturnType<typeof runLifecycleMaintenance>> | null = null;
   let compactionResult: Awaited<ReturnType<typeof runCompaction>> | null = null;
+  let learningResult: LearningMaintenanceResult | null = null;
 
   if (runDistiller) {
     distillResult = await deps.runPreferenceDistiller(
@@ -159,7 +170,15 @@ async function runGatewayMaintenanceOnce(
     await deps.recordCompactionRun(compactionStateFile);
   }
 
-  if (distillResult || lifecycleResult || compactionResult) {
+  if (runLearning && config.learningMemory?.enabled) {
+    learningResult = await deps.runLearningMemoryMaintenance(
+      { store, embedder, llm: smartExtractionLlmClient, logger: api.logger },
+      config.learningMemory,
+    );
+    await deps.recordCompactionRun(learningStateFile);
+  }
+
+  if (distillResult || lifecycleResult || compactionResult || learningResult) {
     api.logger.info(
       `memory-maintenance [auto]: ` +
       `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
@@ -172,6 +191,8 @@ async function runGatewayMaintenanceOnce(
       `llmRefined=${compactionResult?.llmRefined ?? 0} ` +
       `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
       `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
+      `learningScenes=${learningResult ? `${learningResult.scenesCreated}/${learningResult.scenesUpdated}` : "0/0"} ` +
+      `learningSkills=${learningResult?.skillsCreated ?? 0} ` +
       `archived=${lifecycleResult?.archived ?? 0} ` +
       `promoted=${lifecycleResult?.promoted ?? 0} demoted=${lifecycleResult?.demoted ?? 0}`,
     );
@@ -188,7 +209,8 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
   if (
     !config.memoryCompaction?.enabled &&
     !config.lifecycleMaintenance?.enabled &&
-    !(config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill)
+    !(config.preferenceDistiller?.enabled && config.preferenceDistiller?.gatewayBackfill) &&
+    !config.learningMemory?.enabled
   ) {
     return;
   }

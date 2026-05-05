@@ -1,0 +1,568 @@
+import { createHash } from "node:crypto";
+import type { Logger } from "./logger.js";
+import type { LlmClient } from "./llm-client.js";
+import type { Embedder } from "./embedder.js";
+import type { MemoryEntry, MemoryStore } from "./store.js";
+import type { LearningMemoryConfig } from "./plugin-types.js";
+import type { RetrievalResult } from "./retriever-types.js";
+import type { LearningScoreBreakdown } from "./retriever-types.js";
+import {
+  buildSmartMetadata,
+  parseSmartMetadata,
+  stringifySmartMetadata,
+  type SmartMemoryMetadata,
+} from "./smart-metadata.js";
+import type { MemoryCategory } from "./memory-categories.js";
+
+export type NormalizedLearningMemoryConfig = Required<LearningMemoryConfig> & {
+  sceneMemory: Required<NonNullable<LearningMemoryConfig["sceneMemory"]>>;
+  utilityLearning: Required<NonNullable<LearningMemoryConfig["utilityLearning"]>>;
+  exploration: Required<NonNullable<LearningMemoryConfig["exploration"]>>;
+  casePatternDistillation: Required<NonNullable<LearningMemoryConfig["casePatternDistillation"]>>;
+  autoSkills: Required<NonNullable<LearningMemoryConfig["autoSkills"]>>;
+};
+
+export interface LearningMemoryResult extends RetrievalResult {
+  sources: RetrievalResult["sources"] & {
+    learning?: LearningScoreBreakdown;
+  };
+}
+
+export interface LearningMaintenanceResult {
+  scanned: number;
+  scenesCreated: number;
+  scenesUpdated: number;
+  patternsCreated: number;
+  skillsCreated: number;
+  skipped: number;
+  llmRefined: number;
+  fallbackUsed: number;
+}
+
+type LearningStore = Pick<MemoryStore, "list" | "store" | "update">;
+
+const DEFAULT_CONFIG: NormalizedLearningMemoryConfig = {
+  enabled: true,
+  sceneMemory: {
+    enabled: true,
+    maxScenesPerRun: 8,
+    maxSceneMembers: 8,
+    maxExpandedSceneMembers: 2,
+  },
+  utilityLearning: {
+    enabled: true,
+    positiveReward: 0.12,
+    negativeReward: 0.18,
+    smoothing: 0.25,
+  },
+  exploration: {
+    enabled: true,
+    weight: 0.08,
+    minTrialsBeforeDecay: 3,
+  },
+  casePatternDistillation: {
+    enabled: true,
+    minCaseClusterSize: 2,
+    maxPatternsPerRun: 4,
+  },
+  autoSkills: {
+    enabled: true,
+    maxSkillsPerRecall: 2,
+    maxSkillChars: 600,
+    minConfidence: 0.72,
+  },
+  llmQuality: "high",
+  cooldownHours: 4,
+  maxMemoriesToScan: 300,
+};
+
+function clamp01(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(1, Math.max(0, n));
+}
+
+function positiveInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+export function normalizeLearningMemoryConfig(
+  config?: LearningMemoryConfig,
+): NormalizedLearningMemoryConfig {
+  return {
+    enabled: config?.enabled !== false,
+    sceneMemory: {
+      enabled: config?.sceneMemory?.enabled !== false,
+      maxScenesPerRun: positiveInt(config?.sceneMemory?.maxScenesPerRun, DEFAULT_CONFIG.sceneMemory.maxScenesPerRun, 1, 50),
+      maxSceneMembers: positiveInt(config?.sceneMemory?.maxSceneMembers, DEFAULT_CONFIG.sceneMemory.maxSceneMembers, 2, 24),
+      maxExpandedSceneMembers: positiveInt(config?.sceneMemory?.maxExpandedSceneMembers, DEFAULT_CONFIG.sceneMemory.maxExpandedSceneMembers, 0, 5),
+    },
+    utilityLearning: {
+      enabled: config?.utilityLearning?.enabled !== false,
+      positiveReward: clamp01(config?.utilityLearning?.positiveReward, DEFAULT_CONFIG.utilityLearning.positiveReward),
+      negativeReward: clamp01(config?.utilityLearning?.negativeReward, DEFAULT_CONFIG.utilityLearning.negativeReward),
+      smoothing: Math.max(0.01, clamp01(config?.utilityLearning?.smoothing, DEFAULT_CONFIG.utilityLearning.smoothing)),
+    },
+    exploration: {
+      enabled: config?.exploration?.enabled !== false,
+      weight: Math.min(0.5, clamp01(config?.exploration?.weight, DEFAULT_CONFIG.exploration.weight)),
+      minTrialsBeforeDecay: positiveInt(config?.exploration?.minTrialsBeforeDecay, DEFAULT_CONFIG.exploration.minTrialsBeforeDecay, 0, 50),
+    },
+    casePatternDistillation: {
+      enabled: config?.casePatternDistillation?.enabled !== false,
+      minCaseClusterSize: positiveInt(config?.casePatternDistillation?.minCaseClusterSize, DEFAULT_CONFIG.casePatternDistillation.minCaseClusterSize, 2, 20),
+      maxPatternsPerRun: positiveInt(config?.casePatternDistillation?.maxPatternsPerRun, DEFAULT_CONFIG.casePatternDistillation.maxPatternsPerRun, 1, 20),
+    },
+    autoSkills: {
+      enabled: config?.autoSkills?.enabled !== false,
+      maxSkillsPerRecall: positiveInt(config?.autoSkills?.maxSkillsPerRecall, DEFAULT_CONFIG.autoSkills.maxSkillsPerRecall, 0, 5),
+      maxSkillChars: positiveInt(config?.autoSkills?.maxSkillChars, DEFAULT_CONFIG.autoSkills.maxSkillChars, 120, 2000),
+      minConfidence: clamp01(config?.autoSkills?.minConfidence, DEFAULT_CONFIG.autoSkills.minConfidence),
+    },
+    llmQuality: config?.llmQuality === "low" || config?.llmQuality === "medium" || config?.llmQuality === "high"
+      ? config.llmQuality
+      : DEFAULT_CONFIG.llmQuality,
+    cooldownHours: positiveInt(config?.cooldownHours, DEFAULT_CONFIG.cooldownHours, 1, 168),
+    maxMemoriesToScan: positiveInt(config?.maxMemoriesToScan, DEFAULT_CONFIG.maxMemoriesToScan, 20, 2000),
+  };
+}
+
+export function applyLearningPolicy(
+  results: RetrievalResult[],
+  config?: LearningMemoryConfig,
+): LearningMemoryResult[] {
+  const cfg = normalizeLearningMemoryConfig(config);
+  if (!cfg.enabled) return results as LearningMemoryResult[];
+
+  const totalTrials = results.reduce((sum, result) => {
+    const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, result.entry);
+    return sum + Math.max(0, Number(meta.utility_trial_count || 0));
+  }, 0);
+  const logTrials = Math.log1p(Math.max(totalTrials, results.length));
+
+  return results
+    .map((result) => {
+      const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, result.entry);
+      const utility = clamp01(meta.utility_score, 0.5);
+      const trialCount = Math.max(0, Number(meta.utility_trial_count || 0));
+      const badRecallCount = Math.max(0, Number(meta.bad_recall_count || 0));
+      const utilityBoost = cfg.utilityLearning.enabled ? (utility - 0.5) * 0.24 : 0;
+      const explorationBoost = cfg.exploration.enabled
+        ? cfg.exploration.weight * Math.sqrt(logTrials / Math.max(1, trialCount + 1))
+        : 0;
+      const sceneBoost = meta.memory_kind === "scene" ? 0.04 : meta.scene_id || meta.scene_key ? 0.02 : 0;
+      const badRecallPenalty = Math.min(0.35, badRecallCount * 0.08);
+      const finalScore = Math.max(0, result.score + utilityBoost + explorationBoost + sceneBoost - badRecallPenalty);
+      const breakdown: LearningScoreBreakdown = {
+        originalScore: result.score,
+        utility,
+        utilityBoost,
+        explorationBoost,
+        sceneBoost,
+        badRecallPenalty,
+        finalScore,
+      };
+      return {
+        ...result,
+        score: finalScore,
+        sources: {
+          ...result.sources,
+          learning: breakdown,
+        },
+      } as LearningMemoryResult;
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+export function buildUtilityPatch(
+  metadata: SmartMemoryMetadata,
+  signal: "positive" | "negative",
+  config?: LearningMemoryConfig,
+  at = Date.now(),
+): Record<string, unknown> {
+  const cfg = normalizeLearningMemoryConfig(config);
+  const current = clamp01(metadata.utility_score, 0.5);
+  const success = Math.max(0, Number(metadata.utility_success_count || 0));
+  const failure = Math.max(0, Number(metadata.utility_failure_count || 0));
+  const reward = signal === "positive" ? cfg.utilityLearning.positiveReward : -cfg.utilityLearning.negativeReward;
+  const target = signal === "positive" ? 1 : 0;
+  const moved = current * (1 - cfg.utilityLearning.smoothing) + target * cfg.utilityLearning.smoothing;
+  const adjusted = clamp01(moved + reward * 0.25, current);
+  return {
+    utility_score: adjusted,
+    utility_success_count: signal === "positive" ? success + 1 : success,
+    utility_failure_count: signal === "negative" ? failure + 1 : failure,
+    utility_trial_count: Math.max(0, Number(metadata.utility_trial_count || 0)) + 1,
+    last_utility_update_at: at,
+  };
+}
+
+export function isEnabledSkillMemory(meta: SmartMemoryMetadata, config?: LearningMemoryConfig): boolean {
+  const cfg = normalizeLearningMemoryConfig(config);
+  return cfg.enabled &&
+    cfg.autoSkills.enabled &&
+    meta.memory_kind === "skill" &&
+    meta.skill_enabled !== false &&
+    meta.state === "confirmed" &&
+    meta.memory_layer !== "archive" &&
+    meta.confidence >= cfg.autoSkills.minConfidence;
+}
+
+export function formatLearnedSkillLine(entry: MemoryEntry, maxChars: number): string {
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  const name = meta.skill_name || meta.scene_title || meta.l0_abstract || "learned-skill";
+  const conditions = Array.isArray(meta.skill_activation_conditions)
+    ? meta.skill_activation_conditions.slice(0, 3).join(" | ")
+    : "";
+  const steps = Array.isArray(meta.case_steps)
+    ? meta.case_steps.slice(0, 4).join(" | ")
+    : "";
+  const body = [
+    name,
+    conditions ? `Trigger: ${conditions}` : "",
+    steps ? `Action: ${steps}` : (meta.l1_overview || meta.l2_content || entry.text),
+  ].filter(Boolean).join(" -> ");
+  return `- [skill:${entry.scope}] ${body}`.slice(0, maxChars).trim();
+}
+
+export function formatSceneLine(entry: MemoryEntry, maxChars: number): string {
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  const title = meta.scene_title || meta.l0_abstract || "Memory scene";
+  const body = meta.l1_overview || meta.l2_content || entry.text;
+  return `- [scene:${entry.scope}] ${title}: ${body}`.slice(0, maxChars).trim();
+}
+
+function memoryKindForCategory(category: MemoryCategory): SmartMemoryMetadata["memory_kind"] {
+  if (category === "cases") return "case";
+  if (category === "patterns") return "pattern";
+  return "memory";
+}
+
+export function defaultLearningKindPatch(category: MemoryCategory): Record<string, unknown> {
+  return {
+    memory_kind: memoryKindForCategory(category),
+    utility_score: 0.5,
+    utility_success_count: 0,
+    utility_failure_count: 0,
+    utility_trial_count: 0,
+  };
+}
+
+function normalizeTopic(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[`"'“”‘’()[\]{}]/g, " ")
+    .replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTopic(entry: MemoryEntry, meta: SmartMemoryMetadata): string {
+  const candidates = [
+    meta.scene_key,
+    meta.fact_key,
+    meta.canonical_id,
+    meta.case_trigger,
+    meta.skill_name,
+    meta.l0_abstract,
+    entry.text,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const raw = candidates[0] ?? entry.id;
+  const cjk = raw.match(/[\u4e00-\u9fff]{2,12}/);
+  if (cjk) return `${entry.scope}:${meta.memory_category}:${cjk[0]}`;
+  const words = normalizeTopic(raw)
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !/^(the|and|for|with|this|that|memory|user|agent)$/.test(word))
+    .slice(0, 5);
+  return `${entry.scope}:${meta.memory_category}:${words.join(" ") || raw.slice(0, 32)}`;
+}
+
+function stableId(prefix: string, key: string): string {
+  return `${prefix}:${createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
+}
+
+function toStoreCategory(category: MemoryCategory): MemoryEntry["category"] {
+  switch (category) {
+    case "preferences": return "preference";
+    case "entities": return "entity";
+    case "events": return "decision";
+    case "patterns": return "other";
+    case "profile":
+    case "cases":
+      return "fact";
+  }
+}
+
+function summarizeMembers(members: MemoryEntry[], maxMembers: number): string {
+  return members.slice(0, maxMembers).map((entry) => {
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    return `- ${meta.l0_abstract || entry.text}`;
+  }).join("\n");
+}
+
+async function refineSceneTitle(
+  llm: LlmClient | undefined,
+  members: MemoryEntry[],
+  fallback: { title: string; summary: string },
+): Promise<{ title: string; summary: string } | null> {
+  if (!llm) return null;
+  const prompt = [
+    "You organize long-term agent memory into one reusable memory scene.",
+    "Return only JSON with keys: title, summary.",
+    "title must be concise. summary must be a compact bullet-style synthesis useful for future recall.",
+    "Use Simplified Chinese for ordinary prose; keep code identifiers and proper nouns unchanged.",
+    "",
+    summarizeMembers(members, 10),
+  ].join("\n");
+  const raw = await llm.completeJson<unknown>(prompt, "learning-memory-scene");
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : fallback.title;
+  const summary = typeof obj.summary === "string" && obj.summary.trim() ? obj.summary.trim() : fallback.summary;
+  return { title, summary };
+}
+
+async function refinePattern(
+  llm: LlmClient | undefined,
+  cases: MemoryEntry[],
+  fallback: { title: string; content: string; steps: string[] },
+): Promise<{ title: string; content: string; steps: string[] } | null> {
+  if (!llm) return null;
+  const prompt = [
+    "Distill repeated successful or failed agent cases into one reusable pattern and skill candidate.",
+    "Return only JSON with keys: title, content, steps.",
+    "steps must be an array of concrete action steps.",
+    "Use Simplified Chinese for ordinary prose; keep commands, paths, APIs, and code identifiers unchanged.",
+    "",
+    summarizeMembers(cases, 12),
+  ].join("\n");
+  const raw = await llm.completeJson<unknown>(prompt, "learning-memory-pattern");
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : fallback.title;
+  const content = typeof obj.content === "string" && obj.content.trim() ? obj.content.trim() : fallback.content;
+  const steps = Array.isArray(obj.steps)
+    ? obj.steps.filter((step): step is string => typeof step === "string" && step.trim().length > 0).slice(0, 8)
+    : fallback.steps;
+  return { title, content, steps: steps.length > 0 ? steps : fallback.steps };
+}
+
+export async function runLearningMemoryMaintenance(
+  deps: {
+    store: LearningStore;
+    embedder: Pick<Embedder, "embedPassage">;
+    llm?: LlmClient | null;
+    logger?: Pick<Logger, "info" | "warn" | "debug">;
+  },
+  config?: LearningMemoryConfig,
+  scopeFilter?: string[],
+): Promise<LearningMaintenanceResult> {
+  const cfg = normalizeLearningMemoryConfig(config);
+  const result: LearningMaintenanceResult = {
+    scanned: 0,
+    scenesCreated: 0,
+    scenesUpdated: 0,
+    patternsCreated: 0,
+    skillsCreated: 0,
+    skipped: 0,
+    llmRefined: 0,
+    fallbackUsed: 0,
+  };
+  if (!cfg.enabled) return result;
+
+  const rows = await deps.store.list(scopeFilter, undefined, cfg.maxMemoriesToScan, 0);
+  result.scanned = rows.length;
+  const active = rows.filter((entry) => {
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    return meta.state !== "archived" && meta.memory_layer !== "archive" && meta.source !== "session-summary";
+  });
+  const existingScenes = new Map<string, MemoryEntry>();
+  const groups = new Map<string, MemoryEntry[]>();
+
+  for (const entry of active) {
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    if (meta.memory_kind === "scene" && meta.scene_key) {
+      existingScenes.set(meta.scene_key, entry);
+      continue;
+    }
+    if (meta.memory_kind === "skill") continue;
+    const key = extractTopic(entry, meta);
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+
+  if (cfg.sceneMemory.enabled) {
+    const sceneGroups = [...groups.entries()]
+      .filter(([, members]) => members.length >= 2)
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, cfg.sceneMemory.maxScenesPerRun);
+
+    for (const [key, members] of sceneGroups) {
+      const selected = members
+        .sort((a, b) => b.importance - a.importance || b.timestamp - a.timestamp)
+        .slice(0, cfg.sceneMemory.maxSceneMembers);
+      const fallbackTitle = selected[0]
+        ? (parseSmartMetadata(selected[0].metadata, selected[0]).l0_abstract || selected[0].text).slice(0, 80)
+        : key;
+      const fallbackSummary = summarizeMembers(selected, cfg.sceneMemory.maxSceneMembers);
+      let refined = await refineSceneTitle(deps.llm ?? undefined, selected, {
+        title: fallbackTitle,
+        summary: fallbackSummary,
+      });
+      if (refined) result.llmRefined++;
+      if (!refined) {
+        refined = { title: fallbackTitle, summary: fallbackSummary };
+        result.fallbackUsed++;
+      }
+      const existing = existingScenes.get(key);
+      const now = Date.now();
+      const metadata = buildSmartMetadata(existing ?? {
+        text: refined.title,
+        category: "other",
+        importance: 0.8,
+        timestamp: now,
+      }, {
+        memory_kind: "scene",
+        memory_category: "patterns",
+        memory_type: "knowledge",
+        l0_abstract: refined.title,
+        l1_overview: refined.summary,
+        l2_content: refined.summary,
+        scene_id: stableId("scene", key),
+        scene_key: key,
+        scene_title: refined.title,
+        scene_member_ids: selected.map((entry) => entry.id),
+        scene_summary_version: Number(parseSmartMetadata(existing?.metadata, existing).scene_summary_version || 0) + 1,
+        source: "reflection",
+        state: "confirmed",
+        memory_layer: "working",
+        tier: "working",
+        confidence: 0.78,
+        utility_score: 0.55,
+        last_utility_update_at: now,
+      });
+      const text = `Scene: ${refined.title}\n${refined.summary}`;
+      if (existing) {
+        await deps.store.update(existing.id, {
+          text,
+          vector: await deps.embedder.embedPassage(text),
+          importance: Math.max(existing.importance, 0.78),
+          category: "other",
+          metadata: stringifySmartMetadata(metadata),
+        }, scopeFilter);
+        result.scenesUpdated++;
+      } else {
+        await deps.store.store({
+          text,
+          vector: await deps.embedder.embedPassage(text),
+          category: "other",
+          scope: selected[0]?.scope || "global",
+          importance: 0.78,
+          metadata: stringifySmartMetadata(metadata),
+        });
+        result.scenesCreated++;
+      }
+    }
+  }
+
+  if (cfg.casePatternDistillation.enabled && cfg.autoSkills.enabled) {
+    let caseGroups = [...groups.entries()]
+      .map(([key, members]) => [key, members.filter((entry) => {
+        const meta = parseSmartMetadata(entry.metadata, entry);
+        return meta.memory_category === "cases" || meta.memory_kind === "case";
+      })] as const)
+      .filter(([, members]) => members.length >= cfg.casePatternDistillation.minCaseClusterSize)
+      .slice(0, cfg.casePatternDistillation.maxPatternsPerRun);
+    if (caseGroups.length === 0) {
+      const casesByScope = new Map<string, MemoryEntry[]>();
+      for (const entry of active) {
+        const meta = parseSmartMetadata(entry.metadata, entry);
+        if (meta.memory_category !== "cases" && meta.memory_kind !== "case") continue;
+        const key = `${entry.scope}:cases:fallback`;
+        const list = casesByScope.get(key) ?? [];
+        list.push(entry);
+        casesByScope.set(key, list);
+      }
+      caseGroups = [...casesByScope.entries()]
+        .filter(([, members]) => members.length >= cfg.casePatternDistillation.minCaseClusterSize)
+        .slice(0, cfg.casePatternDistillation.maxPatternsPerRun);
+    }
+
+    for (const [key, members] of caseGroups) {
+      const existingSkill = active.find((entry) => {
+        const meta = parseSmartMetadata(entry.metadata, entry);
+        return meta.memory_kind === "skill" && meta.case_trigger === key;
+      });
+      if (existingSkill) {
+        result.skipped++;
+        continue;
+      }
+      const fallbackTitle = `Pattern: ${key.split(":").slice(-1)[0]}`;
+      const fallbackContent = summarizeMembers(members, 8);
+      let refined = await refinePattern(deps.llm ?? undefined, members, {
+        title: fallbackTitle,
+        content: fallbackContent,
+        steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).l0_abstract || entry.text),
+      });
+      if (refined) result.llmRefined++;
+      if (!refined) {
+        refined = {
+          title: fallbackTitle,
+          content: fallbackContent,
+          steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).l0_abstract || entry.text),
+        };
+        result.fallbackUsed++;
+      }
+      const now = Date.now();
+      const sourceIds = members.map((entry) => entry.id);
+      const patternText = `${refined.title}\n${refined.content}`;
+      const patternMeta = buildSmartMetadata({
+        text: patternText,
+        category: "other",
+        importance: 0.86,
+        timestamp: now,
+      }, {
+        memory_kind: "skill",
+        memory_category: "patterns",
+        memory_type: "knowledge",
+        l0_abstract: refined.title,
+        l1_overview: refined.content,
+        l2_content: patternText,
+        case_trigger: key,
+        case_outcome: "distilled_pattern",
+        case_steps: refined.steps,
+        skill_name: refined.title.replace(/^Pattern:\s*/i, "").slice(0, 80),
+        skill_enabled: true,
+        skill_activation_conditions: [key.split(":").slice(-1)[0], refined.title],
+        skill_source_ids: sourceIds,
+        source: "reflection",
+        state: "confirmed",
+        memory_layer: "working",
+        tier: "working",
+        confidence: 0.78,
+        utility_score: 0.6,
+        last_utility_update_at: now,
+      });
+      await deps.store.store({
+        text: patternText,
+        vector: await deps.embedder.embedPassage(patternText),
+        category: toStoreCategory("patterns"),
+        scope: members[0]?.scope || "global",
+        importance: 0.86,
+        metadata: stringifySmartMetadata(patternMeta),
+      });
+      result.patternsCreated++;
+      result.skillsCreated++;
+    }
+  }
+
+  deps.logger?.info?.(
+    `learning-memory-maintenance: scanned=${result.scanned} scenes=${result.scenesCreated}/${result.scenesUpdated} ` +
+      `patterns=${result.patternsCreated} skills=${result.skillsCreated} llm=${result.llmRefined} fallback=${result.fallbackUsed}`,
+  );
+  return result;
+}

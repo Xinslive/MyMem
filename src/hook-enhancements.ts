@@ -28,6 +28,7 @@ import {
   buildRecallSuppressionPatch,
   isRecallSuppressedForSession,
 } from "./recall-suppression.js";
+import { buildUtilityPatch } from "./learning-memory.js";
 
 const MAX_TRACKED_SESSIONS = 200;
 const DEFAULT_CONTEXT_BUDGET_CHARS = 3_200;
@@ -398,6 +399,7 @@ async function patchBadRecall(params: {
     await params.store.patchMetadata(item.id, {
       bad_recall_count: badRecallCount,
       ...suppressionPatch,
+      ...buildUtilityPatch(meta, "negative"),
       last_bad_recall_at: Date.now(),
       last_bad_recall_reason: params.reason,
     }, params.scopeFilter);
@@ -491,6 +493,7 @@ async function applySelfCorrectionRule(params: {
     const targetMeta = parseSmartMetadata(targetEntry.metadata, targetEntry);
     await params.store.patchMetadata(targetEntry.id, {
       bad_recall_count: Number(targetMeta.bad_recall_count || 0) + 1,
+      ...buildUtilityPatch(targetMeta, "negative"),
       ...buildRecallSuppressionPatch({
         metadata: targetMeta,
         sessionKey: params.sessionKey,

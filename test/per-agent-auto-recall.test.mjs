@@ -203,8 +203,38 @@ describe("auto-recall metadata write-behind", () => {
         last_injected_at: 1_500,
         access_count: 7,
         last_accessed_at: 1_500,
+        utility_score: 0.655,
+        utility_success_count: 1,
+        utility_failure_count: 0,
+        utility_trial_count: 1,
+        last_utility_update_at: 1_500,
       },
     }]);
+  });
+
+  it("can disable utility metadata on auto-recall flush", async () => {
+    const patches = [];
+    const accumulator = new AutoRecallMetadataAccumulator({
+      store: {
+        async patchMetadataBatch(batch) {
+          patches.push(batch);
+          return batch.length;
+        },
+      },
+      logger: { warn() {} },
+      debounceMs: 60_000,
+      learningMemory: { enabled: false },
+    });
+
+    accumulator.enqueue(
+      [{ id: "memory-1", meta: { injected_count: 0, access_count: 0 } }],
+      { injectedAt: 1_000, scopeFilter: ["global"] },
+    );
+    await accumulator.flushNow();
+
+    assert.equal(patches.length, 1);
+    assert.equal(Object.hasOwn(patches[0][0].patch, "utility_score"), false);
+    assert.equal(Object.hasOwn(patches[0][0].patch, "utility_trial_count"), false);
   });
 
   it("does not mark repeated unconfirmed injections as bad recall", async () => {

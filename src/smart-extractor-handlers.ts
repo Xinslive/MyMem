@@ -20,6 +20,7 @@ import {
   updateSupportStats,
 } from "./smart-metadata.js";
 import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
+import { defaultLearningKindPatch } from "./learning-memory.js";
 
 // ============================================================================
 // Context
@@ -146,6 +147,7 @@ export async function storeCandidate(
         injected_count: 0,
         bad_recall_count: 0,
         suppressed_until_turn: 0,
+        ...defaultLearningKindPatch(candidate.category),
         memory_temporal_type: classifyTemporal(classifyText),
         valid_until: inferExpiry(classifyText),
       },
@@ -316,6 +318,7 @@ export async function handleMerge(
         l1_overview: merged.overview,
         l2_content: merged.content,
         memory_category: candidate.category,
+        ...defaultLearningKindPatch(candidate.category),
         tier: "working",
         confidence: 0.8,
       }),
@@ -405,6 +408,7 @@ export async function handleSupersede(
           injected_count: 0,
           bad_recall_count: 0,
           suppressed_until_turn: 0,
+          ...defaultLearningKindPatch(candidate.category),
           valid_from: now,
           fact_key: factKey,
           supersedes: matchId,
@@ -503,6 +507,7 @@ export async function handleContextualize(
     injected_count: 0,
     bad_recall_count: 0,
     suppressed_until_turn: 0,
+    ...defaultLearningKindPatch(candidate.category),
     contexts: contextLabel ? [contextLabel] : [],
     relations: [{ type: "contextualizes", targetId: matchId }],
   }, admissionAudit));
@@ -568,6 +573,7 @@ export async function handleContradict(
     injected_count: 0,
     bad_recall_count: 0,
     suppressed_until_turn: 0,
+    ...defaultLearningKindPatch(candidate.category),
     contexts: contextLabel ? [contextLabel] : [],
     relations: [{ type: "contradicts", targetId: matchId }],
   }, admissionAudit));

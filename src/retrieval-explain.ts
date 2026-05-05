@@ -6,7 +6,7 @@ import type {
 } from "./retriever.js";
 import type { RetrievalTrace, RetrievalStageResult } from "./retrieval-trace.js";
 import { filterResultsByMemoryCategory } from "./tools-shared.js";
-import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 
@@ -79,6 +79,8 @@ function stageLabel(name: string): string {
       return "recency scoring";
     case "fallback_scoring":
       return "fallback scoring";
+    case "learning_policy":
+      return "learning policy";
     case "memory_category_filter":
       return "memory category filter";
     default:
@@ -122,7 +124,7 @@ function serializeExplainResults(results: RetrievalResult[]) {
   return results.map((result) => ({
     id: result.entry.id,
     text: redactSecrets(result.entry.text),
-    category: getDisplayCategoryTag(result.entry),
+    category: getSmartDisplayCategoryTag(result.entry),
     rawCategory: result.entry.category,
     scope: result.entry.scope,
     importance: result.entry.importance,
@@ -193,6 +195,9 @@ export function buildRetrievalExplanation(params: {
   } else if (allDropStage?.name === "rerank") {
     reasons.push("Reranking removed all candidates.");
     suggestions.push("Check rerank configuration or try retrieval.rerank=none for comparison.");
+  } else if (allDropStage?.name === "learning_policy") {
+    reasons.push("Learning policy removed all candidates.");
+    suggestions.push("Inspect utility_score and bad_recall_count with mymem_explain_rank.");
   } else if (searchFoundNoCandidates(trace)) {
     reasons.push("Vector/BM25 search found no initial candidates.");
     suggestions.push("Check scope filters, category filters, and whether matching memories exist.");
@@ -256,10 +261,14 @@ export function formatRetrievalExplainText(report: RetrievalExplainReport["detai
 
   lines.push("", `Results (${report.results.length}):`);
   for (const [index, result] of report.results.entries()) {
+    const learning = result.sources.learning;
+    const learningText = learning
+      ? ` learning(u=${learning.utility.toFixed(2)}, explore=${learning.explorationBoost.toFixed(3)}, bad=-${learning.badRecallPenalty.toFixed(3)})`
+      : "";
     lines.push(
       `${index + 1}. [${result.id}] [${result.category}:${result.scope}] ` +
       `${truncateText(normalizeInlineText(result.text), 140)} ` +
-      `(score=${result.score.toFixed(3)})`,
+      `(score=${result.score.toFixed(3)}${learningText})`,
     );
   }
   return lines.join("\n");

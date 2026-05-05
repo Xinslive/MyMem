@@ -34,6 +34,7 @@ export interface MemoryRelation {
 
 export type MemoryState = "pending" | "confirmed" | "archived";
 export type MemoryLayer = "durable" | "working" | "reflection" | "archive";
+export type MemoryKind = "memory" | "scene" | "case" | "pattern" | "skill";
 export type MemorySource =
   | "manual"
   | "auto-capture"
@@ -45,6 +46,7 @@ export interface SmartMemoryMetadata {
   l0_abstract: string;
   l1_overview: string;
   l2_content: string;
+  memory_kind: MemoryKind;
   memory_category: MemoryCategory;
   memory_type: MemoryType;
   tier: MemoryTier;
@@ -68,6 +70,23 @@ export interface SmartMemoryMetadata {
   last_confirmed_use_at?: number;
   bad_recall_count: number;
   suppressed_until_turn: number;
+  utility_score: number;
+  utility_success_count: number;
+  utility_failure_count: number;
+  utility_trial_count: number;
+  last_utility_update_at?: number;
+  scene_id?: string;
+  scene_key?: string;
+  scene_title?: string;
+  scene_member_ids?: string[];
+  scene_summary_version?: number;
+  case_trigger?: string;
+  case_outcome?: string;
+  case_steps?: string[];
+  skill_name?: string;
+  skill_enabled?: boolean;
+  skill_activation_conditions?: string[];
+  skill_source_ids?: string[];
   canonical_id?: string;
   [key: string]: unknown;
 }
@@ -147,6 +166,19 @@ function normalizeLayer(value: unknown): MemoryLayer {
   }
 }
 
+function normalizeMemoryKind(value: unknown): MemoryKind {
+  switch (value) {
+    case "scene":
+    case "case":
+    case "pattern":
+    case "skill":
+    case "memory":
+      return value;
+    default:
+      return "memory";
+  }
+}
+
 function deriveDefaultLayer(
   source: MemorySource,
   memoryCategory: MemoryCategory,
@@ -212,6 +244,20 @@ function normalizeOptionalTimestamp(value: unknown): number | undefined {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n) || n <= 0) return undefined;
   return Math.floor(n);
+}
+
+function normalizeOptionalPositiveInt(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.floor(n);
+}
+
+function normalizeStringArray(value: unknown, maxItems: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+  return strings.length > 0 ? strings.slice(0, maxItems) : undefined;
 }
 
 export function deriveFactKey(
@@ -308,12 +354,18 @@ export function parseSmartMetadata(
   const resolvedMemoryType: MemoryType =
     normalizeMemoryType(parsed.memory_type) ??
     classifyMemoryType(resolvedMemoryCategory, entry.category);
+  const rawMemoryKind = parsed.memory_kind ?? (
+    parsed.scene_id || parsed.scene_key ? "scene" :
+      parsed.skill_name || parsed.skill_enabled === true ? "skill" :
+        undefined
+  );
 
   const normalized: SmartMemoryMetadata = {
     ...parsed,
     l0_abstract: l0,
     l1_overview: normalizeText(parsed.l1_overview, defaultOverview(l0)),
     l2_content: l2,
+    memory_kind: normalizeMemoryKind(rawMemoryKind),
     memory_category: resolvedMemoryCategory,
     memory_type: resolvedMemoryType,
     tier: normalizeTier(parsed.tier),
@@ -348,6 +400,23 @@ export function parseSmartMetadata(
     last_confirmed_use_at: normalizeOptionalTimestamp(parsed.last_confirmed_use_at),
     bad_recall_count: clampCount(parsed.bad_recall_count, 0),
     suppressed_until_turn: clampCount(parsed.suppressed_until_turn, 0),
+    utility_score: clamp01(parsed.utility_score, 0.5),
+    utility_success_count: clampCount(parsed.utility_success_count, 0),
+    utility_failure_count: clampCount(parsed.utility_failure_count, 0),
+    utility_trial_count: clampCount(parsed.utility_trial_count, 0),
+    last_utility_update_at: normalizeOptionalTimestamp(parsed.last_utility_update_at),
+    scene_id: normalizeOptionalString(parsed.scene_id),
+    scene_key: normalizeOptionalString(parsed.scene_key),
+    scene_title: normalizeOptionalString(parsed.scene_title),
+    scene_member_ids: normalizeStringArray(parsed.scene_member_ids, 24),
+    scene_summary_version: normalizeOptionalPositiveInt(parsed.scene_summary_version),
+    case_trigger: normalizeOptionalString(parsed.case_trigger),
+    case_outcome: normalizeOptionalString(parsed.case_outcome),
+    case_steps: normalizeStringArray(parsed.case_steps, 12),
+    skill_name: normalizeOptionalString(parsed.skill_name),
+    skill_enabled: typeof parsed.skill_enabled === "boolean" ? parsed.skill_enabled : undefined,
+    skill_activation_conditions: normalizeStringArray(parsed.skill_activation_conditions, 12),
+    skill_source_ids: normalizeStringArray(parsed.skill_source_ids, 24),
     canonical_id: normalizeOptionalString(parsed.canonical_id),
   };
 
@@ -388,6 +457,7 @@ export function buildSmartMetadata(
     l0_abstract: l0Abstract,
     l1_overview: normalizeText(patch.l1_overview, base.l1_overview),
     l2_content: normalizeText(patch.l2_content, base.l2_content),
+    memory_kind: normalizeMemoryKind(patch.memory_kind ?? base.memory_kind),
     memory_category: nextCategory,
     memory_type: nextMemoryType,
     tier: normalizeTier(patch.tier ?? base.tier),
@@ -443,6 +513,67 @@ export function buildSmartMetadata(
       patch.suppressed_until_turn,
       base.suppressed_until_turn,
     ),
+    utility_score: clamp01(patch.utility_score, base.utility_score),
+    utility_success_count: clampCount(
+      patch.utility_success_count,
+      base.utility_success_count,
+    ),
+    utility_failure_count: clampCount(
+      patch.utility_failure_count,
+      base.utility_failure_count,
+    ),
+    utility_trial_count: clampCount(
+      patch.utility_trial_count,
+      base.utility_trial_count,
+    ),
+    last_utility_update_at:
+      patch.last_utility_update_at === undefined
+        ? base.last_utility_update_at
+        : normalizeOptionalTimestamp(patch.last_utility_update_at),
+    scene_id:
+      patch.scene_id === undefined ? base.scene_id : normalizeOptionalString(patch.scene_id),
+    scene_key:
+      patch.scene_key === undefined ? base.scene_key : normalizeOptionalString(patch.scene_key),
+    scene_title:
+      patch.scene_title === undefined ? base.scene_title : normalizeOptionalString(patch.scene_title),
+    scene_member_ids:
+      patch.scene_member_ids === undefined
+        ? base.scene_member_ids
+        : normalizeStringArray(patch.scene_member_ids, 24),
+    scene_summary_version:
+      patch.scene_summary_version === undefined
+        ? base.scene_summary_version
+        : normalizeOptionalPositiveInt(patch.scene_summary_version),
+    case_trigger:
+      patch.case_trigger === undefined
+        ? base.case_trigger
+        : normalizeOptionalString(patch.case_trigger),
+    case_outcome:
+      patch.case_outcome === undefined
+        ? base.case_outcome
+        : normalizeOptionalString(patch.case_outcome),
+    case_steps:
+      patch.case_steps === undefined
+        ? base.case_steps
+        : normalizeStringArray(patch.case_steps, 12),
+    skill_name:
+      patch.skill_name === undefined
+        ? base.skill_name
+        : normalizeOptionalString(patch.skill_name),
+    skill_enabled:
+      patch.skill_enabled === undefined
+        ? base.skill_enabled
+        : typeof patch.skill_enabled === "boolean"
+          ? patch.skill_enabled
+          : undefined,
+    skill_activation_conditions:
+      patch.skill_activation_conditions === undefined
+        ? base.skill_activation_conditions
+        : normalizeStringArray(patch.skill_activation_conditions, 12),
+    skill_source_ids:
+      patch.skill_source_ids === undefined
+        ? base.skill_source_ids
+        : normalizeStringArray(patch.skill_source_ids, 24),
     canonical_id:
       patch.canonical_id === undefined
         ? base.canonical_id
