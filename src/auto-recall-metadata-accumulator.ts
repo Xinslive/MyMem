@@ -1,6 +1,4 @@
 import type { MetadataPatch } from "./store-types.js";
-import { buildUtilityPatch } from "./learning-memory.js";
-import { parseSmartMetadata } from "./smart-metadata.js";
 import type { LearningMemoryConfig } from "./plugin-types.js";
 
 export const AUTO_RECALL_METADATA_FLUSH_DEBOUNCE_MS = 3_000;
@@ -57,7 +55,6 @@ export class AutoRecallMetadataAccumulator {
   private readonly store: MetadataBatchStore;
   private readonly logger: WarnLogger;
   private readonly debounceMs: number;
-  private readonly learningMemory?: LearningMemoryConfig;
   private readonly pending = new Map<string, PendingAutoRecallPatch>();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,7 +62,6 @@ export class AutoRecallMetadataAccumulator {
     this.store = options.store;
     this.logger = options.logger;
     this.debounceMs = Math.max(0, Math.floor(options.debounceMs ?? AUTO_RECALL_METADATA_FLUSH_DEBOUNCE_MS));
-    this.learningMemory = options.learningMemory;
   }
 
   enqueue(
@@ -131,17 +127,6 @@ export class AutoRecallMetadataAccumulator {
         scopeFilter: cloneScopeFilter(record.scopeFilter),
         patches: [],
       };
-      const utilityPatch = this.learningMemory?.enabled === false
-        ? {}
-        : buildUtilityPatch(
-            parseSmartMetadata(JSON.stringify(record.baseMeta), {
-              text: typeof record.baseMeta.l0_abstract === "string" ? record.baseMeta.l0_abstract : "",
-              metadata: JSON.stringify(record.baseMeta),
-            }),
-            "positive",
-            this.learningMemory,
-            record.lastAccessedAt,
-          );
       group.patches.push({
         id,
         patch: {
@@ -149,7 +134,6 @@ export class AutoRecallMetadataAccumulator {
           last_injected_at: record.lastInjectedAt,
           access_count: record.baseAccessCount + record.accessDelta,
           last_accessed_at: record.lastAccessedAt,
-          ...utilityPatch,
         },
       });
       groups.set(key, group);

@@ -47,6 +47,7 @@ export interface PluginRegistrationContext {
   decayEngine: DecayEngine;
   tierManager: TierManager;
   smartExtractionLlmClient: LlmClient | null;
+  learningMemoryLlmClient?: LlmClient | null;
   resolvedDbPath: string;
 }
 
@@ -80,7 +81,7 @@ async function runGatewayMaintenanceOnce(
   ctx: PluginRegistrationContext,
   deps: GatewayMaintenanceDeps = defaultGatewayMaintenanceDeps,
 ): Promise<void> {
-  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, resolvedDbPath } = ctx;
+  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, learningMemoryLlmClient, resolvedDbPath } = ctx;
   const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
   const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
   const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
@@ -172,7 +173,7 @@ async function runGatewayMaintenanceOnce(
 
   if (runLearning && config.learningMemory?.enabled) {
     learningResult = await deps.runLearningMemoryMaintenance(
-      { store, embedder, llm: smartExtractionLlmClient, logger: api.logger },
+      { store, embedder, llm: learningMemoryLlmClient ?? smartExtractionLlmClient, logger: api.logger },
       config.learningMemory,
     );
     await deps.recordCompactionRun(learningStateFile);

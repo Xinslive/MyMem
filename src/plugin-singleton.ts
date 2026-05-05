@@ -5,7 +5,7 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { ReflectionErrorState } from "./plugin-types.js";
+import type { PluginConfig, ReflectionErrorState } from "./plugin-types.js";
 import { DIAG_BUILD_TAG } from "./plugin-constants.js";
 import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs, pruneMapIfOver } from "./config-utils.js";
 import { getDefaultDbPath, getDefaultWorkspaceDir } from "./path-utils.js";
@@ -61,6 +61,7 @@ export interface PluginSingletonState {
   migrator: ReturnType<typeof createMigrator>;
   smartExtractor: SmartExtractor | null;
   smartExtractionLlmClient: LlmClient | null;
+  learningMemoryLlmClient: LlmClient | null;
   extractionRateLimiter: ReturnType<typeof createExtractionRateLimiter>;
   feedbackLoop: FeedbackLoop | null;
   telemetryStore: TelemetryStore | null;
@@ -91,6 +92,19 @@ export function setSingletonState(state: PluginSingletonState | null): void {
 /** Test-only: reset singleton state so each test gets a fresh init. */
 export function __resetSingletonForTesting__(): void {
   _singletonState = null;
+}
+
+function resolveLearningLlmModel(
+  llmConfig: PluginConfig["llm"],
+  quality: "low" | "medium" | "high" | undefined,
+  fallbackModel: string,
+): string {
+  if (quality === "low" && llmConfig?.lowModel) return llmConfig.lowModel;
+  if (quality === "medium" && llmConfig?.mediumModel) return llmConfig.mediumModel;
+  if (quality === "high" && llmConfig?.highModel) return llmConfig.highModel;
+  if (quality === "low") return llmConfig?.mediumModel || llmConfig?.model || fallbackModel;
+  if (quality === "medium") return llmConfig?.mediumModel || llmConfig?.model || fallbackModel;
+  return llmConfig?.highModel || llmConfig?.model || fallbackModel;
 }
 
 // ── Initialization ─────────────────────────────────────────────────────
@@ -186,6 +200,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
   let smartExtractor: SmartExtractor | null = null;
   let smartExtractionLlmClient: LlmClient | null = null;
+  let learningMemoryLlmClient: LlmClient | null = null;
   let feedbackLoop: FeedbackLoop | null = null;
   if (config.smartExtraction !== false) {
     try {
@@ -206,6 +221,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         : undefined;
       const llmOauthProvider = llmAuth === "oauth" ? config.llm?.oauthProvider : undefined;
       const llmTimeoutMs = resolveLlmTimeoutMs(config);
+      const learningLlmModel = resolveLearningLlmModel(
+        config.llm,
+        config.learningMemory?.llmQuality,
+        llmModel,
+      );
 
       const llmClient = createLlmClient({
         auth: llmAuth,
@@ -219,6 +239,19 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         warnLog: (msg: string) => api.logger.warn(msg),
       });
       smartExtractionLlmClient = llmClient;
+      learningMemoryLlmClient = learningLlmModel === llmModel
+        ? llmClient
+        : createLlmClient({
+            auth: llmAuth,
+            apiKey: llmApiKey,
+            model: learningLlmModel,
+            baseURL: llmBaseURL,
+            oauthProvider: llmOauthProvider,
+            oauthPath: llmOauthPath,
+            timeoutMs: Math.max(llmTimeoutMs, config.learningMemory?.llmQuality === "high" ? 120_000 : llmTimeoutMs),
+            log: (msg: string) => api.logger.debug(msg),
+            warnLog: (msg: string) => api.logger.warn(msg),
+          });
 
       const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(config, resolvedDbPath, api);
 
@@ -253,6 +286,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       (isCliMode() ? api.logger.debug : api.logger.info)(
         "mymem: smart extraction enabled (LLM model: "
         + llmModel
+        + ", learningModel: "
+        + learningLlmModel
         + ", timeoutMs: "
         + llmTimeoutMs
         + ")",
@@ -359,6 +394,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     migrator,
     smartExtractor,
     smartExtractionLlmClient,
+    learningMemoryLlmClient,
     extractionRateLimiter,
     feedbackLoop,
     telemetryStore,

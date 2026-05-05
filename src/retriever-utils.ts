@@ -139,20 +139,20 @@ export function buildDropSummary(
     },
     {
       order: 9,
-      stage: "learningPolicy" as const,
+      stage: "diversity" as const,
       before: diagnostics.stageCounts.afterTimeDecay,
-      after: diagnostics.stageCounts.afterLearningPolicy,
+      after: diagnostics.stageCounts.afterDiversity,
     },
     {
       order: 10,
-      stage: "diversity" as const,
-      before: diagnostics.stageCounts.afterLearningPolicy,
-      after: diagnostics.stageCounts.afterDiversity,
+      stage: "learningPolicy" as const,
+      before: diagnostics.stageCounts.afterDiversity,
+      after: diagnostics.stageCounts.afterLearningPolicy,
     },
     {
       order: 11,
       stage: "limit" as const,
-      before: diagnostics.stageCounts.afterDiversity,
+      before: diagnostics.stageCounts.afterLearningPolicy,
       after: diagnostics.finalResultCount,
     },
   ];

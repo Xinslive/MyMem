@@ -111,6 +111,7 @@ const myMemPlugin = {
       migrator,
       smartExtractor,
       smartExtractionLlmClient,
+      learningMemoryLlmClient,
       decayEngine,
       tierManager,
       extractionRateLimiter,
@@ -276,6 +277,7 @@ const myMemPlugin = {
       decayEngine,
       tierManager,
       smartExtractionLlmClient,
+      learningMemoryLlmClient,
       resolvedDbPath,
     });
 

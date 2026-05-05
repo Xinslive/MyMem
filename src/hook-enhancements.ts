@@ -28,7 +28,7 @@ import {
   buildRecallSuppressionPatch,
   isRecallSuppressedForSession,
 } from "./recall-suppression.js";
-import { buildUtilityPatch } from "./learning-memory.js";
+import { buildPositiveUtilityMetadataPatch, buildUtilityPatch } from "./learning-memory.js";
 
 const MAX_TRACKED_SESSIONS = 200;
 const DEFAULT_CONTEXT_BUDGET_CHARS = 3_200;
@@ -65,6 +65,13 @@ type SessionState = {
   lastTouchedFiles: string[];
   lastPromptAt?: number;
   turnCount: number;
+};
+
+type StoreWithBatchMetadata = MemoryStore & {
+  patchMetadataBatch(
+    patches: Array<{ id: string; patch: Record<string, unknown> }>,
+    scopeFilter?: string[],
+  ): Promise<number>;
 };
 
 export type HookEnhancementState = {
@@ -212,6 +219,49 @@ function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boo
   // Raised absolute threshold from 3 → 4 to reduce false positives
   // on short Chinese messages where a few shared character-pairs are coincidental.
   return overlap / Math.max(userTokens.size, 1) < 0.08 && overlap < 4;
+}
+
+function hasInjectedMemoryUseSignal(text: string, injectedTexts: string[]): boolean {
+  if (!text.trim() || injectedTexts.length === 0) return false;
+  const tokenize = (s: string) => {
+    const words = s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").split(/\s+/).filter((w) => w.length >= 3);
+    return new Set(words);
+  };
+  const textTokens = tokenize(text);
+  if (textTokens.size === 0) return false;
+  return injectedTexts.some((memoryText) => {
+    const memoryTokens = tokenize(memoryText);
+    if (memoryTokens.size === 0) return false;
+    let overlap = 0;
+    for (const token of memoryTokens) {
+      if (textTokens.has(token)) overlap++;
+    }
+    return overlap >= 3 || overlap / Math.max(memoryTokens.size, 1) >= 0.22;
+  });
+}
+
+async function patchConfirmedInjectedUse(params: {
+  store: StoreWithBatchMetadata;
+  injected: InjectedMemory[];
+  scopeFilter?: string[];
+  text: string;
+  learningMemory?: PluginConfig["learningMemory"];
+}): Promise<void> {
+  const recent = params.injected.filter((item) => Date.now() - item.injectedAt < 300_000).slice(-8);
+  if (!hasInjectedMemoryUseSignal(params.text, recent.map((item) => item.text))) return;
+  const entries = await Promise.all(recent.map((item) => params.store.getById(item.id, params.scopeFilter).catch(() => null)));
+  const now = Date.now();
+  const patches = entries.flatMap((entry) => {
+    if (!entry) return [];
+    const meta = parseSmartMetadata(entry.metadata, entry);
+    return [{
+      id: entry.id,
+      patch: buildPositiveUtilityMetadataPatch(meta, params.learningMemory, now),
+    }];
+  });
+  if (patches.length > 0) {
+    await params.store.patchMetadataBatch(patches, params.scopeFilter);
+  }
 }
 
 function extractCorrection(text: string): { oldText: string; newText: string } | null {
@@ -383,6 +433,7 @@ async function patchBadRecall(params: {
   currentTurn?: number;
   suppressTurns?: number;
 }): Promise<void> {
+  const patches: Array<{ id: string; patch: Record<string, unknown> }> = [];
   await Promise.allSettled(params.injected.slice(-8).map(async (item) => {
     const entry = await params.store.getById(item.id, params.scopeFilter);
     if (!entry) return;
@@ -396,14 +447,20 @@ async function patchBadRecall(params: {
           suppressTurns: params.suppressTurns ?? 12,
         })
       : {};
-    await params.store.patchMetadata(item.id, {
-      bad_recall_count: badRecallCount,
-      ...suppressionPatch,
-      ...buildUtilityPatch(meta, "negative"),
-      last_bad_recall_at: Date.now(),
-      last_bad_recall_reason: params.reason,
-    }, params.scopeFilter);
+    patches.push({
+      id: item.id,
+      patch: {
+        bad_recall_count: badRecallCount,
+        ...suppressionPatch,
+        ...buildUtilityPatch(meta, "negative"),
+        last_bad_recall_at: Date.now(),
+        last_bad_recall_reason: params.reason,
+      },
+    });
   }));
+  if (patches.length > 0) {
+    await params.store.patchMetadataBatch(patches, params.scopeFilter);
+  }
 }
 
 async function applySelfCorrectionRule(params: {
@@ -533,6 +590,7 @@ export function registerHookEnhancements(params: {
   isCliMode?: () => boolean;
 }): HookEnhancementState {
   const { api, config, store, embedder, scopeManager, feedbackLoop } = params;
+  const batchStore = store as StoreWithBatchMetadata;
   const reflectionStore = params.reflectionStore ?? store;
   const state = params.state ?? createHookEnhancementState();
 
@@ -581,7 +639,7 @@ export function registerHookEnhancements(params: {
         if (toSuppress.length > 0) {
           try {
             await patchBadRecall({
-              store,
+              store: batchStore,
               injected: toSuppress,
               scopeFilter,
               reason: "recall_ignored",
@@ -722,12 +780,20 @@ export function registerHookEnhancements(params: {
           const recentInjected = session.injected.filter((m) => Date.now() - m.injectedAt < 300_000);
           if (recentInjected.length > 0 && hasNegativeRecallSignal(userText)) {
             await patchBadRecall({
-              store,
+              store: batchStore,
               injected: recentInjected,
               scopeFilter,
               reason: "negative_recall_signal",
               currentTurn: session.turnCount,
               suppressTurns: getSelfCorrectionLoopConfig(config).suppressTurns,
+            });
+          } else if (recentInjected.length > 0) {
+            await patchConfirmedInjectedUse({
+              store: batchStore,
+              injected: recentInjected,
+              scopeFilter,
+              text,
+              learningMemory: config.learningMemory,
             });
           }
         }
@@ -781,10 +847,16 @@ export function registerHookEnhancements(params: {
         }
 
         if (enhancementEnabled(config, "workspaceDrift") && session.lastTouchedFiles.length > 0 && session.injected.length > 0) {
-          await Promise.allSettled(session.injected.slice(-8).map((item) => store.patchMetadata(item.id, {
-            workspace_files: session.lastTouchedFiles.slice(-8),
-            workspace_drift_updated_at: Date.now(),
-          }, scopeFilter)));
+          await batchStore.patchMetadataBatch(
+            session.injected.slice(-8).map((item) => ({
+              id: item.id,
+              patch: {
+                workspace_files: session.lastTouchedFiles.slice(-8),
+                workspace_drift_updated_at: Date.now(),
+              },
+            })),
+            scopeFilter,
+          );
         }
 
         await feedbackLoop?.drainPreventiveLessonBuffer();

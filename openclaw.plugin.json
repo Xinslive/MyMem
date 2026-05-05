@@ -1008,6 +1008,15 @@
           "model": {
             "type": "string"
           },
+          "lowModel": {
+            "type": "string"
+          },
+          "mediumModel": {
+            "type": "string"
+          },
+          "highModel": {
+            "type": "string"
+          },
           "baseURL": {
             "type": "string"
           },
@@ -1517,6 +1526,21 @@
       "label": "LLM Model",
       "placeholder": "openai/gpt-oss-120b",
       "help": "OpenAI-compatible chat model for memory extraction/summary"
+    },
+    "llm.lowModel": {
+      "label": "Low Quality LLM Model",
+      "help": "Optional model override used when learningMemory.llmQuality is low.",
+      "advanced": true
+    },
+    "llm.mediumModel": {
+      "label": "Medium Quality LLM Model",
+      "help": "Optional model override used when learningMemory.llmQuality is medium.",
+      "advanced": true
+    },
+    "llm.highModel": {
+      "label": "High Quality LLM Model",
+      "help": "Optional model override used when learningMemory.llmQuality is high.",
+      "advanced": true
     },
     "llm.baseURL": {
       "label": "LLM Base URL",

@@ -23,7 +23,7 @@ import { parseSmartMetadata } from "./smart-metadata.js";
 import type { MemoryType } from "./memory-categories.js";
 import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
-import { buildUtilityPatch } from "./learning-memory.js";
+import { buildPositiveUtilityMetadataPatch } from "./learning-memory.js";
 
 export function registerMemoryRecallTool(
   api: OpenClawPluginApi,
@@ -146,22 +146,20 @@ export function registerMemoryRecallTool(
           }
 
           const now = Date.now();
-          await Promise.allSettled(
+          const learningMemory = runtimeContext.retriever.getConfig().learningMemory;
+          await runtimeContext.store.patchMetadataBatch(
             results.map((result) => {
               const meta = parseSmartMetadata(result.entry.metadata, result.entry);
-              return runtimeContext.store.patchMetadata(
-                result.entry.id,
-                {
+              return {
+                id: result.entry.id,
+                patch: {
                   access_count: meta.access_count + 1,
                   last_accessed_at: now,
-                  last_confirmed_use_at: now,
-                  bad_recall_count: 0,
-                  suppressed_until_turn: 0,
-                  ...buildUtilityPatch(meta, "positive", runtimeContext.retriever.getConfig().learningMemory, now),
+                  ...buildPositiveUtilityMetadataPatch(meta, learningMemory, now),
                 },
-                scopeFilter,
-              );
+              };
             }),
+            scopeFilter,
           );
 
           const text = results

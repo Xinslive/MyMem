@@ -428,25 +428,25 @@ export class MemoryRetriever {
     }
     if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
 
-    // 7. Learned utility / exploration policy
-    if (trace) trace.startStage("learning_policy", lifecycleRanked.map((r) => r.entry.id));
-    const learningRanked = applyLearningPolicy(lifecycleRanked, this.config.learningMemory);
+    // 7. MMR diversity runs before learning policy so learned utility can
+    // adjust the diversified candidate set without changing the diversity pass.
+    if (trace) trace.startStage("mmr_diversity", lifecycleRanked.map((r) => r.entry.id));
+    lifecycleRanked.sort((a, b) => b.score - a.score);
+    const deduplicated = applyMMRDiversity(lifecycleRanked);
+    if (trace) trace.endStage(deduplicated.map((r) => r.entry.id), deduplicated.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
+
+    // 8. Learned utility / exploration policy
+    if (trace) trace.startStage("learning_policy", deduplicated.map((r) => r.entry.id));
+    const learningRanked = applyLearningPolicy(deduplicated, this.config.learningMemory);
     if (trace) trace.endStage(learningRanked.map((r) => r.entry.id), learningRanked.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterLearningPolicy = learningRanked.length;
-
-    // 8. Sort once after all scoring
-    if (trace) trace.startStage("mmr_diversity", learningRanked.map((r) => r.entry.id));
-    learningRanked.sort((a, b) => b.score - a.score);
-    const deduplicated = applyMMRDiversity(learningRanked);
-    const finalResults = deduplicated.slice(0, limit);
+    const finalResults = learningRanked.slice(0, limit);
 
     // 9. Confidence scores
     for (const result of finalResults) {
       result.confidence = this.computeConfidence(result);
     }
-
-    if (trace) trace.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
 
     return finalResults;
   }

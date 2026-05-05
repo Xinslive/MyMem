@@ -15,8 +15,11 @@ const jiti = jitiFactory(import.meta.url, {
 
 const {
   applyLearningPolicy,
+  buildUtilitySmoothingPatch,
   buildUtilityPatch,
   formatLearnedSkillLine,
+  formatSceneExpandedLine,
+  pickHighValueSceneMembers,
   runLearningMemoryMaintenance,
 } = jiti("../src/learning-memory.ts");
 const {
@@ -112,6 +115,22 @@ describe("learning policy", () => {
     assert.equal(negative.utility_failure_count, 1);
     assert.equal(negative.last_utility_update_at, 456);
   });
+
+  it("builds smoothing patches from accumulated success and failure counts", () => {
+    const meta = parseSmartMetadata(JSON.stringify({
+      utility_score: 0.9,
+      utility_success_count: 1,
+      utility_failure_count: 3,
+      utility_trial_count: 4,
+    }), { text: "memory", category: "other", timestamp: 1 });
+    const patch = buildUtilitySmoothingPatch(meta, {
+      enabled: true,
+      utilityLearning: { enabled: true, smoothing: 0.5 },
+    }, 789);
+    assert.equal(patch.utility_score, 0.575);
+    assert.equal(patch.utility_trial_count, 4);
+    assert.equal(patch.last_utility_update_at, 789);
+  });
 });
 
 describe("learned skills and maintenance", () => {
@@ -128,6 +147,45 @@ describe("learned skills and maintenance", () => {
     assert.match(line, /\[skill:global\]/);
     assert.match(line, /Verify generated files/);
     assert.match(line, /inspect path/);
+  });
+
+  it("expands scene memories with high-value member memories", () => {
+    const sceneMeta = buildSmartMetadata({ text: "scene", category: "other", timestamp: 1 }, {
+      memory_kind: "scene",
+      scene_title: "Verification scene",
+      scene_member_ids: ["low", "high", "archived"],
+      memory_category: "patterns",
+      l1_overview: "Repeated verification work",
+    });
+    const high = entry("high", "Always verify generated file paths", {
+      l0_abstract: "Verify generated file paths",
+      utility_score: 0.9,
+      state: "confirmed",
+      memory_layer: "working",
+    });
+    const low = entry("low", "Mentioned a file path once", {
+      l0_abstract: "Mentioned a file path once",
+      utility_score: 0.2,
+      state: "confirmed",
+      memory_layer: "working",
+    });
+    const archived = entry("archived", "Old archived detail", {
+      l0_abstract: "Old archived detail",
+      utility_score: 1,
+      state: "archived",
+      memory_layer: "archive",
+    });
+    const members = pickHighValueSceneMembers(
+      parseSmartMetadata(stringifySmartMetadata(sceneMeta), { text: "scene", category: "other", timestamp: 1 }),
+      new Map([[high.id, high], [low.id, low], [archived.id, archived]]),
+      2,
+    );
+
+    assert.deepEqual(members.map((member) => member.id), ["high", "low"]);
+    const line = formatSceneExpandedLine(entry("scene", "scene", sceneMeta), members, 500);
+    assert.match(line, /\[scene:global\]/);
+    assert.match(line, /member: Verify generated file paths/);
+    assert.doesNotMatch(line, /Old archived detail/);
   });
 
   it("creates scene and skill memories from existing cases", async () => {
@@ -180,10 +238,116 @@ describe("learned skills and maintenance", () => {
     assert.equal(result.scanned, 2);
     assert.equal(result.scenesCreated, 1);
     assert.equal(result.skillsCreated, 1);
-    assert.equal(stored.length, 2);
+    assert.equal(result.patternsCreated, 1);
+    assert.equal(stored.length, 3);
     const metas = stored.map((memory) => parseSmartMetadata(memory.metadata, memory));
     assert.ok(metas.some((meta) => meta.memory_kind === "scene"));
+    assert.ok(metas.some((meta) => meta.memory_kind === "pattern"));
     assert.ok(metas.some((meta) => meta.memory_kind === "skill" && meta.skill_enabled === true));
     assert.equal(updated.length, 0);
+  });
+
+  it("creates independent patterns even when auto skills are disabled", async () => {
+    const stored = [];
+    const rows = [
+      entry("case-1", "Case: deploy rollback required dry run", {
+        memory_kind: "case",
+        memory_category: "cases",
+        l0_abstract: "Deploy rollback required dry run",
+        state: "confirmed",
+        memory_layer: "working",
+      }),
+      entry("case-2", "Case: deploy rollback should verify dry run first", {
+        memory_kind: "case",
+        memory_category: "cases",
+        l0_abstract: "Deploy rollback should verify dry run first",
+        state: "confirmed",
+        memory_layer: "working",
+      }),
+    ];
+    const result = await runLearningMemoryMaintenance({
+      store: {
+        async list() { return rows; },
+        async store(memory) {
+          stored.push(memory);
+          return { ...memory, id: `stored-${stored.length}`, timestamp: Date.now() };
+        },
+        async update() { return null; },
+      },
+      embedder: { async embedPassage() { return [0.1, 0.2, 0.3]; } },
+      llm: null,
+      logger: { info() {}, warn() {}, debug() {} },
+    }, {
+      enabled: true,
+      sceneMemory: { enabled: false },
+      casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 1 },
+      autoSkills: { enabled: false },
+    });
+
+    assert.equal(result.patternsCreated, 1);
+    assert.equal(result.skillsCreated, 0);
+    assert.equal(stored.length, 1);
+    assert.equal(parseSmartMetadata(stored[0].metadata, stored[0]).memory_kind, "pattern");
+  });
+
+  it("uses LLM multi-axis scene clustering when available", async () => {
+    const stored = [];
+    const rows = [
+      entry("a", "Project Atlas deploy workflow failed in April", {
+        memory_kind: "case",
+        memory_category: "cases",
+        l0_abstract: "Project Atlas deploy workflow failed in April",
+        state: "confirmed",
+        memory_layer: "working",
+      }),
+      entry("b", "Project Atlas deploy workflow needs rollback checklist", {
+        memory_kind: "case",
+        memory_category: "cases",
+        l0_abstract: "Project Atlas deploy workflow needs rollback checklist",
+        state: "confirmed",
+        memory_layer: "working",
+      }),
+    ];
+    const llm = {
+      async completeJson(_prompt, label) {
+        if (label === "learning-memory-scene-cluster") {
+          return {
+            scenes: [{
+              key: "project-atlas-deploy-april",
+              title: "Atlas deploy workflow",
+              summary: "- Deployment and rollback checklist for Atlas",
+              member_ids: ["a", "b"],
+            }],
+          };
+        }
+        return null;
+      },
+      getLastError() { return null; },
+    };
+
+    const result = await runLearningMemoryMaintenance({
+      store: {
+        async list() { return rows; },
+        async store(memory) {
+          stored.push(memory);
+          return { ...memory, id: `stored-${stored.length}`, timestamp: Date.now() };
+        },
+        async update() { return null; },
+      },
+      embedder: { async embedPassage() { return [0.1, 0.2, 0.3]; } },
+      llm,
+      logger: { info() {}, warn() {}, debug() {} },
+    }, {
+      enabled: true,
+      sceneMemory: { enabled: true, maxScenesPerRun: 1, maxSceneMembers: 4 },
+      casePatternDistillation: { enabled: false },
+    });
+
+    assert.equal(result.scenesCreated, 1);
+    const scene = stored.find((memory) => parseSmartMetadata(memory.metadata, memory).memory_kind === "scene");
+    assert.ok(scene);
+    const meta = parseSmartMetadata(scene.metadata, scene);
+    assert.equal(meta.scene_title, "Atlas deploy workflow");
+    assert.deepEqual(meta.scene_member_ids, ["a", "b"]);
   });
 });

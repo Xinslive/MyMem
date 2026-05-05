@@ -27,7 +27,7 @@ import {
 import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { explainMemoryRetrieval } from "./retrieval-explain.js";
 import type { StoreIndexStatus } from "./store.js";
-import { buildUtilityPatch } from "./learning-memory.js";
+import { buildPositiveUtilityMetadataPatch } from "./learning-memory.js";
 
 type StoreWithOptionalIndexStatus = ToolContext["store"] & {
   getIndexStatus?: () => Promise<StoreIndexStatus>;
@@ -660,7 +660,7 @@ export function registerMemoryPromoteTool(
               last_confirmed_use_at: state === "confirmed" ? now : undefined,
               bad_recall_count: 0,
               suppressed_until_turn: 0,
-              ...buildUtilityPatch(parseSmartMetadata(before.metadata, before), "positive", runtimeContext.retriever.getConfig().learningMemory, now),
+              ...buildPositiveUtilityMetadataPatch(parseSmartMetadata(before.metadata, before), runtimeContext.retriever.getConfig().learningMemory, now),
             },
             scopeFilter,
           );
@@ -831,20 +831,20 @@ export function registerMemoryCompactTool(
 
           let archivedCount = 0;
           if (!dryRun) {
-            for (const item of duplicates) {
-              await runtimeContext.store.patchMetadata(
-                item.duplicateId,
-                {
+            const now = Date.now();
+            archivedCount = await runtimeContext.store.patchMetadataBatch(
+              duplicates.map((item) => ({
+                id: item.duplicateId,
+                patch: {
                   state: "archived",
                   memory_layer: "archive",
                   canonical_id: item.canonicalId,
                   archive_reason: "compact_duplicate",
-                  archived_at: Date.now(),
+                  archived_at: now,
                 },
-                scopeFilter,
-              );
-              archivedCount++;
-            }
+              })),
+              scopeFilter,
+            );
           }
 
           return {

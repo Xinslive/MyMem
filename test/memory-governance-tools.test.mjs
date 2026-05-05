@@ -74,6 +74,10 @@ describe("memory governance tools", () => {
           patchCalls.push({ id, patch });
           return entries.find((e) => e.id === id) ?? null;
         },
+        async patchMetadataBatch(batch) {
+          for (const { id, patch } of batch) patchCalls.push({ id, patch });
+          return batch.length;
+        },
         async getById(id) {
           return entries.find((e) => e.id === id) ?? null;
         },
@@ -97,6 +101,7 @@ describe("memory governance tools", () => {
     assert.equal(patchCalls.length, 2);
     assert.equal(patchCalls[0].patch.state, "confirmed");
     assert.equal(patchCalls[0].patch.memory_layer, "durable");
+    assert.ok(patchCalls[0].patch.utility_score > 0.5);
     assert.equal(patchCalls[1].patch.state, "archived");
     assert.equal(patchCalls[1].patch.memory_layer, "archive");
   });

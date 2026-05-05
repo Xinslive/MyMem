@@ -116,6 +116,16 @@ function createStore({ searchResults = [], byId = {}, reflectionEntries = [] } =
       }
       return entry || null;
     },
+    async patchMetadataBatch(batch) {
+      for (const { id, patch } of batch) {
+        patches.push({ id, patch });
+        const entry = byId[id];
+        if (entry) {
+          entry.metadata = JSON.stringify({ ...JSON.parse(entry.metadata), ...patch });
+        }
+      }
+      return batch.length;
+    },
     async update(id, patch) {
       updated.push({ id, patch });
       const entry = byId[id];

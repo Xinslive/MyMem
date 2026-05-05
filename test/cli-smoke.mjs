@@ -395,6 +395,7 @@ async function runCliSmoke() {
     },
     store: {
       async patchMetadata() {},
+      async patchMetadataBatch(batch) { return batch.length; },
       async count() { return 1; },
     },
     scopeManager: {

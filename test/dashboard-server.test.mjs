@@ -66,6 +66,11 @@ function createContext() {
       access_count: 3,
       memory_layer: "durable",
       source: "manual",
+      memory_kind: "memory",
+      utility_score: 0.67,
+      utility_success_count: 2,
+      utility_failure_count: 1,
+      utility_trial_count: 3,
     }),
   };
   const lowConfidenceEntry = {
@@ -259,6 +264,13 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(memories.body.memories[0].categoryLabel, "用户偏好");
     assert.equal(memories.body.memories[0].scopeLabel, "全局");
     assert.equal(memories.body.memories[0].details.l0, "The user likes clear dashboards.");
+    assert.deepEqual(memories.body.memories[0].learning, {
+      kind: "memory",
+      utilityScore: 0.67,
+      utilitySuccessCount: 2,
+      utilityFailureCount: 1,
+      utilityTrialCount: 3,
+    });
 
     const profileMemories = await requestJson(server.url + "/api/memories?category=profile&limit=10");
     assert.equal(profileMemories.statusCode, 200);

@@ -203,11 +203,6 @@ describe("auto-recall metadata write-behind", () => {
         last_injected_at: 1_500,
         access_count: 7,
         last_accessed_at: 1_500,
-        utility_score: 0.655,
-        utility_success_count: 1,
-        utility_failure_count: 0,
-        utility_trial_count: 1,
-        last_utility_update_at: 1_500,
       },
     }]);
   });
@@ -1179,6 +1174,99 @@ describe("real before_prompt_build hook", () => {
       );
 
       assert.match(output.prependContext, /legacy turn-only suppression should not hide this memory/);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps legacy injection shape when learning memory is disabled", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-learning-disabled-"));
+    const memoryResult = {
+      entry: {
+        id: "plain-memory-1",
+        text: "plain memory should inject without scene expansion",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          l0_abstract: "plain memory should inject without scene expansion",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          injected_count: 0,
+          bad_recall_count: 0,
+          suppressed_until_turn: 0,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+    const patches = [];
+    const store = {
+      async patchMetadataBatch(batch) {
+        patches.push(batch);
+        return batch.length;
+      },
+    };
+    const retriever = {
+      async retrieve() {
+        return [memoryResult];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        learningMemory: { enabled: false },
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store,
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: autoRecallHook }] = hooks;
+      const output = await autoRecallHook(
+        { prompt: "Please recall the plain memory.", sessionKey: "agent:main:session:learning-disabled" },
+        { sessionKey: "agent:main:session:learning-disabled", agentId: "main" },
+      );
+      const [{ handler: sessionEndHook }] = harness.eventHandlers.get("session_end") || [];
+      await sessionEndHook(
+        { sessionKey: "agent:main:session:learning-disabled" },
+        { sessionKey: "agent:main:session:learning-disabled" },
+      );
+
+      assert.ok(output?.prependContext?.includes("<relevant-memories>"));
+      assert.match(output.prependContext, /\[W\]\[cases:global\]/);
+      assert.doesNotMatch(output.prependContext, /member:/);
+      assert.ok(patches.flat().every(({ patch }) => !Object.hasOwn(patch, "utility_score")));
     } finally {
       rmSync(workspaceDir, { recursive: true, force: true });
     }

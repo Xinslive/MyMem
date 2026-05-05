@@ -292,6 +292,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         ...raw,
         auth: raw.auth === "oauth" ? "oauth" : "api-key",
         model: typeof raw.model === "string" ? raw.model.trim() : undefined,
+        lowModel: typeof raw.lowModel === "string" ? raw.lowModel.trim() : undefined,
+        mediumModel: typeof raw.mediumModel === "string" ? raw.mediumModel.trim() : undefined,
+        highModel: typeof raw.highModel === "string" ? raw.highModel.trim() : undefined,
         baseURL: typeof raw.baseURL === "string" ? resolveEnvVars(raw.baseURL.trim()) : undefined,
         timeoutMs: parsePositiveInt(raw.timeoutMs) ?? 90000,
       } as PluginConfig["llm"];

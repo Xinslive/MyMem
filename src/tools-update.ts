@@ -32,6 +32,7 @@ import {
   type MemoryCategory,
 } from "./memory-categories.js";
 import { mapToStoreCategory } from "./smart-extractor-handlers.js";
+import { buildPositiveUtilityMetadataPatch } from "./learning-memory.js";
 
 export function registerMemoryUpdateTool(
   api: OpenClawPluginApi,
@@ -167,6 +168,7 @@ export function registerMemoryUpdateTool(
               details: { error: "invalid_category", category },
             };
           }
+          const learningMemory = runtimeContext.retriever.getConfig().learningMemory;
 
           // --- Temporal supersede guard ---
           // For temporal-versioned categories (preferences/entities), changing
@@ -263,6 +265,7 @@ export function registerMemoryUpdateTool(
 
           // Rebuild smart metadata when text, importance, or memory category changes (#544)
           if ((text || requestedMemoryCategory) && existing) {
+            const now = Date.now();
             const meta = parseSmartMetadata(existing.metadata, existing);
             const effectiveCategory: MemoryCategory = requestedMemoryCategory ?? meta.memory_category;
             const updatedMeta = buildSmartMetadata(existing, {
@@ -280,6 +283,7 @@ export function registerMemoryUpdateTool(
                 importance !== undefined
                   ? clamp01(importance, 0.7)
                   : meta.confidence,
+              ...buildPositiveUtilityMetadataPatch(meta, learningMemory, now),
             });
             // Re-derive valid_until from the new text. Explicit override
             // (not via patch.valid_until) so the absence of a new expiry
@@ -288,8 +292,11 @@ export function registerMemoryUpdateTool(
             updates.metadata = stringifySmartMetadata(updatedMeta);
           } else if (importance !== undefined && existing) {
             // Sync confidence for importance-only changes
+            const now = Date.now();
+            const meta = parseSmartMetadata(existing.metadata, existing);
             const updatedMeta = buildSmartMetadata(existing, {
               confidence: clamp01(importance, 0.7),
+              ...buildPositiveUtilityMetadataPatch(meta, learningMemory, now),
             });
             updates.metadata = stringifySmartMetadata(updatedMeta);
           }

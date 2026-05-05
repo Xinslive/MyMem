@@ -146,6 +146,9 @@ export interface PluginConfig {
     auth?: "api-key" | "oauth";
     apiKey?: string;
     model?: string;
+    lowModel?: string;
+    mediumModel?: string;
+    highModel?: string;
     baseURL?: string;
     oauthProvider?: string;
     oauthPath?: string;

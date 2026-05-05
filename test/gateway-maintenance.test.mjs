@@ -64,7 +64,7 @@ describe("gateway maintenance", () => {
       recordLifecycleMaintenanceRun: async () => {
         calls.push({ type: "record-lifecycle" });
       },
-      shouldRunCompaction: async () => true,
+      shouldRunCompaction: async (stateFile) => !stateFile.includes(".learning-memory-state.json"),
       runCompaction: async () => {
         calls.push({ type: "compaction" });
         return {
@@ -78,6 +78,7 @@ describe("gateway maintenance", () => {
         };
       },
       recordCompactionRun: async () => {},
+      runLearningMemoryMaintenance: async () => null,
     };
 
     await __test__.runGatewayMaintenanceOnce(ctx, deps);
@@ -92,5 +93,66 @@ describe("gateway maintenance", () => {
     assert.doesNotMatch(infoLogs[0], /lifecycleScanned=14\b/);
     assert.match(infoLogs[0], /deleted=7\b/);
     assert.match(infoLogs[0], /promoted=3 demoted=4\b/);
+  });
+
+  it("passes the quality-specific learning LLM to learning maintenance", async () => {
+    const learningLlm = { completeJson: async () => null, getLastError: () => null };
+    const smartLlm = { completeJson: async () => null, getLastError: () => null };
+    let seenLlm = null;
+    const ctx = {
+      api: {
+        logger: {
+          info() {},
+          warn() {},
+          debug() {},
+        },
+      },
+      config: {
+        learningMemory: {
+          enabled: true,
+          cooldownHours: 4,
+          llmQuality: "high",
+        },
+      },
+      store: {
+        getById: async () => null,
+        update: async () => {},
+      },
+      embedder: {},
+      decayEngine: {},
+      tierManager: {},
+      smartExtractionLlmClient: smartLlm,
+      learningMemoryLlmClient: learningLlm,
+      resolvedDbPath: path.join(tmpdir(), "mymem-gateway-maintenance-learning", "db"),
+    };
+    const deps = {
+      shouldRunPreferenceDistiller: async () => false,
+      runPreferenceDistiller: async () => ({ created: 0, updated: 0 }),
+      recordPreferenceDistillerRun: async () => {},
+      shouldRunLifecycleMaintenance: async () => false,
+      runLifecycleMaintenance: async () => null,
+      recordLifecycleMaintenanceRun: async () => {},
+      shouldRunCompaction: async (stateFile) => stateFile.includes(".learning-memory-state.json"),
+      runCompaction: async () => null,
+      recordCompactionRun: async () => {},
+      runLearningMemoryMaintenance: async (depsArg) => {
+        seenLlm = depsArg.llm;
+        return {
+          scanned: 0,
+          scenesCreated: 0,
+          scenesUpdated: 0,
+          patternsCreated: 0,
+          skillsCreated: 0,
+          utilitySmoothed: 0,
+          skipped: 0,
+          llmRefined: 0,
+          fallbackUsed: 0,
+        };
+      },
+    };
+
+    await __test__.runGatewayMaintenanceOnce(ctx, deps);
+
+    assert.equal(seenLlm, learningLlm);
   });
 });

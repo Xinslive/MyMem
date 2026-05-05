@@ -94,6 +94,18 @@ type DashboardMemory = {
   sourceLabel: string;
   memoryType: string;
   memoryTypeLabel: string;
+  learning: {
+    kind: string;
+    utilityScore: number;
+    utilitySuccessCount: number;
+    utilityFailureCount: number;
+    utilityTrialCount: number;
+    sceneId?: string;
+    sceneTitle?: string;
+    sceneMemberIds?: string[];
+    skillName?: string;
+    skillEnabled?: boolean;
+  };
   qualityFlags: DashboardQualityFilter[];
   details: {
     l0: string;
@@ -516,6 +528,18 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
     sourceLabel: displaySource(source),
     memoryType,
     memoryTypeLabel: displayMemoryType(memoryType),
+    learning: {
+      kind: meta.memory_kind,
+      utilityScore: meta.utility_score,
+      utilitySuccessCount: meta.utility_success_count,
+      utilityFailureCount: meta.utility_failure_count,
+      utilityTrialCount: meta.utility_trial_count,
+      ...(meta.scene_id ? { sceneId: meta.scene_id } : {}),
+      ...(meta.scene_title ? { sceneTitle: meta.scene_title } : {}),
+      ...(meta.scene_member_ids ? { sceneMemberIds: meta.scene_member_ids } : {}),
+      ...(meta.skill_name ? { skillName: meta.skill_name } : {}),
+      ...(typeof meta.skill_enabled === "boolean" ? { skillEnabled: meta.skill_enabled } : {}),
+    },
     qualityFlags,
     details: {
       l0: displayMemoryText(meta.l0_abstract),
