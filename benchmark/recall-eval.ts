@@ -60,7 +60,6 @@ function metadata(text: string, category: MemoryEntry["category"], memoryCategor
       { text, category, importance: 0.8, timestamp: Date.now() },
       {
         l0_abstract: text,
-        l1_overview: `- ${text}`,
         l2_content: text,
         memory_category: memoryCategory,
         source: "manual",

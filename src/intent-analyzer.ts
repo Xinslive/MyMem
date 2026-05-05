@@ -27,7 +27,7 @@ export type MemoryCategoryIntent =
   | "entity"
   | "other";
 
-export type RecallDepth = "l0" | "l1" | "full";
+export type RecallDepth = "l0" | "full";
 
 /**
  * Knowledge vs Experience routing (arxiv:2602.05665 §V-E).
@@ -106,7 +106,7 @@ const INTENT_RULES: IntentRule[] = [
       /(最终决定|方案是|确定用|定了用|选了|为啥选|为啥用|干嘛用|干吗选)/,
     ],
     categories: ["decision", "fact"],
-    depth: "l1",
+    depth: "full",
     memoryType: "experience",
   },
 
@@ -122,7 +122,7 @@ const INTENT_RULES: IntentRule[] = [
       /(谁负责|哪个团队在做|联系人是谁|谁在搞|谁弄的|谁写的)/,
     ],
     categories: ["entity", "fact"],
-    depth: "l1",
+    depth: "full",
     memoryType: "knowledge",
   },
 
@@ -152,7 +152,7 @@ const INTENT_RULES: IntentRule[] = [
       /(怎么用|怎么配|什么作用|怎么实现的|啥意思|干嘛的|有什么用)/,
     ],
     categories: ["fact", "entity"],
-    depth: "l1",
+    depth: "full",
     memoryType: "knowledge",
   },
 ];
@@ -161,7 +161,7 @@ const INTENT_RULES: IntentRule[] = [
 // Analyzer
 // ============================================================================
 
-const DEPTH_RANK: Record<RecallDepth, number> = { l0: 0, l1: 1, full: 2 };
+const DEPTH_RANK: Record<RecallDepth, number> = { l0: 0, full: 1 };
 
 /**
  * Analyze a query to determine which memory categories and recall depth
@@ -282,7 +282,6 @@ export function applyMemoryTypeBoost<
  * Format a memory entry for context injection at the specified depth level.
  *
  * - l0: One-line summary (category + scope + truncated text)
- * - l1: Medium detail (category + scope + text up to ~300 chars)
  * - full: Complete text (existing behavior)
  */
 export function formatAtDepth(
@@ -309,14 +308,6 @@ export function formatAtDepth(
       // Ultra-compact: first sentence or first 80 chars
       const brief = extractFirstSentence(safe, 80);
       return `- [${entry.category}] ${brief} (${scoreStr}${sourceTag})`;
-    }
-    case "l1": {
-      // Medium: up to 300 chars
-      const medium =
-        safe.length > 300
-          ? safe.slice(0, 297) + "..."
-          : safe;
-      return `- [${entry.category}:${entry.scope}] ${medium} (${scoreStr}${sourceTag})`;
     }
     case "full":
     default:

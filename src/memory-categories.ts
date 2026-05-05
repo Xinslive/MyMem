@@ -89,9 +89,8 @@ export function classifyMemoryType(
 /** A candidate memory extracted from conversation by LLM. */
 export type CandidateMemory = {
   category: MemoryCategory;
-  abstract: string; // L0: one-sentence index
-  overview: string; // L1: structured markdown summary
-  content: string; // L2: full narrative
+  abstract: string; // Summary: one-sentence index
+  content: string; // Full narrative
   /** LLM judgment: whether this candidate is worth long-term storage. */
   worth_storing?: boolean;
 };

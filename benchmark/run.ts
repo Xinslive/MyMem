@@ -93,7 +93,6 @@ function makeBenchmarkEntry(i: number): Omit<MemoryEntry, "id" | "timestamp"> {
     state: i % 11 === 0 ? "draft" : "confirmed",
     memory_layer: i % 13 === 0 ? "archive" : "working",
     l0_abstract: text,
-    l1_overview: `- ${text}`,
     l2_content: text,
     confidence: i % 10 === 0 ? 0.3 : 0.8,
   });

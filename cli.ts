@@ -1785,10 +1785,10 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
   // Upgrade legacy memories to new smart memory format
   memory
     .command("upgrade")
-    .description("Upgrade legacy memories to new 6-category L0/L1/L2 smart memory format")
+    .description("Upgrade legacy memories to new 6-category summary/content smart memory format")
     .option("--dry-run", "Show upgrade statistics without modifying data")
     .option("--batch-size <n>", "Number of memories per batch", "10")
-    .option("--no-llm", "Skip LLM calls; use simple text truncation for L0/L1")
+    .option("--no-llm", "Skip LLM calls; use simple text truncation for summary/content")
     .option("--limit <n>", "Maximum number of memories to upgrade")
     .option("--scope <scope>", "Only upgrade memories in this scope")
     .action(async (options) => {
@@ -1964,10 +1964,10 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
       }
     });
 
-  // repair-summaries: Detect and fix stale L0/L1/L2 summaries
+  // repair-summaries: Detect and fix stale summary/content metadata
   memory
     .command("repair-summaries")
-    .description("Detect and fix L0/L1/L2 summaries that are inconsistent with text (text updated but summaries not regenerated)")
+    .description("Detect and fix summary/content metadata that is inconsistent with text (text updated but metadata not regenerated)")
     .option("--scope <scope>", "Filter by scope (e.g. agent:bs-intern)")
     .option("--dry-run", "Preview mode — report stale entries without modifying data", false)
     .action(async (options: { scope?: string; dryRun: boolean }) => {
@@ -2001,7 +2001,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         }
 
         if (staleEntries.length === 0) {
-          console.log("No stale summaries found. All L0/L1/L2 are consistent with text.");
+          console.log("No stale summaries found. All summary/content metadata is consistent with text.");
           return;
         }
 
@@ -2024,10 +2024,9 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         for (const { entry } of staleEntries) {
           try {
-            // Rebuild L0/L1/L2 using truncation fallback from buildSmartMetadata
+            // Rebuild summary/content using truncation fallback from buildSmartMetadata
             const rebuilt = buildSmartMetadata(entry, {
               l0_abstract: entry.text,
-              l1_overview: `- ${entry.text}`,
               l2_content: entry.text,
             });
             const newMetadataStr = stringifySmartMetadata(rebuilt);

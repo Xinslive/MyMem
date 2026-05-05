@@ -71,7 +71,6 @@ function makeMemoryEntry({
     timestamp,
     metadata: JSON.stringify({
       l0_abstract: text,
-      l1_overview: `- ${text}`,
       l2_content: text,
       memory_category: memoryCategory,
       memory_type: "knowledge",

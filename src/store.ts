@@ -1113,7 +1113,6 @@ export class MemoryStore {
       const candidateFields = [
         { text: entry.text, weight: 1 },
         { text: meta.l0_abstract, weight: 0.98 },
-        { text: meta.l1_overview, weight: 0.92 },
         { text: meta.l2_content, weight: 0.96 },
       ];
       const preTokenized = candidateFields

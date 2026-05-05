@@ -155,7 +155,6 @@ describe("learned skills and maintenance", () => {
       scene_title: "Verification scene",
       scene_member_ids: ["low", "high", "archived"],
       memory_category: "patterns",
-      l1_overview: "Repeated verification work",
     });
     const high = entry("high", "Always verify generated file paths", {
       l0_abstract: "Verify generated file paths",
@@ -195,7 +194,6 @@ describe("learned skills and maintenance", () => {
       memory_kind: "case",
       memory_category: "cases",
       l0_abstract: text,
-      l1_overview: `- ${text}`,
       l2_content: text,
       state: "confirmed",
       memory_layer: "working",

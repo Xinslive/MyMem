@@ -59,7 +59,6 @@ function createContext() {
     metadata: JSON.stringify({
       memory_category: "preferences",
       l0_abstract: "The user likes clear dashboards.",
-      l1_overview: "- clear dashboard preference",
       l2_content: "The user likes dashboard pages with clear visual summaries.",
       state: "confirmed",
       confidence: 0.91,
@@ -83,7 +82,6 @@ function createContext() {
     metadata: JSON.stringify({
       memory_category: "profile",
       l0_abstract: "Stale profile note.",
-      l1_overview: "- stale profile",
       l2_content: "A legacy fact stores a stale profile-like note.",
       state: "confirmed",
       confidence: 0.21,

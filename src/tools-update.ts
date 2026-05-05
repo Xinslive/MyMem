@@ -185,7 +185,6 @@ export function registerMemoryUpdateTool(
                   { text, category: existing.category },
                   {
                     l0_abstract: text,
-                    l1_overview: meta.l1_overview,
                     l2_content: text,
                     memory_category: meta.memory_category,
                     tier: meta.tier,
@@ -272,7 +271,6 @@ export function registerMemoryUpdateTool(
               ...(text
                 ? {
                     l0_abstract: text,
-                    l1_overview: `- ${text}`,
                     l2_content: text,
                     memory_temporal_type: classifyTemporal(text),
                   }

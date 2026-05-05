@@ -241,7 +241,6 @@ describe("memory governance tools", () => {
           { text: "Use tavily first", category: "fact", importance: 0.7 },
           {
             l0_abstract: "Use tavily first",
-            l1_overview: "- Use tavily first",
             l2_content: "Use tavily first",
             memory_category: "cases",
           },

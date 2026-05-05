@@ -402,7 +402,6 @@ export class SmartExtractor {
         category: string;
         worth_storing?: boolean;
         abstract: string;
-        overview: string;
         content: string;
       }>;
     }>(prompt, "extract-candidates");
@@ -447,7 +446,6 @@ export class SmartExtractor {
       }
 
       const abstract = (raw.abstract ?? "").trim();
-      const overview = (raw.overview ?? "").trim();
       const content = (raw.content ?? "").trim();
 
       // Skip empty or noise
@@ -466,7 +464,7 @@ export class SmartExtractor {
         continue;
       }
 
-      candidates.push({ category, abstract, overview, content, worth_storing: raw.worth_storing });
+      candidates.push({ category, abstract, content: content || abstract, worth_storing: raw.worth_storing });
     }
 
     this.debugLog(

@@ -320,7 +320,6 @@ async function runCliSmoke() {
     timestamp: Date.now(),
     metadata: JSON.stringify({
       l0_abstract: "用户以前偏好冰美式咖啡。",
-      l1_overview: "- 旧摘要",
       l2_content: "旧内容",
       memory_category: "preferences",
       memory_type: "semantic",

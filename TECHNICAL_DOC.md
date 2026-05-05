@@ -133,7 +133,7 @@ MyMem-main/
 1. **自动完成**：用户无需手动维护记忆，系统自动捕获、提取、检索、注入
 2. **会演化**：记忆不是静态存储，会随时间衰减、升降级、合并、淘汰
 3. **闭环学习**：用户纠正、工具失败、坏召回和有效召回都会反馈回系统改进自身
-4. **多层隔离**：作用域隔离、知识/经验分离、三层摘要粒度
+4. **多层隔离**：作用域隔离、知识/经验分离、摘要/原文双层粒度
 5. **性能优先**：混合检索 + RRF 融合 + MMR 多样性 + Learning Memory 后排序 + 并发控制，实时召回不调用 LLM
 6. **单例模式**：重型资源（LanceDB 连接、Embedder、Retriever 等）只初始化一次，防止重复 `register()` 调用导致的内存增长
 
@@ -175,23 +175,21 @@ export const APPEND_ONLY_CATEGORIES = new Set<MemoryCategory>(["events", "cases"
 
 这种分离在检索时体现为**通道提升**：问偏好时优先找稳定知识，问"上次""之前"时优先找经验轨迹。在衰减时也区别对待：知识半衰期乘数 3.0（衰减更慢），经验半衰期乘数 0.7（衰减更快）。
 
-### 3.3 三层摘要结构 (L0/L1/L2)
+### 3.3 双层记忆结构 (L0/L2)
 
-每条智能记忆都带有三层表达：
+每条智能记忆都带有两层表达：
 
 | 层级 | 字段 | 用途 |
 |------|------|------|
-| L0 | `l0_abstract` | 一句话索引，用于快速检索、去重和低成本召回 |
-| L1 | `l1_overview` | 结构化概览，用于回答"这条记忆大概是什么" |
-| L2 | `l2_content` | 完整叙事，用于需要细节、来源和上下文时展开 |
+| L0 | `l0_abstract` | 一句话摘要，用于快速检索、去重、日志和低成本显示 |
+| L2 | `l2_content` | LLM 提炼后的原文/完整叙事，用于默认召回和需要细节时展开 |
 
 ### 3.4 完整元数据结构
 
 ```typescript
 interface SmartMemoryMetadata {
-  // 三层摘要
+  // 摘要与原文
   l0_abstract: string;
-  l1_overview: string;
   l2_content: string;
 
   // 分类与层级
@@ -545,7 +543,7 @@ const INTENT_RULES: IntentRule[] = [
 意图分析结果用于：
 - **类别提升**：优先检索与意图匹配的记忆类别
 - **通道提升**：knowledge 或 experience 通道加权
-- **召回深度**：L0（仅摘要）/ L1（概览）/ full（全文）
+- **召回深度**：L0（仅摘要）/ full（默认，使用 L2 原文）
 
 ### 6.11 自适应检索
 
@@ -591,9 +589,8 @@ const BOILERPLATE_INDICATORS = [/\bthanks?\b/i, /\bok\b/i, /^hi\b/i, ...];
 ```typescript
 type CandidateMemory = {
   category: MemoryCategory;  // 6 类分类
-  abstract: string;           // L0: 一句话索引
-  overview: string;           // L1: 结构化概览
-  content: string;            // L2: 完整叙事
+  abstract: string;           // L0: 一句话摘要
+  content: string;            // L2: LLM 提炼后的完整叙事
   worth_storing?: boolean;    // LLM 判断是否值得存储
 };
 ```

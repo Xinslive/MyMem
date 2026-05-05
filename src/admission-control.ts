@@ -451,7 +451,6 @@ ${excerpt}
 Candidate memory:
 - Category: ${candidate.category}
 - Abstract: ${candidate.abstract}
-- Overview: ${candidate.overview}
 - Content: ${candidate.content}
 
 Score future usefulness on a 0.0-1.0 scale.

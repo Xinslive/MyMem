@@ -148,7 +148,6 @@ async function runTest() {
           { text: oldText, category: "preference", importance: 0.8 },
           {
             l0_abstract: oldText,
-            l1_overview: "## Preference\n- 喜欢乌龙茶",
             l2_content: "用户喜欢乌龙茶。",
             memory_category: "preferences",
             tier: "working",
@@ -239,7 +238,6 @@ async function runTest() {
             { text: `饮品偏好：历史版本${i}`, category: "preference", importance: 0.8 },
             {
               l0_abstract: `饮品偏好：历史版本${i}`,
-              l1_overview: `## Preference\n- 历史版本${i}`,
               l2_content: `历史版本${i}`,
               memory_category: "preferences",
               tier: "working",

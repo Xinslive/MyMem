@@ -27,7 +27,6 @@ function makeEntry({
       { text, category, importance: 0.8, timestamp },
       {
         l0_abstract: text,
-        l1_overview: `- ${text}`,
         l2_content: text,
         memory_category: memoryCategory,
         confidence: 0.8,

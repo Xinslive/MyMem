@@ -268,7 +268,7 @@ export function formatLearnedSkillLine(entry: MemoryEntry, maxChars: number): st
   const body = [
     name,
     conditions ? `Trigger: ${conditions}` : "",
-    steps ? `Action: ${steps}` : (meta.l1_overview || meta.l2_content || entry.text),
+    steps ? `Action: ${steps}` : (meta.l2_content || entry.text),
   ].filter(Boolean).join(" -> ");
   return `- [skill:${entry.scope}] ${body}`.slice(0, maxChars).trim();
 }
@@ -276,7 +276,7 @@ export function formatLearnedSkillLine(entry: MemoryEntry, maxChars: number): st
 export function formatSceneLine(entry: MemoryEntry, maxChars: number): string {
   const meta = parseSmartMetadata(entry.metadata, entry);
   const title = meta.scene_title || meta.l0_abstract || "Memory scene";
-  const body = meta.l1_overview || meta.l2_content || entry.text;
+  const body = meta.l2_content || entry.text;
   return `- [scene:${entry.scope}] ${title}: ${body}`.slice(0, maxChars).trim();
 }
 
@@ -385,7 +385,6 @@ function pushAxis(axes: string[], kind: string, value: unknown, maxWords = 5): v
 function inferSceneAxes(entry: MemoryEntry, meta: SmartMemoryMetadata): string[] {
   const text = [
     meta.l0_abstract,
-    meta.l1_overview,
     meta.case_trigger,
     meta.canonical_id,
     meta.fact_key,
@@ -694,7 +693,6 @@ export async function runLearningMemoryMaintenance(
         memory_category: "patterns",
         memory_type: "knowledge",
         l0_abstract: refined.title,
-        l1_overview: refined.summary,
         l2_content: refined.summary,
         scene_id: stableId("scene", key),
         scene_key: key,
@@ -811,7 +809,6 @@ export async function runLearningMemoryMaintenance(
         memory_category: "patterns",
         memory_type: "knowledge",
         l0_abstract: refined.title,
-        l1_overview: refined.content,
         l2_content: patternText,
         case_trigger: key,
         case_outcome: "distilled_pattern",
@@ -861,7 +858,6 @@ export async function runLearningMemoryMaintenance(
           memory_category: "patterns",
           memory_type: "knowledge",
           l0_abstract: refined.title,
-          l1_overview: refined.content,
           l2_content: skillText,
           case_trigger: key,
           case_outcome: "distilled_skill",

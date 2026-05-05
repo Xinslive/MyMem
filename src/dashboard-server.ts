@@ -109,7 +109,6 @@ type DashboardMemory = {
   qualityFlags: DashboardQualityFilter[];
   details: {
     l0: string;
-    l1: string;
     l2: string;
     factKey?: string;
     validFrom: number;
@@ -543,7 +542,6 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
     qualityFlags,
     details: {
       l0: displayMemoryText(meta.l0_abstract),
-      l1: displayMemoryText(meta.l1_overview),
       l2: displayMemoryText(meta.l2_content),
       ...(meta.fact_key ? { factKey: meta.fact_key } : {}),
       validFrom: meta.valid_from,
@@ -2194,7 +2192,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="config-item"><div class="config-label">质量标记</div><div class="config-value">' + escapeHtml((memory.qualityFlags || []).map(qualityLabel).join("、") || "无") + '</div></div>' +
         '</div>' +
         '<section class="detail-section"><h3>L0 摘要</h3><p class="detail-text">' + escapeHtml(detail.l0 || memory.preview) + '</p></section>' +
-        '<section class="detail-section"><h3>L1 概览</h3><p class="detail-text">' + escapeHtml(detail.l1 || "") + '</p></section>' +
         '<section class="detail-section"><h3>L2 原文/叙事</h3><p class="detail-text">' + escapeHtml(detail.l2 || memory.text) + '</p></section>';
       $("detailOverlay").classList.add("open");
     }

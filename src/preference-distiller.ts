@@ -318,7 +318,6 @@ export async function runPreferenceDistiller(
       const now = Date.now();
       const next = buildSmartMetadata(conflicting, {
         l0_abstract: candidate.rule.text,
-        l1_overview: `- ${candidate.rule.text}`,
         l2_content: candidate.rule.text,
         memory_category: candidate.rule.memoryCategory,
         confidence: candidate.confidence,

@@ -67,7 +67,6 @@ export function isUserMdExclusiveMemory(
     factKey?: string;
     text?: string;
     abstract?: string;
-    overview?: string;
     content?: string;
   },
   workspaceBoundary?: WorkspaceBoundaryConfig | null,
@@ -84,7 +83,6 @@ export function isUserMdExclusiveMemory(
     factKey: params.factKey,
     text: params.text,
     abstract: params.abstract,
-    overview: params.overview,
     content: params.content,
   });
 
@@ -98,7 +96,6 @@ export function isUserMdExclusiveMemory(
   const probe = [
     params.text,
     params.abstract,
-    params.overview,
     params.content,
   ]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -135,7 +132,6 @@ export function isUserMdExclusiveEntry(
       factKey: meta.fact_key,
       text: entry.text,
       abstract: meta.l0_abstract,
-      overview: meta.l1_overview,
       content: meta.l2_content,
     },
     workspaceBoundary,

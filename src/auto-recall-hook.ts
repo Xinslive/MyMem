@@ -123,7 +123,7 @@ function formatReasoningStrategyLine(result: RecallResult, maxChars: number): Re
     : meta.l0_abstract || result.entry.text;
   const detailParts = Array.isArray(meta.strategy_steps)
     ? meta.strategy_steps.filter((step): step is string => typeof step === "string")
-    : sanitizeForContext(meta.l1_overview || meta.l2_content || result.entry.text)
+    : sanitizeForContext(meta.l2_content || result.entry.text)
       .split(/\r?\n/)
       .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
       .filter(Boolean);
@@ -636,7 +636,6 @@ export function registerAutoRecallHook(params: {
         if (!intent) return autoRecallPerItemMaxChars;
         switch (intent.depth) {
           case "l0": return Math.min(autoRecallPerItemMaxChars, 80);
-          case "l1": return autoRecallPerItemMaxChars;
           case "full": return Math.min(autoRecallPerItemMaxChars * 3, 1000);
         }
       })();
@@ -687,9 +686,7 @@ export function registerAutoRecallHook(params: {
             })()
           : (recallMode === "summary" || recallMode === "l0")
             ? (metaObj.l0_abstract || r.entry.text)
-            : intent?.depth === "full"
-              ? (r.entry.text)
-              : (metaObj.l0_abstract || r.entry.text);
+            : (metaObj.l2_content || r.entry.text);
         const summary = sanitizeForContext(contentText).slice(0, effectivePerItemMaxChars);
         const linePrefix = "- " + buildPrefix() + " ";
         const line = linePrefix + summary;

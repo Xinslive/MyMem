@@ -1,9 +1,9 @@
 /**
  * Prompt templates for intelligent memory extraction.
  * Three mandatory prompts:
- * - buildExtractionPrompt: 6-category L0/L1/L2 extraction with few-shot
+ * - buildExtractionPrompt: 6-category summary/content extraction with few-shot
  * - buildDedupPrompt: CREATE/MERGE/SKIP dedup decision
- * - buildMergePrompt: Memory merge with three-level structure
+ * - buildMergePrompt: Memory merge with summary/content structure
  */
 
 export function buildExtractionPrompt(
@@ -71,17 +71,15 @@ ${conversationText}
 - "Encountered problem A, used solution B" -> cases (not events)
 - "General process for handling certain problems" -> patterns (not cases)
 
-# Three-Level Structure
+# Two-Level Structure
 
-Each memory contains three levels:
+Each memory contains two fields:
 
-**abstract (L0)**: One-liner index
+**abstract**: One-liner summary/index
 - Merge types (preferences/entities/profile/patterns): \`[Merge key]: [Description]\`
 - Independent types (events/cases): Specific description
 
-**overview (L1)**: Structured Markdown summary with category-specific headings
-
-**content (L2)**: Full narrative with background and details
+**content**: LLM-refined full narrative with background and details
 
 # Few-shot Examples
 
@@ -91,7 +89,6 @@ Each memory contains three levels:
   "category": "profile",
   "worth_storing": true,
   "abstract": "用户基本信息：AI 开发工程师，有 3 年 LLM 经验",
-  "overview": "## 背景\\n- 职业：AI 开发工程师\\n- 经验：3 年 LLM 应用开发\\n- 技术栈：Python、LangChain",
   "content": "用户是 AI 开发工程师，有 3 年 LLM 应用开发经验。"
 }
 \`\`\`
@@ -102,7 +99,6 @@ Each memory contains three levels:
   "category": "preferences",
   "worth_storing": true,
   "abstract": "Python 代码风格：不要类型提示，简洁直接",
-  "overview": "## 偏好领域\\n- 语言：Python\\n- 主题：代码风格\\n\\n## 细节\\n- 不写类型提示\\n- 函数注释保持简洁\\n- 实现方式直接",
   "content": "用户偏好 Python 代码不写类型提示，函数注释简洁，实现方式直接。"
 }
 \`\`\`
@@ -113,7 +109,6 @@ Each memory contains three levels:
   "category": "cases",
   "worth_storing": true,
   "abstract": "LanceDB BigInt 数值处理问题",
-  "overview": "## 问题\\nLanceDB 0.26+ 会把数值列返回为 BigInt\\n\\n## 解决办法\\n做算术前用 Number(...) 转换",
   "content": "当 LanceDB 返回 BigInt 数值时，做算术运算前要先用 Number(...) 包裹转换。"
 }
 \`\`\`
@@ -148,7 +143,6 @@ Return JSON:
       "category": "profile|preferences|entities|events|cases|patterns",
       "worth_storing": true,
       "abstract": "中文单行索引",
-      "overview": "中文结构化 Markdown 摘要",
       "content": "中文完整叙述"
     }
   ]
@@ -156,8 +150,8 @@ Return JSON:
 
 Notes:
 - "worth_storing" is REQUIRED for every candidate. Set to true only for genuinely valuable long-term memories.
-- Output abstract, overview, and content in Simplified Chinese by default, even when the conversation contains English.
-- 默认用简体中文生成 abstract、overview、content；即使对话是英文，也把普通叙述翻译成中文。
+- Output abstract and content in Simplified Chinese by default, even when the conversation contains English.
+- 默认用简体中文生成 abstract、content；即使对话是英文，也把普通叙述翻译成中文。
 - Preserve code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns exactly.
 - 代码标识符、API 名、路径、命令、URL、配置键、模型名等保持原文。
 - Only extract truly valuable personalized information
@@ -168,7 +162,6 @@ Notes:
 
 export function buildDedupPrompt(
   candidateAbstract: string,
-  candidateOverview: string,
   candidateContent: string,
   existingMemories: string,
 ): string {
@@ -176,7 +169,6 @@ export function buildDedupPrompt(
 
 **Candidate Memory**:
 Abstract: ${candidateAbstract}
-Overview: ${candidateOverview}
 Content: ${candidateContent}
 
 **Existing Similar Memories**:
@@ -212,34 +204,28 @@ Return JSON format:
 
 export function buildMergePrompt(
   existingAbstract: string,
-  existingOverview: string,
   existingContent: string,
   newAbstract: string,
-  newOverview: string,
   newContent: string,
   category: string,
 ): string {
-  return `Merge the following memory into a single coherent record with all three levels.
+  return `Merge the following memory into a single coherent record with summary and full content.
 
 ** Category **: ${category}
 
 ** Existing Memory:**
     Abstract: ${existingAbstract}
-  Overview:
-${existingOverview}
   Content:
 ${existingContent}
 
 ** New Information:**
     Abstract: ${newAbstract}
-  Overview:
-${newOverview}
   Content:
 ${newContent}
 
 Requirements:
-- Output abstract, overview, and content in Simplified Chinese by default.
-- 默认用简体中文输出 abstract、overview、content。
+- Output abstract and content in Simplified Chinese by default.
+- 默认用简体中文输出 abstract、content。
 - If existing or new memory text is English, translate ordinary prose to Simplified Chinese.
 - 如果旧记忆或新信息是英文，普通叙述翻译成简体中文。
 - Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.
@@ -251,8 +237,7 @@ Requirements:
 Return JSON:
   {
     "abstract": "合并后的中文单行摘要",
-      "overview": "合并后的中文结构化 Markdown 概览",
-        "content": "合并后的中文完整内容"
+    "content": "合并后的中文完整内容"
   } `;
 }
 

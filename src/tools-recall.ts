@@ -48,7 +48,7 @@ export function registerMemoryRecallTool(
         ),
         includeFullText: Type.Optional(
           Type.Boolean({
-            description: "Return full memory text when exact wording matters; default false returns compact summary previews.",
+            description: "Return full memory text. Defaults to true; set false only when a compact summary preview is enough.",
           }),
         ),
         maxCharsPerItem: Type.Optional(
@@ -70,7 +70,7 @@ export function registerMemoryRecallTool(
         const {
           query,
           limit = 3,
-          includeFullText = false,
+          includeFullText = true,
           maxCharsPerItem = 180,
           scope,
           category,
@@ -167,7 +167,7 @@ export function registerMemoryRecallTool(
               const categoryTag = getSmartDisplayCategoryTag(r.entry);
               const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
               const base = includeFullText
-                ? (metadata.l2_content || metadata.l1_overview || r.entry.text)
+                ? (metadata.l2_content || r.entry.text)
                 : (metadata.l0_abstract || r.entry.text);
               const inline = normalizeInlineText(base);
               const rendered = includeFullText
@@ -182,7 +182,7 @@ export function registerMemoryRecallTool(
             for (let i = 0; i < results.length; i++) {
               const metadata = parseSmartMetadata(results[i].entry.metadata, results[i].entry);
               (serializedMemories[i] as Record<string, unknown>).fullText =
-                metadata.l2_content || metadata.l1_overview || results[i].entry.text;
+                metadata.l2_content || results[i].entry.text;
             }
           }
 

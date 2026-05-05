@@ -170,7 +170,6 @@ async function seedPreference(dbPath) {
         { text: seedText, category: "preference", importance: 0.8 },
         {
           l0_abstract: seedText,
-          l1_overview: "## Preference Domain\n- 饮品\n\n## Details\n- 喜欢乌龙茶",
           l2_content: "用户长期喜欢乌龙茶。",
           memory_category: "preferences",
           tier: "working",

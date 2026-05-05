@@ -527,7 +527,6 @@ async function applySelfCorrectionRule(params: {
         category: rule.storeCategory,
         metadata: stringifySmartMetadata(buildSmartMetadata(conflicting.entry, {
           l0_abstract: rule.text,
-          l1_overview: `- ${rule.text}`,
           l2_content: rule.text,
           memory_category: rule.memoryCategory,
           confidence: rule.confidence,
@@ -826,7 +825,6 @@ export function registerHookEnhancements(params: {
               const meta = buildSmartMetadata(match, {
                 ...oldMeta,
                 l0_abstract: correction.newText,
-                l1_overview: `- ${correction.newText}`,
                 l2_content: correction.newText,
                 source_session: sessionKey,
                 source: "auto-capture",

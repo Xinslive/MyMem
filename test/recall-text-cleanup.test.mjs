@@ -173,7 +173,6 @@ function makeUserMdExclusiveResults() {
             { text: "称呼偏好：宙斯", category: "preference", importance: 0.9 },
             {
               l0_abstract: "称呼偏好：宙斯",
-              l1_overview: "## Addressing\n- Preferred form of address: 宙斯",
               l2_content: "用户希望以后被称呼为“宙斯”。",
               memory_category: "preferences",
               fact_key: "preferences:称呼偏好",
@@ -209,7 +208,6 @@ function makeLegacyAddressingResults() {
             },
             {
               l0_abstract: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
-              l1_overview: "- 用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
               l2_content: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
               memory_category: "preferences",
               fact_key: "preferences:用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”",
@@ -325,7 +323,6 @@ function makeReasoningStrategyResults(count = 3) {
             { text, category: "other", importance: 0.82, timestamp: now - i * 1000 },
             {
               l0_abstract: text,
-              l1_overview: `- Run focused test ${i + 1}\n- Patch narrow code\n- Verify regression ${i + 1}`,
               l2_content: text,
               memory_category: "patterns",
               compiled_strategy: true,
@@ -363,7 +360,6 @@ function makeSceneResults() {
         memory_category: "patterns",
         scene_title: "Generated file verification",
         l0_abstract: "Generated file verification",
-        l1_overview: "Repeated cases about verifying generated file paths.",
         scene_member_ids: ["member-high", "member-low", "member-archived"],
         state: "confirmed",
         memory_layer: "working",
@@ -754,18 +750,19 @@ describe("recall text cleanup", () => {
     assert.equal(capturedCreatedAt, oldTimestamp);
   });
 
-  it("defaults memory_recall to concise output (limit=3, preview text)", async () => {
+  it("defaults memory_recall to full L2 output with limit=3", async () => {
     const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(7)));
     const res = await tool.execute(null, { query: "many memories" });
     const lines = extractRenderedMemoryRecallLines(res.content[0].text);
 
+    assert.match(res.content[0].text, /<mode:full>/);
     assert.equal(lines.length, 3, "default recall should return 3 items");
-    assert.match(lines[0], /…$/, "default recall should return truncated preview text");
+    assert.doesNotMatch(lines[0], /…$/, "default full recall should not force preview truncation");
   });
 
   it("caps summary-mode memory_recall results to 6 even if a larger limit is requested", async () => {
     const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(9)));
-    const res = await tool.execute(null, { query: "many memories", limit: 10 });
+    const res = await tool.execute(null, { query: "many memories", limit: 10, includeFullText: false });
     const lines = extractRenderedMemoryRecallLines(res.content[0].text);
     assert.match(res.content[0].text, /<mode:summary>/);
 
@@ -804,7 +801,6 @@ describe("recall text cleanup", () => {
               { text: l0, category: "fact", importance: 0.85 },
               {
                 l0_abstract: l0,
-                l1_overview: "## Conflict\n- LanceDB concurrent write resolved via proper-lockfile",
                 l2_content: l2,
                 memory_category: "cases",
                 fact_key: "cases:lancedb-write-conflict",
@@ -817,13 +813,12 @@ describe("recall text cleanup", () => {
       },
     ];
 
-    // default (summary) mode should show L0
+    // default (full) mode should show L2
     const toolSummary = createTool(registerMemoryRecallTool, makeRecallContext(results));
     const resSummary = await toolSummary.execute(null, { query: "lancedb conflict" });
     const summaryLines = extractRenderedMemoryRecallLines(resSummary.content[0].text);
     assert.equal(summaryLines.length, 1);
-    assert.match(summaryLines[0], new RegExp(l0.slice(0, 20)));
-    assert.doesNotMatch(summaryLines[0], /Full L2 narrative/);
+    assert.match(summaryLines[0], /Full L2 narrative/);
 
     // includeFullText=true should show L2 in rendered output
     const toolFull = createTool(registerMemoryRecallTool, makeRecallContext(results));
@@ -857,7 +852,6 @@ describe("recall text cleanup", () => {
               { text: l0, category: "fact", importance: 0.85 },
               {
                 l0_abstract: l0,
-                l1_overview: "## Overview\n- some overview",
                 l2_content: l2,
                 memory_category: "cases",
                 fact_key: "cases:opt-in-check",
@@ -871,7 +865,7 @@ describe("recall text cleanup", () => {
     ];
 
     const tool = createTool(registerMemoryRecallTool, makeRecallContext(results));
-    const res = await tool.execute(null, { query: "opt-in check" });
+    const res = await tool.execute(null, { query: "opt-in check", includeFullText: false });
 
     assert.equal(res.details.memories[0].fullText, undefined, "fullText should be absent when includeFullText=false");
     assert.equal(res.details.memories[0].text, l0, "text should still carry L0");
@@ -1314,7 +1308,13 @@ describe("recall text cleanup", () => {
     const res = await tool.execute(null, { query: "addressing without recall filter" });
 
     assert.equal(res.details.memories.length, 3);
-    assert.match(res.content[0].text, /称呼偏好：宙斯/);
+    assert.match(res.content[0].text, /用户希望以后被称呼为“宙斯”/);
+
+    const summaryRes = await tool.execute(null, {
+      query: "addressing without recall filter",
+      includeFullText: false,
+    });
+    assert.match(summaryRes.content[0].text, /称呼偏好：宙斯/);
   });
 
   // --- PR #602: recall prefix format tests ---

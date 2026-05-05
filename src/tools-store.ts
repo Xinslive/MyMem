@@ -236,7 +236,6 @@ export function registerMemoryStoreTool(
               { text, category: storeCategory, importance: safeImportance },
               {
                 l0_abstract: text,
-                l1_overview: oldMeta.l1_overview || `- ${text}`,
                 l2_content: text,
                 memory_category: oldMeta.memory_category,
                 ...defaultLearningKindPatch(oldMeta.memory_category),
@@ -340,7 +339,6 @@ export function registerMemoryStoreTool(
                 },
                 {
                   l0_abstract: text,
-                  l1_overview: `- ${text}`,
                   l2_content: text,
                   memory_category: memoryCategory,
                   ...defaultLearningKindPatch(memoryCategory),

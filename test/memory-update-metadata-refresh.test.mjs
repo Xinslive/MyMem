@@ -2,7 +2,7 @@
  * Test: memory_update normal path rebuilds smart metadata on text/importance change.
  *
  * Validates the fix for #544: the normal (non-supersede) update path was
- * updating entry.text but leaving l0_abstract / l1_overview / l2_content
+ * updating entry.text but leaving l0_abstract / l2_content
  * and other derived metadata fields stale.
  */
 import assert from "node:assert/strict";
@@ -67,7 +67,6 @@ async function simulateMemoryUpdate(store, resolvedId, text, newVector, importan
           { text, category: existing.category },
           {
             l0_abstract: text,
-            l1_overview: meta.l1_overview,
             l2_content: text,
             memory_category: meta.memory_category,
             tier: meta.tier,
@@ -126,7 +125,6 @@ async function simulateMemoryUpdate(store, resolvedId, text, newVector, importan
     const newExpiry = inferExpiry(text);
     const updatedMeta = buildSmartMetadata(existing, {
       l0_abstract: text,
-      l1_overview: `- ${text}`,
       l2_content: text,
       fact_key: deriveFactKey(effectiveCategory, text),
       memory_temporal_type: classifyTemporal(text),
@@ -160,9 +158,9 @@ async function runTests() {
 
   try {
     // ====================================================================
-    // Test 1: Text change refreshes l0/l1/l2
+    // Test 1: Text change refreshes l0/l2
     // ====================================================================
-    console.log("Test 1: text change refreshes l0/l1/l2...");
+    console.log("Test 1: text change refreshes l0/l2...");
 
     const origText = "Attended 2026 tech conference";
     const entry1 = await store.store({
@@ -176,7 +174,6 @@ async function runTests() {
           { text: origText, category: "fact", importance: 0.6 },
           {
             l0_abstract: origText,
-            l1_overview: "- tech conference 2026",
             l2_content: origText,
             memory_category: "cases",
             tier: "working",
@@ -198,10 +195,9 @@ async function runTests() {
     assert.equal(after1.text, newText1, "text should be updated");
     const meta1 = parseSmartMetadata(after1.metadata, after1);
     assert.equal(meta1.l0_abstract, newText1, "l0_abstract should match new text");
-    assert.equal(meta1.l1_overview, `- ${newText1}`, "l1_overview should match new text");
     assert.equal(meta1.l2_content, newText1, "l2_content should match new text");
 
-    console.log("  OK text change refreshes l0/l1/l2");
+    console.log("  OK text change refreshes l0/l2");
 
     // ====================================================================
     // Test 2: Text change refreshes fact_key
@@ -220,7 +216,6 @@ async function runTests() {
           { text: origText2, category: "fact", importance: 0.7 },
           {
             l0_abstract: origText2,
-            l1_overview: `- ${origText2}`,
             l2_content: origText2,
             memory_category: "cases",
             tier: "working",
@@ -272,7 +267,6 @@ async function runTests() {
           { text: origText3, category: "fact", importance: 0.5 },
           {
             l0_abstract: origText3,
-            l1_overview: `- ${origText3}`,
             l2_content: origText3,
             memory_category: "cases",
             tier: "working",
@@ -324,7 +318,6 @@ async function runTests() {
           { text: origText4, category: "fact", importance: 0.5 },
           {
             l0_abstract: origText4,
-            l1_overview: `- ${origText4}`,
             l2_content: origText4,
             memory_category: "facts",
             tier: "working",
@@ -350,9 +343,8 @@ async function runTests() {
     assert.equal(after4.importance, 0.95, "importance field should be updated");
     const meta4 = parseSmartMetadata(after4.metadata, after4);
     assert.equal(meta4.confidence, 0.95, "metadata confidence should be synced to new importance");
-    // l0/l1/l2 should NOT have changed
+    // l0/l2 should NOT have changed
     assert.equal(meta4.l0_abstract, origText4, "l0 should be unchanged");
-    assert.equal(meta4.l1_overview, `- ${origText4}`, "l1 should be unchanged");
     assert.equal(meta4.l2_content, origText4, "l2 should be unchanged");
 
     console.log("  OK importance-only change syncs confidence");
@@ -374,7 +366,6 @@ async function runTests() {
           { text: origText5, category: "fact", importance: 0.6 },
           {
             l0_abstract: origText5,
-            l1_overview: `- ${origText5}`,
             l2_content: origText5,
             memory_category: "facts",
             tier: "working",
@@ -393,9 +384,8 @@ async function runTests() {
     const after5 = await store.getById(entry5.id, scopeFilter);
     assert.equal(after5.category, "decision", "category should be updated");
     const meta5 = parseSmartMetadata(after5.metadata, after5);
-    // l0/l1/l2 should be unchanged since text was not modified
+    // l0/l2 should be unchanged since text was not modified
     assert.equal(meta5.l0_abstract, origText5, "l0 should be preserved");
-    assert.equal(meta5.l1_overview, `- ${origText5}`, "l1 should be preserved");
     assert.equal(meta5.l2_content, origText5, "l2 should be preserved");
     assert.equal(meta5.confidence, 0.6, "confidence should be preserved");
 
@@ -418,7 +408,6 @@ async function runTests() {
           { text: origText6, category: "preference", importance: 0.8 },
           {
             l0_abstract: origText6,
-            l1_overview: "- Vim",
             l2_content: origText6,
             memory_category: "preferences",
             tier: "working",

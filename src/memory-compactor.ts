@@ -101,7 +101,6 @@ export interface CompactionResult {
 
 interface RefinedMemory {
   abstract: string;
-  overview: string;
   content: string;
   category: MemoryEntry["category"];
   memoryCategory: MemoryCategory;
@@ -319,7 +318,6 @@ function normalizeRefinedMemory(value: unknown, fallback: ClusterPlan["merged"])
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   const abstract = typeof raw.abstract === "string" ? raw.abstract.trim() : "";
-  const overview = typeof raw.overview === "string" ? raw.overview.trim() : "";
   const content = typeof raw.content === "string" ? raw.content.trim() : "";
   const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
   if (!abstract || !content) return null;
@@ -331,7 +329,6 @@ function normalizeRefinedMemory(value: unknown, fallback: ClusterPlan["merged"])
 
   return {
     abstract,
-    overview: overview || `- ${abstract}`,
     content,
     category,
     memoryCategory,
@@ -354,11 +351,11 @@ function buildRefinementPrompt(members: CompactionEntry[]): string {
   return [
     "You refine duplicate or near-duplicate long-term memories into one canonical memory.",
     "Preserve durable user-relevant facts, preferences, decisions, and patterns. Remove repetition, obsolete wording, and low-signal noise.",
-    "Return only JSON with keys: abstract, overview, content, category, importance, reason.",
+    "Return only JSON with keys: abstract, content, category, importance, reason.",
     "category must be one of the smart memory categories: profile, preferences, entities, events, cases, patterns. importance must be a number from 0 to 1.",
-    "abstract should be one concise sentence. overview should be a short bullet-style summary. content should be the canonical memory text.",
-    "Output abstract, overview, content, and reason in Simplified Chinese by default; translate ordinary English prose to Simplified Chinese.",
-    "默认用简体中文输出 abstract、overview、content 和 reason；英文普通叙述翻译成简体中文。",
+    "abstract should be one concise sentence. content should be the canonical memory text.",
+    "Output abstract, content, and reason in Simplified Chinese by default; translate ordinary English prose to Simplified Chinese.",
+    "默认用简体中文输出 abstract、content 和 reason；英文普通叙述翻译成简体中文。",
     "Keep code identifiers, API names, file paths, commands, URLs, config keys, model names, and other proper nouns unchanged.",
     "代码标识符、API 名、文件路径、命令、URL、配置键、模型名和其它专有名词保留原文。",
     "",
@@ -562,7 +559,6 @@ export async function runCompaction(
           },
           {
             l0_abstract: refined?.abstract ?? merged.text,
-            l1_overview: refined?.overview ?? `- ${merged.text}`,
             l2_content: refined?.content ?? merged.text,
             memory_category: refined?.memoryCategory ?? reverseMapLegacyCategory(merged.category, merged.text),
             compacted: true,

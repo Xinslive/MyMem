@@ -44,7 +44,6 @@ export type MemorySource =
 
 export interface SmartMemoryMetadata {
   l0_abstract: string;
-  l1_overview: string;
   l2_content: string;
   memory_kind: MemoryKind;
   memory_category: MemoryCategory;
@@ -222,10 +221,6 @@ export function reverseMapLegacyCategory(
   }
 }
 
-function defaultOverview(text: string): string {
-  return `- ${text}`;
-}
-
 function normalizeText(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -331,7 +326,8 @@ export function parseSmartMetadata(
 
   const memoryCategory = reverseMapLegacyCategory(entry.category, text);
   const l0 = normalizeText(parsed.l0_abstract, text);
-  const l2 = normalizeText(parsed.l2_content, text);
+  const legacyL1 = normalizeOptionalString(parsed.l1_overview);
+  const l2 = normalizeText(parsed.l2_content, legacyL1 ?? text);
   const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
   const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
   const fallbackSource =
@@ -363,7 +359,6 @@ export function parseSmartMetadata(
   const normalized: SmartMemoryMetadata = {
     ...parsed,
     l0_abstract: l0,
-    l1_overview: normalizeText(parsed.l1_overview, defaultOverview(l0)),
     l2_content: l2,
     memory_kind: normalizeMemoryKind(rawMemoryKind),
     memory_category: resolvedMemoryCategory,
@@ -455,7 +450,6 @@ export function buildSmartMetadata(
     ...base,
     ...patch,
     l0_abstract: l0Abstract,
-    l1_overview: normalizeText(patch.l1_overview, base.l1_overview),
     l2_content: normalizeText(patch.l2_content, base.l2_content),
     memory_kind: normalizeMemoryKind(patch.memory_kind ?? base.memory_kind),
     memory_category: nextCategory,
@@ -614,6 +608,7 @@ export function stringifySmartMetadata(
   metadata: SmartMemoryMetadata | Record<string, unknown>,
 ): string {
   const capped = { ...metadata } as Record<string, unknown>;
+  delete capped.l1_overview;
 
   // Cap array fields to prevent metadata bloat
   if (Array.isArray(capped.sources) && capped.sources.length > MAX_SOURCES) {

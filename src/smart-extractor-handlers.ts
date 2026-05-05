@@ -112,7 +112,7 @@ function withAdmissionAudit<T extends Record<string, unknown>>(
 }
 
 /**
- * Store a candidate memory as a new entry with L0/L1/L2 metadata.
+ * Store a candidate memory as a new entry with summary/content metadata.
  */
 export async function storeCandidate(
   ctx: HandlerContext,
@@ -134,7 +134,6 @@ export async function storeCandidate(
       },
       {
         l0_abstract: candidate.abstract,
-        l1_overview: candidate.overview,
         l2_content: candidate.content,
         memory_category: candidate.category,
         tier: "working",
@@ -253,7 +252,6 @@ export async function handleMerge(
   admissionAudit?: AdmissionAuditRecord,
 ): Promise<void> {
   let existingAbstract = "";
-  let existingOverview = "";
   let existingContent = "";
 
   try {
@@ -261,7 +259,6 @@ export async function handleMerge(
     if (existing) {
       const meta = parseSmartMetadata(existing.metadata, existing);
       existingAbstract = meta.l0_abstract || existing.text;
-      existingOverview = meta.l1_overview || "";
       existingContent = meta.l2_content || existing.text;
     }
   } catch {
@@ -285,17 +282,14 @@ export async function handleMerge(
   // Call LLM to merge
   const prompt = buildMergePrompt(
     existingAbstract,
-    existingOverview,
     existingContent,
     candidate.abstract,
-    candidate.overview,
     candidate.content,
     candidate.category,
   );
 
   const merged = await ctx.llm.completeJson<{
     abstract: string;
-    overview: string;
     content: string;
   }>(prompt, "merge-memory");
 
@@ -315,7 +309,6 @@ export async function handleMerge(
       ctx,
       buildSmartMetadata(existing ?? { text: merged.abstract }, {
         l0_abstract: merged.abstract,
-        l1_overview: merged.overview,
         l2_content: merged.content,
         memory_category: candidate.category,
         ...defaultLearningKindPatch(candidate.category),
@@ -395,7 +388,6 @@ export async function handleSupersede(
         },
         {
           l0_abstract: candidate.abstract,
-          l1_overview: candidate.overview,
           l2_content: candidate.content,
           memory_category: candidate.category,
           tier: "working",
@@ -493,7 +485,6 @@ export async function handleContextualize(
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
     l0_abstract: candidate.abstract,
-    l1_overview: candidate.overview,
     l2_content: candidate.content,
     memory_category: candidate.category,
     tier: "working" as const,
@@ -559,7 +550,6 @@ export async function handleContradict(
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
     l0_abstract: candidate.abstract,
-    l1_overview: candidate.overview,
     l2_content: candidate.content,
     memory_category: candidate.category,
     tier: "working" as const,

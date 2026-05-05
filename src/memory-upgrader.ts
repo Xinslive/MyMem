@@ -1,7 +1,7 @@
 /**
  * Memory Upgrader — Convert legacy memories to new smart memory format
  *
- * Legacy memories lack L0/L1/L2 metadata, memory_category (6-category),
+ * Legacy memories lack summary/content metadata, memory_category (6-category),
  * tier, access_count, and confidence fields. This module enriches them
  * to enable unified memory lifecycle management (decay, tier promotion,
  * smart dedup).
@@ -9,7 +9,7 @@
  * Pipeline per memory:
  *   1. Detect legacy format (missing `memory_category` in metadata)
  *   2. Reverse-map 5-category → 6-category
- *   3. Generate L0/L1/L2 via LLM (or fallback to simple rules)
+ *   3. Generate summary/content via LLM (or fallback to simple rules)
  *   4. Write enriched metadata back via store.update()
  */
 
@@ -28,7 +28,7 @@ export interface UpgradeOptions {
   dryRun?: boolean;
   /** Number of memories to process per batch (default: 10) */
   batchSize?: number;
-  /** Skip LLM calls; use simple text truncation for L0/L1 (default: false) */
+  /** Skip LLM calls; use simple text truncation for summary/content (default: false) */
   noLlm?: boolean;
   /** Maximum number of memories to upgrade (default: unlimited) */
   limit?: number;
@@ -51,7 +51,6 @@ export interface UpgradeResult {
 
 interface EnrichedMetadata {
   l0_abstract: string;
-  l1_overview: string;
   l2_content: string;
   memory_category: MemoryCategory;
   tier: MemoryTier;
@@ -105,7 +104,7 @@ function reverseMapCategory(
 // ============================================================================
 
 function buildUpgradePrompt(text: string, category: MemoryCategory): string {
-  return `You are a memory librarian. Given a raw memory text and its category, produce a structured 3-layer summary.
+  return `You are a memory librarian. Given a raw memory text and its category, produce a structured memory record.
 
 **Category**: ${category}
 
@@ -117,14 +116,12 @@ ${text.slice(0, 2000)}
 Return ONLY valid JSON (no markdown fences):
 {
   "l0_abstract": "One sentence (≤30 words) summarizing the core fact/preference/event",
-  "l1_overview": "A structured markdown summary (2-5 bullet points)",
   "l2_content": "The full original text, cleaned up if needed",
   "resolved_category": "${category}"
 }
 
 Rules:
 - l0_abstract must be a single concise sentence, suitable as a search index key
-- l1_overview should use markdown bullet points to structure the information
 - l2_content should preserve the original meaning; may clean up formatting
 - resolved_category: if the text is clearly about personal identity/profile info (name, age, role, etc.), set to "profile"; if it's a reusable problem-solution pair, set to "cases"; otherwise keep "${category}"
 - Respond in the SAME language as the raw memory text`;
@@ -137,18 +134,14 @@ Rules:
 function simpleEnrich(
   text: string,
   _category: MemoryCategory,
-): Pick<EnrichedMetadata, "l0_abstract" | "l1_overview" | "l2_content"> {
+): Pick<EnrichedMetadata, "l0_abstract" | "l2_content"> {
   // L0: first sentence or first 80 chars
   const firstSentence = text.match(/^[^.!?。！？\n]+[.!?。！？]?/)?.[0] || text;
   const l0 = firstSentence.slice(0, 100).trim();
 
-  // L1: structured as a single bullet
-  const l1 = `- ${l0}`;
-
   // L2: full text
   return {
     l0_abstract: l0,
-    l1_overview: l1,
     l2_content: text,
   };
 }
@@ -301,15 +294,14 @@ export class MemoryUpgrader {
     // Step 1: Reverse-map category
     let newCategory = reverseMapCategory(entry.category, entry.text);
 
-    // Step 2: Generate L0/L1/L2
-    let enriched: Pick<EnrichedMetadata, "l0_abstract" | "l1_overview" | "l2_content">;
+    // Step 2: Generate summary/content
+    let enriched: Pick<EnrichedMetadata, "l0_abstract" | "l2_content">;
 
     if (!noLlm && this.llm) {
       try {
         const prompt = buildUpgradePrompt(entry.text, newCategory);
         const llmResult = await this.llm.completeJson<{
           l0_abstract: string;
-          l1_overview: string;
           l2_content: string;
           resolved_category?: string;
         }>(prompt);
@@ -321,7 +313,6 @@ export class MemoryUpgrader {
 
         enriched = {
           l0_abstract: llmResult.l0_abstract || simpleEnrich(entry.text, newCategory).l0_abstract,
-          l1_overview: llmResult.l1_overview || simpleEnrich(entry.text, newCategory).l1_overview,
           l2_content: llmResult.l2_content || entry.text,
         };
 
@@ -354,7 +345,6 @@ export class MemoryUpgrader {
         { ...entry, metadata: JSON.stringify(existingMeta) },
         {
           l0_abstract: enriched.l0_abstract,
-          l1_overview: enriched.l1_overview,
           l2_content: enriched.l2_content,
           memory_category: newCategory,
           tier: "working" as MemoryTier,

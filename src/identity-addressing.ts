@@ -10,7 +10,6 @@ type IdentityAddressingMemoryLike = {
   factKey?: string;
   text?: string;
   abstract?: string;
-  overview?: string;
   content?: string;
 };
 
@@ -34,7 +33,6 @@ function combineIdentityTextProbe(params: IdentityAddressingMemoryLike): string 
   return [
     params.text,
     params.abstract,
-    params.overview,
     params.content,
   ]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -75,7 +73,6 @@ function makeCandidate(kind: IdentityKind, alias: string, sourceText: string): C
     return {
       category: "entities",
       abstract: `姓名：${alias}`,
-      overview: `## Identity\n- Name: ${alias}`,
       content: `用户当前姓名/自称为“${alias}”。原始表述：${sourceText}`,
     };
   }
@@ -83,7 +80,6 @@ function makeCandidate(kind: IdentityKind, alias: string, sourceText: string): C
   return {
     category: "preferences",
     abstract: `称呼偏好：${alias}`,
-    overview: `## Addressing\n- Preferred form of address: ${alias}`,
     content: `用户希望以后被称呼为“${alias}”。原始表述：${sourceText}`,
   };
 }
@@ -165,7 +161,7 @@ export function classifyIdentityAndAddressingMemory(
 export function canonicalizeIdentityAndAddressingCandidate(
   candidate: CandidateMemory,
 ): CandidateMemory {
-  const combined = [candidate.abstract, candidate.overview, candidate.content]
+  const combined = [candidate.abstract, candidate.content]
     .filter(Boolean)
     .join("\n");
 

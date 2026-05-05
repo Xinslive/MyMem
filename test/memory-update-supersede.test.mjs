@@ -59,7 +59,6 @@ async function simulateMemoryUpdate(store, resolvedId, text, newVector, importan
           { text, category: existing.category },
           {
             l0_abstract: text,
-            l1_overview: meta.l1_overview,
             l2_content: text,
             memory_category: meta.memory_category,
             tier: meta.tier,
@@ -138,7 +137,6 @@ async function runTests() {
           { text: oldText, category: "preference", importance: 0.8 },
           {
             l0_abstract: oldText,
-            l1_overview: "- 喜欢乌龙茶",
             l2_content: oldText,
             memory_category: "preferences",
             tier: "working",
@@ -194,7 +192,6 @@ async function runTests() {
           { text: "编辑器偏好：VS Code", category: "preference", importance: 0.5 },
           {
             l0_abstract: "编辑器偏好：VS Code",
-            l1_overview: "- VS Code",
             l2_content: "编辑器偏好：VS Code",
             memory_category: "preferences",
             tier: "working",
@@ -234,7 +231,6 @@ async function runTests() {
           { text: "参加了2026年技术大会", category: "fact", importance: 0.6 },
           {
             l0_abstract: "参加了2026年技术大会",
-            l1_overview: "- 技术大会",
             l2_content: "参加了2026年技术大会",
             memory_category: "cases",
             tier: "working",
@@ -273,7 +269,6 @@ async function runTests() {
           { text: "Project Alpha: status active", category: "entity", importance: 0.7 },
           {
             l0_abstract: "Project Alpha: status active",
-            l1_overview: "- Project Alpha is active",
             l2_content: "Project Alpha: status active",
             memory_category: "entities",
             tier: "working",

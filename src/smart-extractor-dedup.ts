@@ -119,14 +119,13 @@ export async function llmDedupDecision(
         metaObj = JSON.parse(r.entry.metadata || "{}");
       } catch { }
       const abstract = (metaObj.l0_abstract as string) || r.entry.text;
-      const overview = (metaObj.l1_overview as string) || "";
-      return `${i + 1}. [${(metaObj.memory_category as string) || r.entry.category}] ${abstract}\n   Overview: ${overview}\n   Score: ${r.score.toFixed(3)}`;
+      const content = (metaObj.l2_content as string) || r.entry.text;
+      return `${i + 1}. [${(metaObj.memory_category as string) || r.entry.category}] ${abstract}\n   Content: ${content.slice(0, 600)}\n   Score: ${r.score.toFixed(3)}`;
     })
     .join("\n");
 
   const prompt = buildDedupPrompt(
     candidate.abstract,
-    candidate.overview,
     candidate.content,
     existingFormatted,
   );

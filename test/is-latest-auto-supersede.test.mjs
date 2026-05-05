@@ -96,7 +96,6 @@ function makeOldEntry(id, text, category) {
         { text, category, importance: 0.7 },
         {
           l0_abstract: text,
-          l1_overview: `- ${text}`,
           l2_content: text,
           source: "manual",
           state: "confirmed",
@@ -183,9 +182,9 @@ async function runTests() {
     console.log("  ✅ new memory has supersedes link");
   }
 
-  // Test 4: new memory preserves canonical fields from old entry
+  // Test 4: new memory preserves canonical fields from old entry and drops legacy L1
   {
-    console.log("Test 4: new memory preserves canonical fields from old entry...");
+    console.log("Test 4: new memory preserves canonical fields and drops legacy L1...");
     const store = makeMockStore();
     const oldId = "old-pref-4";
     const oldEntry = makeOldEntry(oldId, "I prefer dark mode", "preference");
@@ -193,8 +192,10 @@ async function runTests() {
     const oldMeta = parseSmartMetadata(oldEntry.metadata, oldEntry);
     oldMeta.memory_category = "preferences";
     oldMeta.tier = "core";
-    oldMeta.l1_overview = "## Preferences\n- Dark mode preferred";
-    oldEntry.metadata = stringifySmartMetadata(oldMeta);
+    oldEntry.metadata = JSON.stringify({
+      ...oldMeta,
+      l1_overview: "## Preferences\n- Dark mode preferred",
+    });
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -205,8 +206,9 @@ async function runTests() {
     const newMeta = parseSmartMetadata(newEntry.metadata, newEntry);
     assert.equal(newMeta.memory_category, "preferences", "should preserve memory_category");
     assert.equal(newMeta.tier, "core", "should preserve tier");
-    assert.equal(newMeta.l1_overview, "## Preferences\n- Dark mode preferred", "should preserve l1_overview");
-    console.log("  ✅ canonical fields preserved from old entry");
+    const rawNewMeta = JSON.parse(newEntry.metadata);
+    assert.equal(rawNewMeta.l1_overview, undefined, "new metadata should not preserve legacy l1_overview");
+    console.log("  ✅ canonical fields preserved and legacy L1 dropped");
   }
 
   // Test 5: decision category is NOT auto-superseded
