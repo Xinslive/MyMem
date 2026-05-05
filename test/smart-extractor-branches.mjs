@@ -169,8 +169,8 @@ async function seedPreference(dbPath) {
       buildSmartMetadata(
         { text: seedText, category: "preference", importance: 0.8 },
         {
-          l0_abstract: seedText,
-          l2_content: "用户长期喜欢乌龙茶。",
+          summary: seedText,
+          content: "用户长期喜欢乌龙茶。",
           memory_category: "preferences",
           tier: "working",
           confidence: 0.8,

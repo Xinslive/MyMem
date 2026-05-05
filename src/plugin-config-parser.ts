@@ -222,7 +222,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoRecallTimeoutMs: parsePositiveInt(cfg.autoRecallTimeoutMs) ?? 20_000,
     autoRecallDegradeAfterMs: parsePositiveInt(cfg.autoRecallDegradeAfterMs) ?? 5_000,
     maxRecallPerTurn: parsePositiveInt(cfg.maxRecallPerTurn) ?? 15,
-    recallMode: (cfg.recallMode === "full" || cfg.recallMode === "summary" || cfg.recallMode === "l0" || cfg.recallMode === "adaptive" || cfg.recallMode === "off") ? cfg.recallMode : "full",
+    recallMode: (cfg.recallMode === "full" || cfg.recallMode === "summary" || cfg.recallMode === "adaptive" || cfg.recallMode === "off") ? cfg.recallMode : "full",
     autoRecallExcludeAgents: Array.isArray(cfg.autoRecallExcludeAgents)
       ? cfg.autoRecallExcludeAgents
         .filter((id: unknown): id is string => typeof id === "string" && id.trim() !== "")

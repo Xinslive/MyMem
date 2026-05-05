@@ -35,7 +35,7 @@ function createContext(overrides = {}) {
     importance: 0.9,
     timestamp: Date.now(),
     metadata: JSON.stringify({
-      l0_abstract: "The user prefers concise answers.",
+      summary: "The user prefers concise answers.",
       memory_category: "preferences",
       state: "confirmed",
       memory_layer: "durable",

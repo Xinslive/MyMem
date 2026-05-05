@@ -487,13 +487,13 @@ async function applySelfCorrectionRule(params: {
   const sameTopic = results.filter((result) => {
     const meta = parseSmartMetadata(result.entry.metadata, result.entry);
     if (meta.state === "archived") return false;
-    const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || result.entry.text, meta.memory_category);
+    const inferred = inferGovernanceRuleFromMemory(meta.summary || result.entry.text, meta.memory_category);
     return inferred?.topic === rule.topic;
   });
 
   const exact = sameTopic.find((result) => {
     const meta = parseSmartMetadata(result.entry.metadata, result.entry);
-    const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || result.entry.text, meta.memory_category);
+    const inferred = inferGovernanceRuleFromMemory(meta.summary || result.entry.text, meta.memory_category);
     return inferred?.normalizedText === rule.normalizedText;
   });
 
@@ -512,7 +512,7 @@ async function applySelfCorrectionRule(params: {
 
   const conflicting = sameTopic.find((result) => {
     const meta = parseSmartMetadata(result.entry.metadata, result.entry);
-    const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || result.entry.text, meta.memory_category);
+    const inferred = inferGovernanceRuleFromMemory(meta.summary || result.entry.text, meta.memory_category);
     return rulesConflict(inferred, rule);
   });
 
@@ -526,8 +526,8 @@ async function applySelfCorrectionRule(params: {
         importance: Math.max(conflicting.entry.importance, rule.memoryCategory === "preferences" ? 0.9 : 0.85),
         category: rule.storeCategory,
         metadata: stringifySmartMetadata(buildSmartMetadata(conflicting.entry, {
-          l0_abstract: rule.text,
-          l2_content: rule.text,
+          summary: rule.text,
+          content: rule.text,
           memory_category: rule.memoryCategory,
           confidence: rule.confidence,
           source_reason: "self_correction",
@@ -686,7 +686,7 @@ export function registerHookEnhancements(params: {
           : Promise.resolve([]);
         const resolvedInvariants = await invariants;
         const primerBlock = buildSessionPrimerBlock({
-          distilledRules: distilledResults.map((result) => parseSmartMetadata(result.entry.metadata, result.entry).l0_abstract || result.entry.text),
+          distilledRules: distilledResults.map((result) => parseSmartMetadata(result.entry.metadata, result.entry).summary || result.entry.text),
           constraints,
           invariants: resolvedInvariants,
           maxItems: primerConfig.maxItems,
@@ -824,8 +824,8 @@ export function registerHookEnhancements(params: {
               const oldMeta = parseSmartMetadata(match.metadata, match);
               const meta = buildSmartMetadata(match, {
                 ...oldMeta,
-                l0_abstract: correction.newText,
-                l2_content: correction.newText,
+                summary: correction.newText,
+                content: correction.newText,
                 source_session: sessionKey,
                 source: "auto-capture",
                 source_reason: "self_correction",

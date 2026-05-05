@@ -131,8 +131,8 @@ export function isUserMdExclusiveEntry(
       memoryCategory: meta.memory_category,
       factKey: meta.fact_key,
       text: entry.text,
-      abstract: meta.l0_abstract,
-      content: meta.l2_content,
+      abstract: meta.summary,
+      content: meta.content,
     },
     workspaceBoundary,
   );

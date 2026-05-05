@@ -157,19 +157,19 @@ describe("learned skills and maintenance", () => {
       memory_category: "patterns",
     });
     const high = entry("high", "Always verify generated file paths", {
-      l0_abstract: "Verify generated file paths",
+      summary: "Verify generated file paths",
       utility_score: 0.9,
       state: "confirmed",
       memory_layer: "working",
     });
     const low = entry("low", "Mentioned a file path once", {
-      l0_abstract: "Mentioned a file path once",
+      summary: "Mentioned a file path once",
       utility_score: 0.2,
       state: "confirmed",
       memory_layer: "working",
     });
     const archived = entry("archived", "Old archived detail", {
-      l0_abstract: "Old archived detail",
+      summary: "Old archived detail",
       utility_score: 1,
       state: "archived",
       memory_layer: "archive",
@@ -193,8 +193,8 @@ describe("learned skills and maintenance", () => {
     const caseMeta = (text) => stringifySmartMetadata(buildSmartMetadata({ text, category: "fact", timestamp: 1 }, {
       memory_kind: "case",
       memory_category: "cases",
-      l0_abstract: text,
-      l2_content: text,
+      summary: text,
+      content: text,
       state: "confirmed",
       memory_layer: "working",
     }));
@@ -251,14 +251,14 @@ describe("learned skills and maintenance", () => {
       entry("case-1", "Case: deploy rollback required dry run", {
         memory_kind: "case",
         memory_category: "cases",
-        l0_abstract: "Deploy rollback required dry run",
+        summary: "Deploy rollback required dry run",
         state: "confirmed",
         memory_layer: "working",
       }),
       entry("case-2", "Case: deploy rollback should verify dry run first", {
         memory_kind: "case",
         memory_category: "cases",
-        l0_abstract: "Deploy rollback should verify dry run first",
+        summary: "Deploy rollback should verify dry run first",
         state: "confirmed",
         memory_layer: "working",
       }),
@@ -294,14 +294,14 @@ describe("learned skills and maintenance", () => {
       entry("a", "Project Atlas deploy workflow failed in April", {
         memory_kind: "case",
         memory_category: "cases",
-        l0_abstract: "Project Atlas deploy workflow failed in April",
+        summary: "Project Atlas deploy workflow failed in April",
         state: "confirmed",
         memory_layer: "working",
       }),
       entry("b", "Project Atlas deploy workflow needs rollback checklist", {
         memory_kind: "case",
         memory_category: "cases",
-        l0_abstract: "Project Atlas deploy workflow needs rollback checklist",
+        summary: "Project Atlas deploy workflow needs rollback checklist",
         state: "confirmed",
         memory_layer: "working",
       }),

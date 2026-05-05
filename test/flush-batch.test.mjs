@@ -87,7 +87,7 @@ describe("MemoryStore flush-batch", () => {
   it("flushBatch preserves metadata and all fields", async () => {
     const d = mkdtempSync(join(tmpdir(), "flush-fields-"));
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
-    const meta = JSON.stringify({ l0_abstract: "test", memory_category: "fact" });
+    const meta = JSON.stringify({ summary: "test", memory_category: "fact" });
 
     store.startBatch();
     await store.store({ text: "Meta", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "agent:bot", importance: 0.9, metadata: meta });

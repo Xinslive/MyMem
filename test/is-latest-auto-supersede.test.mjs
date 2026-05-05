@@ -95,8 +95,8 @@ function makeOldEntry(id, text, category) {
       buildSmartMetadata(
         { text, category, importance: 0.7 },
         {
-          l0_abstract: text,
-          l2_content: text,
+          summary: text,
+          content: text,
           source: "manual",
           state: "confirmed",
           memory_layer: "durable",
@@ -182,9 +182,9 @@ async function runTests() {
     console.log("  ✅ new memory has supersedes link");
   }
 
-  // Test 4: new memory preserves canonical fields from old entry and drops legacy L1
+  // Test 4: new memory preserves canonical fields from old entry and drops legacy l1_overview
   {
-    console.log("Test 4: new memory preserves canonical fields and drops legacy L1...");
+    console.log("Test 4: new memory preserves canonical fields and drops legacy l1_overview...");
     const store = makeMockStore();
     const oldId = "old-pref-4";
     const oldEntry = makeOldEntry(oldId, "I prefer dark mode", "preference");
@@ -208,7 +208,7 @@ async function runTests() {
     assert.equal(newMeta.tier, "core", "should preserve tier");
     const rawNewMeta = JSON.parse(newEntry.metadata);
     assert.equal(rawNewMeta.l1_overview, undefined, "new metadata should not preserve legacy l1_overview");
-    console.log("  ✅ canonical fields preserved and legacy L1 dropped");
+    console.log("  ✅ canonical fields preserved and legacy l1_overview dropped");
   }
 
   // Test 5: decision category is NOT auto-superseded

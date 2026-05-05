@@ -55,6 +55,14 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.sessionStrategy, "memoryReflection");
   });
 
+  it("does not preserve removed l0 recallMode alias", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      recallMode: "l0",
+    });
+    assert.equal(parsed.recallMode, "full");
+  });
+
   it("uses opinionated defaults after provider endpoints and models are configured", () => {
     const parsed = parsePluginConfig(baseConfig());
 

@@ -1988,15 +1988,15 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         console.log(`Scanned ${allEntries.length} memories${options.scope ? ` (scope: ${options.scope})` : ""}\n`);
 
-        const staleEntries: Array<{ entry: MemoryEntry; l0Prefix: string; textPrefix: string }> = [];
+        const staleEntries: Array<{ entry: MemoryEntry; summaryPrefix: string; textPrefix: string }> = [];
 
         for (const entry of allEntries) {
           const meta = parseSmartMetadata(entry.metadata, entry);
           const textPrefix = entry.text.slice(0, 60).trim();
-          const l0Prefix = (meta.l0_abstract || "").slice(0, 60).trim();
+          const summaryPrefix = (meta.summary || "").slice(0, 60).trim();
 
-          if (textPrefix !== l0Prefix) {
-            staleEntries.push({ entry, l0Prefix, textPrefix });
+          if (textPrefix !== summaryPrefix) {
+            staleEntries.push({ entry, summaryPrefix, textPrefix });
           }
         }
 
@@ -2007,10 +2007,10 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         console.log(`Found ${staleEntries.length} stale entries:\n`);
 
-        for (const { entry, l0Prefix, textPrefix } of staleEntries) {
+        for (const { entry, summaryPrefix, textPrefix } of staleEntries) {
           console.log(`  [${entry.id.slice(0, 8)}] scope=${entry.scope}`);
           console.log(`    text:  "${textPrefix}..."`);
-          console.log(`    l0:    "${l0Prefix}..."`);
+          console.log(`    summary: "${summaryPrefix}..."`);
         }
 
         if (options.dryRun) {
@@ -2026,8 +2026,8 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           try {
             // Rebuild summary/content using truncation fallback from buildSmartMetadata
             const rebuilt = buildSmartMetadata(entry, {
-              l0_abstract: entry.text,
-              l2_content: entry.text,
+              summary: entry.text,
+              content: entry.text,
             });
             const newMetadataStr = stringifySmartMetadata(rebuilt);
             await context.store.update(entry.id, { metadata: newMetadataStr }, scopeFilter);

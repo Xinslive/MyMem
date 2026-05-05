@@ -167,8 +167,8 @@ export function registerMemoryRecallTool(
               const categoryTag = getSmartDisplayCategoryTag(r.entry);
               const metadata = parseSmartMetadata(r.entry.metadata, r.entry);
               const base = includeFullText
-                ? (metadata.l2_content || r.entry.text)
-                : (metadata.l0_abstract || r.entry.text);
+                ? (metadata.content || r.entry.text)
+                : (metadata.summary || r.entry.text);
               const inline = normalizeInlineText(base);
               const rendered = includeFullText
                 ? inline
@@ -182,7 +182,7 @@ export function registerMemoryRecallTool(
             for (let i = 0; i < results.length; i++) {
               const metadata = parseSmartMetadata(results[i].entry.metadata, results[i].entry);
               (serializedMemories[i] as Record<string, unknown>).fullText =
-                metadata.l2_content || results[i].entry.text;
+                metadata.content || results[i].entry.text;
             }
           }
 

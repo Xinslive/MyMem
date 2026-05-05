@@ -71,7 +71,7 @@ async function run() {
     }
 
     if (meta.state === "archived") continue;
-    const key = `${meta.memory_category}:${normalizeKey(meta.l0_abstract || entry.text)}`;
+    const key = `${meta.memory_category}:${normalizeKey(meta.summary || entry.text)}`;
     const existing = canonicalByKey.get(key);
     if (!existing) {
       canonicalByKey.set(key, entry);

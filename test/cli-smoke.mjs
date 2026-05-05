@@ -319,8 +319,8 @@ async function runCliSmoke() {
     importance: 0.9,
     timestamp: Date.now(),
     metadata: JSON.stringify({
-      l0_abstract: "用户以前偏好冰美式咖啡。",
-      l2_content: "旧内容",
+      summary: "用户以前偏好冰美式咖啡。",
+      content: "旧内容",
       memory_category: "preferences",
       memory_type: "semantic",
       state: "confirmed",
@@ -365,7 +365,7 @@ async function runCliSmoke() {
   assert.match(repairOutput, /Repair complete: 1 fixed, 0 failed/);
   const repairedEntry = (await staleStore.list(["agent:smoke"], undefined, 10, 0))[0];
   const repairedMeta = JSON.parse(repairedEntry.metadata || "{}");
-  assert.equal(repairedMeta.l0_abstract, "用户现在偏好热乌龙茶。");
+  assert.equal(repairedMeta.summary, "用户现在偏好热乌龙茶。");
 
   let recallCalls = 0;
   const recallApi = {

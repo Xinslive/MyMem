@@ -815,7 +815,7 @@ export function registerMemoryCompactTool(
           for (const entry of entries) {
             const meta = parseSmartMetadata(entry.metadata, entry);
             if (meta.state === "archived") continue;
-            const key = `${meta.memory_category}:${normalizeInlineText(meta.l0_abstract).toLowerCase()}`;
+            const key = `${meta.memory_category}:${normalizeInlineText(meta.summary).toLowerCase()}`;
             const existing = canonicalByKey.get(key);
             if (!existing) {
               canonicalByKey.set(key, entry);
@@ -937,7 +937,7 @@ export function registerMemoryExplainRankTool(
               `${idx + 1}. [${r.entry.id}] score=${r.score.toFixed(3)} ${sourceBreakdown.join(" ")}`.trim(),
               `   state=${meta.state} layer=${meta.memory_layer} source=${meta.source} tier=${meta.tier}`,
               `   kind=${meta.memory_kind} access=${meta.access_count} injected=${meta.injected_count} utility=${meta.utility_score.toFixed(2)} badRecall=${meta.bad_recall_count} suppressedUntilTurn=${meta.suppressed_until_turn}`,
-              `   text=${truncateText(normalizeInlineText(meta.l0_abstract || r.entry.text), 180)}`,
+              `   text=${truncateText(normalizeInlineText(meta.summary || r.entry.text), 180)}`,
             ].join("\n");
           });
 

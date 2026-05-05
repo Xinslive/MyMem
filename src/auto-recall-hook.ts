@@ -120,10 +120,10 @@ function formatReasoningStrategyLine(result: RecallResult, maxChars: number): Re
   const outcome = typeof meta.outcome === "string" ? meta.outcome : "unknown";
   const title = typeof meta.strategy_title === "string" && meta.strategy_title.trim()
     ? meta.strategy_title.trim()
-    : meta.l0_abstract || result.entry.text;
+    : meta.summary || result.entry.text;
   const detailParts = Array.isArray(meta.strategy_steps)
     ? meta.strategy_steps.filter((step): step is string => typeof step === "string")
-    : sanitizeForContext(meta.l2_content || result.entry.text)
+    : sanitizeForContext(meta.content || result.entry.text)
       .split(/\r?\n/)
       .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
       .filter(Boolean);
@@ -632,10 +632,10 @@ export function registerAutoRecallHook(params: {
       );
 
       const effectivePerItemMaxChars = (() => {
-        if (recallMode === "summary" || recallMode === "l0") return Math.min(autoRecallPerItemMaxChars, 80);
+        if (recallMode === "summary") return Math.min(autoRecallPerItemMaxChars, 80);
         if (!intent) return autoRecallPerItemMaxChars;
         switch (intent.depth) {
-          case "l0": return Math.min(autoRecallPerItemMaxChars, 80);
+          case "summary": return Math.min(autoRecallPerItemMaxChars, 80);
           case "full": return Math.min(autoRecallPerItemMaxChars * 3, 1000);
         }
       })();
@@ -684,9 +684,9 @@ export function registerAutoRecallHook(params: {
                 ? formatSceneExpandedLine(sceneEntry, members, effectivePerItemMaxChars)
                 : formatSceneLine(sceneEntry, effectivePerItemMaxChars);
             })()
-          : (recallMode === "summary" || recallMode === "l0")
-            ? (metaObj.l0_abstract || r.entry.text)
-            : (metaObj.l2_content || r.entry.text);
+          : recallMode === "summary"
+            ? (metaObj.summary || r.entry.text)
+            : (metaObj.content || r.entry.text);
         const summary = sanitizeForContext(contentText).slice(0, effectivePerItemMaxChars);
         const linePrefix = "- " + buildPrefix() + " ";
         const line = linePrefix + summary;

@@ -70,8 +70,8 @@ function makeMemoryEntry({
     importance: 0.8,
     timestamp,
     metadata: JSON.stringify({
-      l0_abstract: text,
-      l2_content: text,
+      summary: text,
+      content: text,
       memory_category: memoryCategory,
       memory_type: "knowledge",
       tier: "working",

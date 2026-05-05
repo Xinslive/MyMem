@@ -282,7 +282,7 @@ describe("auto-recall metadata write-behind", () => {
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          l0_abstract: "session end should flush metadata",
+          summary: "session end should flush metadata",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",
@@ -996,7 +996,7 @@ describe("real before_prompt_build hook", () => {
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          l0_abstract: "shared memory should be available in each session key",
+          summary: "shared memory should be available in each session key",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",
@@ -1107,7 +1107,7 @@ describe("real before_prompt_build hook", () => {
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          l0_abstract: "legacy turn-only suppression should not hide this memory",
+          summary: "legacy turn-only suppression should not hide this memory",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",
@@ -1190,7 +1190,7 @@ describe("real before_prompt_build hook", () => {
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          l0_abstract: "plain memory should inject without scene expansion",
+          summary: "plain memory should inject without scene expansion",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",

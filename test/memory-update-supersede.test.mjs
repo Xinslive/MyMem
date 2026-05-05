@@ -58,8 +58,8 @@ async function simulateMemoryUpdate(store, resolvedId, text, newVector, importan
         const newMeta = buildSmartMetadata(
           { text, category: existing.category },
           {
-            l0_abstract: text,
-            l2_content: text,
+            summary: text,
+            content: text,
             memory_category: meta.memory_category,
             tier: meta.tier,
             access_count: 0,
@@ -136,8 +136,8 @@ async function runTests() {
         buildSmartMetadata(
           { text: oldText, category: "preference", importance: 0.8 },
           {
-            l0_abstract: oldText,
-            l2_content: oldText,
+            summary: oldText,
+            content: oldText,
             memory_category: "preferences",
             tier: "working",
             confidence: 0.8,
@@ -191,8 +191,8 @@ async function runTests() {
         buildSmartMetadata(
           { text: "编辑器偏好：VS Code", category: "preference", importance: 0.5 },
           {
-            l0_abstract: "编辑器偏好：VS Code",
-            l2_content: "编辑器偏好：VS Code",
+            summary: "编辑器偏好：VS Code",
+            content: "编辑器偏好：VS Code",
             memory_category: "preferences",
             tier: "working",
             confidence: 0.5,
@@ -230,8 +230,8 @@ async function runTests() {
         buildSmartMetadata(
           { text: "参加了2026年技术大会", category: "fact", importance: 0.6 },
           {
-            l0_abstract: "参加了2026年技术大会",
-            l2_content: "参加了2026年技术大会",
+            summary: "参加了2026年技术大会",
+            content: "参加了2026年技术大会",
             memory_category: "cases",
             tier: "working",
             confidence: 0.6,
@@ -268,8 +268,8 @@ async function runTests() {
         buildSmartMetadata(
           { text: "Project Alpha: status active", category: "entity", importance: 0.7 },
           {
-            l0_abstract: "Project Alpha: status active",
-            l2_content: "Project Alpha: status active",
+            summary: "Project Alpha: status active",
+            content: "Project Alpha: status active",
             memory_category: "entities",
             tier: "working",
             confidence: 0.7,

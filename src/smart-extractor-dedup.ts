@@ -113,13 +113,13 @@ export async function llmDedupDecision(
   const topSimilar = similar.slice(0, MAX_SIMILAR_FOR_PROMPT);
   const existingFormatted = topSimilar
     .map((r, i) => {
-      // Extract L0 abstract from metadata if available, fallback to text
+      // Extract summary from metadata if available, fallback to text
       let metaObj: Record<string, unknown> = {};
       try {
         metaObj = JSON.parse(r.entry.metadata || "{}");
       } catch { }
-      const abstract = (metaObj.l0_abstract as string) || r.entry.text;
-      const content = (metaObj.l2_content as string) || r.entry.text;
+      const abstract = (metaObj.summary as string) || r.entry.text;
+      const content = (metaObj.content as string) || r.entry.text;
       return `${i + 1}. [${(metaObj.memory_category as string) || r.entry.category}] ${abstract}\n   Content: ${content.slice(0, 600)}\n   Score: ${r.score.toFixed(3)}`;
     })
     .join("\n");

@@ -107,7 +107,7 @@ console.log(`  ✅ Slice cap works correctly (${big.slices.length} slices, ${big
 // --- Test 7: stringifySmartMetadata caps array fields ---
 console.log("\nTest 7: stringifySmartMetadata caps sources/history/relations...");
 const bigMeta = {
-    l0_abstract: "test",
+    summary: "test",
     sources: Array.from({ length: 30 }, (_, i) => `src_${i}`),
     history: Array.from({ length: 60 }, (_, i) => `hist_${i}`),
     relations: Array.from({ length: 20 }, (_, i) => ({ type: "ref", targetId: `t_${i}` })),

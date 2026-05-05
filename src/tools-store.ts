@@ -235,8 +235,8 @@ export function registerMemoryStoreTool(
             const newMeta = buildSmartMetadata(
               { text, category: storeCategory, importance: safeImportance },
               {
-                l0_abstract: text,
-                l2_content: text,
+                summary: text,
+                content: text,
                 memory_category: oldMeta.memory_category,
                 ...defaultLearningKindPatch(oldMeta.memory_category),
                 tier: oldMeta.tier,
@@ -338,8 +338,8 @@ export function registerMemoryStoreTool(
                   importance: safeImportance,
                 },
                 {
-                  l0_abstract: text,
-                  l2_content: text,
+                  summary: text,
+                  content: text,
                   memory_category: memoryCategory,
                   ...defaultLearningKindPatch(memoryCategory),
                   source: "manual",

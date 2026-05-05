@@ -558,8 +558,8 @@ export async function runCompaction(
             importance: merged.importance,
           },
           {
-            l0_abstract: refined?.abstract ?? merged.text,
-            l2_content: refined?.content ?? merged.text,
+            summary: refined?.abstract ?? merged.text,
+            content: refined?.content ?? merged.text,
             memory_category: refined?.memoryCategory ?? reverseMapLegacyCategory(merged.category, merged.text),
             compacted: true,
             source_ids: members.map((m) => m.id),

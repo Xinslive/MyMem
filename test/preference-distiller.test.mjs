@@ -26,8 +26,8 @@ function makeEntry({
     metadata: stringifySmartMetadata(buildSmartMetadata(
       { text, category, importance: 0.8, timestamp },
       {
-        l0_abstract: text,
-        l2_content: text,
+        summary: text,
+        content: text,
         memory_category: memoryCategory,
         confidence: 0.8,
         source: "manual",

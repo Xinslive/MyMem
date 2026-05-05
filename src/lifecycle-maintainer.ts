@@ -106,13 +106,13 @@ function contradictionKey(entry: MemoryEntry, meta: SmartMemoryMetadata): string
     if (factKey) return factKey;
   }
   if (meta.memory_category === "patterns") {
-    const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || entry.text, "patterns");
+    const inferred = inferGovernanceRuleFromMemory(meta.summary || entry.text, "patterns");
     if (inferred) return inferred.topic;
     const canonical = typeof meta.canonical_id === "string" ? meta.canonical_id.trim() : "";
     if (canonical) return canonical;
   }
   if (meta.memory_category === "preferences") {
-    const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || entry.text, "preferences");
+    const inferred = inferGovernanceRuleFromMemory(meta.summary || entry.text, "preferences");
     if (inferred) return inferred.topic;
     const canonical = typeof meta.canonical_id === "string" ? meta.canonical_id.trim() : "";
     if (canonical) return canonical;
@@ -152,7 +152,7 @@ function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: stri
 
     const newest = sorted[0];
     const newestRule = newest.meta.memory_category === "patterns" || newest.meta.memory_category === "preferences"
-      ? inferGovernanceRuleFromMemory(newest.meta.l0_abstract || newest.entry.text, newest.meta.memory_category)
+      ? inferGovernanceRuleFromMemory(newest.meta.summary || newest.entry.text, newest.meta.memory_category)
       : null;
 
     for (const older of sorted.slice(1)) {
@@ -166,12 +166,12 @@ function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: stri
         newest.meta.fact_key &&
         older.meta.fact_key &&
         newest.meta.fact_key === older.meta.fact_key &&
-        newest.meta.l0_abstract !== older.meta.l0_abstract &&
+        newest.meta.summary !== older.meta.summary &&
         newerConfidence >= olderConfidence
       ) {
         shouldArchive = true;
       } else if (older.meta.memory_category === "patterns" || older.meta.memory_category === "preferences") {
-        const olderRule = inferGovernanceRuleFromMemory(older.meta.l0_abstract || older.entry.text, older.meta.memory_category);
+        const olderRule = inferGovernanceRuleFromMemory(older.meta.summary || older.entry.text, older.meta.memory_category);
         if (rulesConflict(newestRule, olderRule) && newerConfidence >= olderConfidence) {
           shouldArchive = true;
         }
@@ -179,7 +179,7 @@ function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: stri
         typeof newest.meta.canonical_id === "string" &&
         typeof older.meta.canonical_id === "string" &&
         newest.meta.canonical_id === older.meta.canonical_id &&
-        newest.meta.l0_abstract !== older.meta.l0_abstract &&
+        newest.meta.summary !== older.meta.summary &&
         newerConfidence >= olderConfidence
       ) {
         shouldArchive = true;

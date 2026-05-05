@@ -50,7 +50,7 @@ describe("memory governance tools", () => {
         scope: "global",
         importance: 0.7,
         timestamp: Date.now(),
-        metadata: JSON.stringify({ l0_abstract: "remember coffee preference", state: "pending", source: "auto-capture", memory_layer: "working" }),
+        metadata: JSON.stringify({ summary: "remember coffee preference", state: "pending", source: "auto-capture", memory_layer: "working" }),
       },
     ];
 
@@ -128,7 +128,7 @@ describe("memory governance tools", () => {
         scope: "global",
         importance: 0.7,
         timestamp: now,
-        metadata: JSON.stringify({ l0_abstract: "Use tavily first", memory_category: "cases", state: "confirmed", source: "manual", memory_layer: "working" }),
+        metadata: JSON.stringify({ summary: "Use tavily first", memory_category: "cases", state: "confirmed", source: "manual", memory_layer: "working" }),
       },
       {
         id: "b2222222-2222-4222-8222-222222222222",
@@ -137,7 +137,7 @@ describe("memory governance tools", () => {
         scope: "global",
         importance: 0.6,
         timestamp: now - 1000,
-        metadata: JSON.stringify({ l0_abstract: "Use tavily first", memory_category: "cases", state: "confirmed", source: "manual", memory_layer: "working" }),
+        metadata: JSON.stringify({ summary: "Use tavily first", memory_category: "cases", state: "confirmed", source: "manual", memory_layer: "working" }),
       },
     ];
 
@@ -197,7 +197,7 @@ describe("memory governance tools", () => {
         scope: "global",
         importance: 0.8,
         timestamp: Date.now(),
-        metadata: JSON.stringify({ l0_abstract: "Prefer concise answers", memory_category: "preferences" }),
+        metadata: JSON.stringify({ summary: "Prefer concise answers", memory_category: "preferences" }),
       },
       {
         id: "c2222222-2222-4222-8222-222222222222",
@@ -206,7 +206,7 @@ describe("memory governance tools", () => {
         scope: "global",
         importance: 0.7,
         timestamp: Date.now() - 1000,
-        metadata: JSON.stringify({ l0_abstract: "Debugged the cache issue", memory_category: "cases" }),
+        metadata: JSON.stringify({ summary: "Debugged the cache issue", memory_category: "cases" }),
       },
     ];
 
@@ -252,8 +252,8 @@ describe("memory governance tools", () => {
         buildSmartMetadata(
           { text: "Use tavily first", category: "fact", importance: 0.7 },
           {
-            l0_abstract: "Use tavily first",
-            l2_content: "Use tavily first",
+            summary: "Use tavily first",
+            content: "Use tavily first",
             memory_category: "cases",
           },
         ),

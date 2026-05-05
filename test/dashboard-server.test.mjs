@@ -58,8 +58,8 @@ function createContext() {
     timestamp: Date.now(),
     metadata: JSON.stringify({
       memory_category: "preferences",
-      l0_abstract: "The user likes clear dashboards.",
-      l2_content: "The user likes dashboard pages with clear visual summaries.",
+      summary: "The user likes clear dashboards.",
+      content: "The user likes dashboard pages with clear visual summaries.",
       state: "confirmed",
       confidence: 0.91,
       access_count: 3,
@@ -81,8 +81,8 @@ function createContext() {
     timestamp: Date.now() - 1000,
     metadata: JSON.stringify({
       memory_category: "profile",
-      l0_abstract: "Stale profile note.",
-      l2_content: "A legacy fact stores a stale profile-like note.",
+      summary: "Stale profile note.",
+      content: "A legacy fact stores a stale profile-like note.",
       state: "confirmed",
       confidence: 0.21,
       bad_recall_count: 2,
@@ -229,7 +229,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.match(page.body, /记忆瀑布流/);
     assert.match(page.body, /masonry-list/);
     assert.match(page.body, /data-action="delete"/);
-    assert.match(page.body, /L0 摘要/);
+    assert.match(page.body, /摘要/);
     assert.match(page.body, /处理阶段/);
     assert.match(page.body, /命中结果/);
     assert.doesNotMatch(page.body, /反馈循环/);
@@ -261,7 +261,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(memories.statusCode, 200);
     assert.equal(memories.body.memories[0].categoryLabel, "用户偏好");
     assert.equal(memories.body.memories[0].scopeLabel, "全局");
-    assert.equal(memories.body.memories[0].details.l0, "The user likes clear dashboards.");
+    assert.equal(memories.body.memories[0].details.summary, "The user likes clear dashboards.");
     assert.deepEqual(memories.body.memories[0].learning, {
       kind: "memory",
       utilityScore: 0.67,

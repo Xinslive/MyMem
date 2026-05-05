@@ -35,7 +35,7 @@ describe("governance metadata compatibility", () => {
 
   it("maps session-summary records to archived/reflection defaults", () => {
     const meta = parseSmartMetadata(
-      JSON.stringify({ type: "session-summary", l0_abstract: "summary" }),
+      JSON.stringify({ type: "session-summary", summary: "summary" }),
       {
         text: "summary",
         category: "other",

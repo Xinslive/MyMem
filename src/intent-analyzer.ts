@@ -27,7 +27,7 @@ export type MemoryCategoryIntent =
   | "entity"
   | "other";
 
-export type RecallDepth = "l0" | "full";
+export type RecallDepth = "summary" | "full";
 
 /**
  * Knowledge vs Experience routing (arxiv:2602.05665 §V-E).
@@ -76,7 +76,7 @@ const INTENT_RULES: IntentRule[] = [
       /(用\S+比较好|推荐用|倾向于|比较喜欢|更喜欢|最好用|一般用)/,
     ],
     categories: ["preference", "decision"],
-    depth: "l0",
+    depth: "summary",
     memoryType: "knowledge",
   },
 
@@ -161,7 +161,7 @@ const INTENT_RULES: IntentRule[] = [
 // Analyzer
 // ============================================================================
 
-const DEPTH_RANK: Record<RecallDepth, number> = { l0: 0, full: 1 };
+const DEPTH_RANK: Record<RecallDepth, number> = { summary: 0, full: 1 };
 
 /**
  * Analyze a query to determine which memory categories and recall depth
@@ -177,7 +177,7 @@ export function analyzeIntent(query: string): IntentSignal {
   if (!trimmed) {
     return {
       categories: [],
-      depth: "l0",
+      depth: "summary",
       confidence: "low",
       label: "empty",
     };
@@ -194,7 +194,7 @@ export function analyzeIntent(query: string): IntentSignal {
     // No specific intent detected — return broad signal.
     return {
       categories: [],
-      depth: "l0",
+      depth: "summary",
       confidence: "low",
       label: "broad",
     };
@@ -281,7 +281,7 @@ export function applyMemoryTypeBoost<
 /**
  * Format a memory entry for context injection at the specified depth level.
  *
- * - l0: One-line summary (category + scope + truncated text)
+ * - summary: One-line summary (category + scope + truncated text)
  * - full: Complete text (existing behavior)
  */
 export function formatAtDepth(
@@ -304,7 +304,7 @@ export function formatAtDepth(
   const safe = extra?.sanitize ? extra.sanitize(entry.text) : entry.text;
 
   switch (depth) {
-    case "l0": {
+    case "summary": {
       // Ultra-compact: first sentence or first 80 chars
       const brief = extractFirstSentence(safe, 80);
       return `- [${entry.category}] ${brief} (${scoreStr}${sourceTag})`;

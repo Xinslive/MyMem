@@ -50,8 +50,8 @@ export interface UpgradeResult {
 }
 
 interface EnrichedMetadata {
-  l0_abstract: string;
-  l2_content: string;
+  summary: string;
+  content: string;
   memory_category: MemoryCategory;
   tier: MemoryTier;
   access_count: number;
@@ -115,14 +115,14 @@ ${text.slice(0, 2000)}
 
 Return ONLY valid JSON (no markdown fences):
 {
-  "l0_abstract": "One sentence (≤30 words) summarizing the core fact/preference/event",
-  "l2_content": "The full original text, cleaned up if needed",
+  "summary": "One sentence (≤30 words) summarizing the core fact/preference/event",
+  "content": "The full original text, cleaned up if needed",
   "resolved_category": "${category}"
 }
 
 Rules:
-- l0_abstract must be a single concise sentence, suitable as a search index key
-- l2_content should preserve the original meaning; may clean up formatting
+- summary must be a single concise sentence, suitable as a search index key
+- content should preserve the original meaning; may clean up formatting
 - resolved_category: if the text is clearly about personal identity/profile info (name, age, role, etc.), set to "profile"; if it's a reusable problem-solution pair, set to "cases"; otherwise keep "${category}"
 - Respond in the SAME language as the raw memory text`;
 }
@@ -134,15 +134,13 @@ Rules:
 function simpleEnrich(
   text: string,
   _category: MemoryCategory,
-): Pick<EnrichedMetadata, "l0_abstract" | "l2_content"> {
-  // L0: first sentence or first 80 chars
+): Pick<EnrichedMetadata, "summary" | "content"> {
   const firstSentence = text.match(/^[^.!?。！？\n]+[.!?。！？]?/)?.[0] || text;
-  const l0 = firstSentence.slice(0, 100).trim();
+  const summary = firstSentence.slice(0, 100).trim();
 
-  // L2: full text
   return {
-    l0_abstract: l0,
-    l2_content: text,
+    summary,
+    content: text,
   };
 }
 
@@ -295,14 +293,14 @@ export class MemoryUpgrader {
     let newCategory = reverseMapCategory(entry.category, entry.text);
 
     // Step 2: Generate summary/content
-    let enriched: Pick<EnrichedMetadata, "l0_abstract" | "l2_content">;
+    let enriched: Pick<EnrichedMetadata, "summary" | "content">;
 
     if (!noLlm && this.llm) {
       try {
         const prompt = buildUpgradePrompt(entry.text, newCategory);
         const llmResult = await this.llm.completeJson<{
-          l0_abstract: string;
-          l2_content: string;
+          summary: string;
+          content: string;
           resolved_category?: string;
         }>(prompt);
 
@@ -312,8 +310,8 @@ export class MemoryUpgrader {
         }
 
         enriched = {
-          l0_abstract: llmResult.l0_abstract || simpleEnrich(entry.text, newCategory).l0_abstract,
-          l2_content: llmResult.l2_content || entry.text,
+          summary: llmResult.summary || simpleEnrich(entry.text, newCategory).summary,
+          content: llmResult.content || entry.text,
         };
 
         // LLM may have resolved the ambiguous fact→profile/cases
@@ -344,8 +342,8 @@ export class MemoryUpgrader {
       ...buildSmartMetadata(
         { ...entry, metadata: JSON.stringify(existingMeta) },
         {
-          l0_abstract: enriched.l0_abstract,
-          l2_content: enriched.l2_content,
+          summary: enriched.summary,
+          content: enriched.content,
           memory_category: newCategory,
           tier: "working" as MemoryTier,
           access_count: 0,
@@ -358,8 +356,8 @@ export class MemoryUpgrader {
 
     // Step 4: Update the memory entry
     await this.store.update(entry.id, {
-      // Update text to L0 abstract for better search indexing
-      text: enriched.l0_abstract,
+      // Update text to the summary for better search indexing
+      text: enriched.summary,
       metadata: stringifySmartMetadata({ ...newMetadata }),
     });
   }

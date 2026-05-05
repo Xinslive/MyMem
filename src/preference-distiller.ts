@@ -121,7 +121,7 @@ function entryToEvidence(entry: MemoryEntry): Evidence | null {
     categoryHint = meta.memory_category;
   }
 
-  const seedText = meta.l0_abstract || entry.text;
+  const seedText = meta.summary || entry.text;
   const rule = inferGovernanceRuleFromMemory(seedText, categoryHint);
   if (!rule) return null;
 
@@ -261,19 +261,19 @@ export async function runPreferenceDistiller(
       if (typeof meta.canonical_id === "string" && meta.canonical_id.trim() && meta.canonical_id === candidate.rule.canonicalId) {
         return true;
       }
-      const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || entry.text, meta.memory_category);
+      const inferred = inferGovernanceRuleFromMemory(meta.summary || entry.text, meta.memory_category);
       return inferred?.topic === candidate.rule.topic;
     });
 
     const exact = sameTopic.find((entry) => {
       const meta = parseSmartMetadata(entry.metadata, entry);
-      const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || entry.text, meta.memory_category);
+      const inferred = inferGovernanceRuleFromMemory(meta.summary || entry.text, meta.memory_category);
       return inferred?.normalizedText === candidate.rule.normalizedText;
     });
 
     const conflictingEntries = sameTopic.filter((entry) => {
       const meta = parseSmartMetadata(entry.metadata, entry);
-      const inferred = inferGovernanceRuleFromMemory(meta.l0_abstract || entry.text, meta.memory_category);
+      const inferred = inferGovernanceRuleFromMemory(meta.summary || entry.text, meta.memory_category);
       return rulesConflict(inferred, candidate.rule);
     });
 
@@ -317,8 +317,8 @@ export async function runPreferenceDistiller(
 
       const now = Date.now();
       const next = buildSmartMetadata(conflicting, {
-        l0_abstract: candidate.rule.text,
-        l2_content: candidate.rule.text,
+        summary: candidate.rule.text,
+        content: candidate.rule.text,
         memory_category: candidate.rule.memoryCategory,
         confidence: candidate.confidence,
         source_reason: "preference_distiller",

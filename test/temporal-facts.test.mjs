@@ -147,8 +147,8 @@ async function runTest() {
         buildSmartMetadata(
           { text: oldText, category: "preference", importance: 0.8 },
           {
-            l0_abstract: oldText,
-            l2_content: "用户喜欢乌龙茶。",
+            summary: oldText,
+            content: "用户喜欢乌龙茶。",
             memory_category: "preferences",
             tier: "working",
             confidence: 0.8,
@@ -237,8 +237,8 @@ async function runTest() {
           buildSmartMetadata(
             { text: `饮品偏好：历史版本${i}`, category: "preference", importance: 0.8 },
             {
-              l0_abstract: `饮品偏好：历史版本${i}`,
-              l2_content: `历史版本${i}`,
+              summary: `饮品偏好：历史版本${i}`,
+              content: `历史版本${i}`,
               memory_category: "preferences",
               tier: "working",
               confidence: 0.8,

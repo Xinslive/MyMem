@@ -8,7 +8,7 @@ describe("analyzeIntent", () => {
     // Composite intent: matches both "preference" and "fact" rules
     assert.ok(result.label.includes("preference"));
     assert.equal(result.confidence, "high");
-    assert.equal(result.depth, "l1"); // deepest of l0 (pref) + l1 (fact)
+    assert.equal(result.depth, "full"); // deepest of summary (pref) + full (fact)
     assert.ok(result.categories.includes("preference"));
   });
 
@@ -22,7 +22,7 @@ describe("analyzeIntent", () => {
     const result = analyzeIntent("Why did we choose PostgreSQL over MySQL?");
     assert.equal(result.label, "decision");
     assert.equal(result.confidence, "high");
-    assert.equal(result.depth, "l1");
+    assert.equal(result.depth, "full");
     assert.ok(result.categories.includes("decision"));
   });
 
@@ -75,7 +75,7 @@ describe("analyzeIntent", () => {
     const result = analyzeIntent("How does the authentication API work?");
     assert.equal(result.label, "fact");
     assert.equal(result.confidence, "high");
-    assert.equal(result.depth, "l1");
+    assert.equal(result.depth, "full");
   });
 
   it("detects fact intent (Chinese)", () => {
@@ -89,7 +89,7 @@ describe("analyzeIntent", () => {
     assert.equal(result.label, "broad");
     assert.equal(result.confidence, "low");
     assert.deepEqual(result.categories, []);
-    assert.equal(result.depth, "l0");
+    assert.equal(result.depth, "summary");
   });
 
   // --- Extended Chinese pattern tests ---
@@ -159,7 +159,7 @@ describe("applyCategoryBoost", () => {
   it("boosts matching categories and re-sorts", () => {
     const intent = {
       categories: ["preference"],
-      depth: "l0",
+      depth: "summary",
       confidence: "high",
       label: "preference",
     };
@@ -172,7 +172,7 @@ describe("applyCategoryBoost", () => {
   it("returns results unchanged for low confidence", () => {
     const intent = {
       categories: [],
-      depth: "l0",
+      depth: "summary",
       confidence: "low",
       label: "broad",
     };
@@ -186,7 +186,7 @@ describe("applyCategoryBoost", () => {
     ];
     const intent = {
       categories: ["preference"],
-      depth: "l0",
+      depth: "summary",
       confidence: "high",
       label: "preference",
     };
@@ -202,16 +202,16 @@ describe("formatAtDepth", () => {
     scope: "global",
   };
 
-  it("l0: returns compact one-line summary", () => {
-    const line = formatAtDepth(entry, "l0", 0.85, 0);
+  it("summary: returns compact one-line summary", () => {
+    const line = formatAtDepth(entry, "summary", 0.85, 0);
     assert.ok(line.length < entry.text.length + 30); // shorter than full
     assert.ok(line.includes("[preference]"));
     assert.ok(line.includes("85%"));
-    assert.ok(!line.includes("global")); // l0 omits scope
+    assert.ok(!line.includes("global")); // summary omits scope
   });
 
-  it("l1: returns medium detail with scope", () => {
-    const line = formatAtDepth(entry, "l1", 0.72, 1);
+  it("full: returns medium detail with scope", () => {
+    const line = formatAtDepth(entry, "full", 0.72, 1);
     assert.ok(line.includes("[preference:global]"));
     assert.ok(line.includes("72%"));
   });
@@ -230,20 +230,20 @@ describe("formatAtDepth", () => {
 
   it("handles short text without truncation", () => {
     const short = { text: "Use tabs.", category: "preference", scope: "global" };
-    const l0 = formatAtDepth(short, "l0", 0.9, 0);
-    assert.ok(l0.includes("Use tabs."));
+    const summary = formatAtDepth(short, "summary", 0.9, 0);
+    assert.ok(summary.includes("Use tabs."));
   });
 
-  it("splits CJK sentences correctly at l0 depth", () => {
+  it("splits CJK sentences correctly at summary depth", () => {
     const cjk = {
       text: "第一句结束。第二句开始，这里有更多内容需要处理。",
       category: "fact",
       scope: "global",
     };
-    const l0 = formatAtDepth(cjk, "l0", 0.8, 0);
+    const summary = formatAtDepth(cjk, "summary", 0.8, 0);
     // Should stop at first 。 not include second sentence
-    assert.ok(l0.includes("第一句结束。"));
-    assert.ok(!l0.includes("第二句开始"));
+    assert.ok(summary.includes("第一句结束。"));
+    assert.ok(!summary.includes("第二句开始"));
   });
 
   it("applies sanitize function when provided", () => {

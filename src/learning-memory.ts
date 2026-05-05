@@ -258,7 +258,7 @@ export function isEnabledSkillMemory(meta: SmartMemoryMetadata, config?: Learnin
 
 export function formatLearnedSkillLine(entry: MemoryEntry, maxChars: number): string {
   const meta = parseSmartMetadata(entry.metadata, entry);
-  const name = meta.skill_name || meta.scene_title || meta.l0_abstract || "learned-skill";
+  const name = meta.skill_name || meta.scene_title || meta.summary || "learned-skill";
   const conditions = Array.isArray(meta.skill_activation_conditions)
     ? meta.skill_activation_conditions.slice(0, 3).join(" | ")
     : "";
@@ -268,15 +268,15 @@ export function formatLearnedSkillLine(entry: MemoryEntry, maxChars: number): st
   const body = [
     name,
     conditions ? `Trigger: ${conditions}` : "",
-    steps ? `Action: ${steps}` : (meta.l2_content || entry.text),
+    steps ? `Action: ${steps}` : (meta.content || entry.text),
   ].filter(Boolean).join(" -> ");
   return `- [skill:${entry.scope}] ${body}`.slice(0, maxChars).trim();
 }
 
 export function formatSceneLine(entry: MemoryEntry, maxChars: number): string {
   const meta = parseSmartMetadata(entry.metadata, entry);
-  const title = meta.scene_title || meta.l0_abstract || "Memory scene";
-  const body = meta.l2_content || entry.text;
+  const title = meta.scene_title || meta.summary || "Memory scene";
+  const body = meta.content || entry.text;
   return `- [scene:${entry.scope}] ${title}: ${body}`.slice(0, maxChars).trim();
 }
 
@@ -289,7 +289,7 @@ export function formatSceneExpandedLine(
   const expansion = members
     .map((member) => {
       const memberMeta = parseSmartMetadata(member.metadata, member);
-      return memberMeta.l0_abstract || member.text;
+      return memberMeta.summary || member.text;
     })
     .filter(Boolean)
     .slice(0, 5)
@@ -355,7 +355,7 @@ function extractTopic(entry: MemoryEntry, meta: SmartMemoryMetadata): string {
     meta.canonical_id,
     meta.case_trigger,
     meta.skill_name,
-    meta.l0_abstract,
+    meta.summary,
     entry.text,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   const raw = candidates[0] ?? entry.id;
@@ -384,7 +384,7 @@ function pushAxis(axes: string[], kind: string, value: unknown, maxWords = 5): v
 
 function inferSceneAxes(entry: MemoryEntry, meta: SmartMemoryMetadata): string[] {
   const text = [
-    meta.l0_abstract,
+    meta.summary,
     meta.case_trigger,
     meta.canonical_id,
     meta.fact_key,
@@ -392,7 +392,7 @@ function inferSceneAxes(entry: MemoryEntry, meta: SmartMemoryMetadata): string[]
   ].filter(Boolean).join(" ");
   const axes: string[] = [];
 
-  pushAxis(axes, "topic", meta.fact_key || meta.canonical_id || meta.case_trigger || meta.l0_abstract, 6);
+  pushAxis(axes, "topic", meta.fact_key || meta.canonical_id || meta.case_trigger || meta.summary, 6);
 
   const projectMatch =
     text.match(/\b(?:project|proj|repo|workspace|service|app)\s*[:#-]?\s*([A-Za-z0-9][\w./-]{1,48})/i) ||
@@ -414,7 +414,7 @@ function inferSceneAxes(entry: MemoryEntry, meta: SmartMemoryMetadata): string[]
     axes.push("workflow:memory-system");
   }
   if (/\b(goal|objective|avoid|prevent|ensure|prefer|policy)\b/i.test(text) || /目标|避免|确保|偏好|策略/.test(text)) {
-    axes.push("goal:" + normalizeClusterFragment(meta.l0_abstract || entry.text, 7));
+    axes.push("goal:" + normalizeClusterFragment(meta.summary || entry.text, 7));
   }
 
   const month = new Date(entry.timestamp || Date.now()).toISOString().slice(0, 7);
@@ -481,7 +481,7 @@ function toStoreCategory(category: MemoryCategory): MemoryEntry["category"] {
 function summarizeMembers(members: MemoryEntry[], maxMembers: number): string {
   return members.slice(0, maxMembers).map((entry) => {
     const meta = parseSmartMetadata(entry.metadata, entry);
-    return `- ${meta.l0_abstract || entry.text}`;
+    return `- ${meta.summary || entry.text}`;
   }).join("\n");
 }
 
@@ -519,7 +519,7 @@ async function clusterScenesWithLlm(
       id: entry.id,
       scope: entry.scope,
       category: meta.memory_category,
-      abstract: meta.l0_abstract || entry.text,
+      abstract: meta.summary || entry.text,
       project: meta.project || meta.repo || meta.workspace,
       person: meta.person || meta.user || meta.owner,
       goal: meta.goal || meta.objective,
@@ -666,7 +666,7 @@ export async function runLearningMemoryMaintenance(
         .sort((a, b) => b.importance - a.importance || b.timestamp - a.timestamp)
         .slice(0, cfg.sceneMemory.maxSceneMembers);
       const fallbackTitle = selected[0]
-        ? (parseSmartMetadata(selected[0].metadata, selected[0]).l0_abstract || selected[0].text).slice(0, 80)
+        ? (parseSmartMetadata(selected[0].metadata, selected[0]).summary || selected[0].text).slice(0, 80)
         : key;
       const fallbackSummary = summarizeMembers(selected, cfg.sceneMemory.maxSceneMembers);
       const wasClusterRefined = Boolean(title || summary);
@@ -692,8 +692,8 @@ export async function runLearningMemoryMaintenance(
         memory_kind: "scene",
         memory_category: "patterns",
         memory_type: "knowledge",
-        l0_abstract: refined.title,
-        l2_content: refined.summary,
+        summary: refined.title,
+        content: refined.summary,
         scene_id: stableId("scene", key),
         scene_key: key,
         scene_title: refined.title,
@@ -784,14 +784,14 @@ export async function runLearningMemoryMaintenance(
       let refined = await refinePattern(deps.llm ?? undefined, members, {
         title: fallbackTitle,
         content: fallbackContent,
-        steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).l0_abstract || entry.text),
+        steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).summary || entry.text),
       });
       if (refined) result.llmRefined++;
       if (!refined) {
         refined = {
           title: fallbackTitle,
           content: fallbackContent,
-          steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).l0_abstract || entry.text),
+          steps: members.slice(0, 3).map((entry) => parseSmartMetadata(entry.metadata, entry).summary || entry.text),
         };
         result.fallbackUsed++;
       }
@@ -808,8 +808,8 @@ export async function runLearningMemoryMaintenance(
         memory_kind: "pattern",
         memory_category: "patterns",
         memory_type: "knowledge",
-        l0_abstract: refined.title,
-        l2_content: patternText,
+        summary: refined.title,
+        content: patternText,
         case_trigger: key,
         case_outcome: "distilled_pattern",
         case_steps: refined.steps,
@@ -857,8 +857,8 @@ export async function runLearningMemoryMaintenance(
           memory_kind: "skill",
           memory_category: "patterns",
           memory_type: "knowledge",
-          l0_abstract: refined.title,
-          l2_content: skillText,
+          summary: refined.title,
+          content: skillText,
           case_trigger: key,
           case_outcome: "distilled_skill",
           case_steps: refined.steps,

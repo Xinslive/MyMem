@@ -75,7 +75,7 @@ export interface PluginConfig {
   autoRecallCandidatePoolSize?: number;
   /** Hard per-turn injection cap (safety valve). Overrides autoRecallMaxItems if lower. Default: 10. */
   maxRecallPerTurn?: number;
-  recallMode?: "full" | "summary" | "l0" | "adaptive" | "off";
+  recallMode?: "full" | "summary" | "adaptive" | "off";
   /** Agent IDs excluded from auto-recall injection. Useful for background agents. */
   autoRecallExcludeAgents?: string[];
   /** Agent IDs included in auto-recall injection (whitelist mode). */

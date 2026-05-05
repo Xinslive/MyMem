@@ -18,7 +18,7 @@ import { cosineSimilarity } from "./utils.js";
 export interface BatchDedupCandidate {
   /** Unique index within the batch */
   index: number;
-  /** L0 abstract text used for embedding */
+  /** Summary text used for embedding */
   abstract: string;
   /** Embedded vector of the abstract */
   vector?: number[];
@@ -55,7 +55,7 @@ export interface ExtractionCostStats {
 /**
  * Perform batch-internal cosine dedup on candidate abstracts.
  *
- * @param abstracts - Array of L0 abstract strings from extracted candidates
+ * @param abstracts - Array of summary strings from extracted candidates
  * @param vectors - Parallel array of embedded vectors for each abstract
  * @param threshold - Cosine similarity threshold above which candidates are considered duplicates (default: 0.85)
  * @returns BatchDedupResult with surviving and duplicate indices

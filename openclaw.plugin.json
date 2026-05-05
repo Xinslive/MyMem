@@ -227,7 +227,7 @@
           "off"
         ],
         "default": "full",
-        "description": "Auto-recall depth mode. 'full': inject with configured per-item budget. 'summary': L0 abstracts only (compact). 'adaptive': analyze query intent to auto-select category and depth. 'off': disable auto-recall injection."
+        "description": "Auto-recall depth mode. 'full': inject content with configured per-item budget. 'summary': inject compact summaries only. 'adaptive': analyze query intent to auto-select category and depth. 'off': disable auto-recall injection."
       },
       "autoRecallExcludeAgents": {
         "type": "array",
@@ -1627,7 +1627,7 @@
     },
     "recallMode": {
       "label": "Recall Mode",
-      "help": "Auto-recall depth: full (default), summary (L0 only), adaptive (intent-based category routing), off.",
+      "help": "Auto-recall depth: full (default), summary, adaptive (intent-based category routing), off.",
       "advanced": false
     },
     "maxRecallPerTurn": {

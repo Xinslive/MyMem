@@ -133,8 +133,8 @@ export async function storeCandidate(
         category: ctx.mapToStoreCategory(candidate.category),
       },
       {
-        l0_abstract: candidate.abstract,
-        l2_content: candidate.content,
+        summary: candidate.abstract,
+        content: candidate.content,
         memory_category: candidate.category,
         tier: "working",
         access_count: 0,
@@ -154,7 +154,7 @@ export async function storeCandidate(
   );
 
   await ctx.store.store({
-    text: candidate.abstract, // L0 used as the searchable text
+    text: candidate.abstract, // Summary used as the searchable text
     vector,
     category: storeCategory,
     scope: targetScope,
@@ -258,8 +258,8 @@ export async function handleMerge(
     const existing = await ctx.store.getById(matchId, scopeFilter);
     if (existing) {
       const meta = parseSmartMetadata(existing.metadata, existing);
-      existingAbstract = meta.l0_abstract || existing.text;
-      existingContent = meta.l2_content || existing.text;
+      existingAbstract = meta.summary || existing.text;
+      existingContent = meta.content || existing.text;
     }
   } catch {
     // Fallback: store as new
@@ -308,8 +308,8 @@ export async function handleMerge(
     withAdmissionAudit(
       ctx,
       buildSmartMetadata(existing ?? { text: merged.abstract }, {
-        l0_abstract: merged.abstract,
-        l2_content: merged.content,
+        summary: merged.abstract,
+        content: merged.content,
         memory_category: candidate.category,
         ...defaultLearningKindPatch(candidate.category),
         tier: "working",
@@ -387,8 +387,8 @@ export async function handleSupersede(
           category: storeCategory,
         },
         {
-          l0_abstract: candidate.abstract,
-          l2_content: candidate.content,
+          summary: candidate.abstract,
+          content: candidate.content,
           memory_category: candidate.category,
           tier: "working",
           access_count: 0,
@@ -484,8 +484,8 @@ export async function handleContextualize(
 ): Promise<void> {
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
-    l0_abstract: candidate.abstract,
-    l2_content: candidate.content,
+    summary: candidate.abstract,
+    content: candidate.content,
     memory_category: candidate.category,
     tier: "working" as const,
     access_count: 0,
@@ -549,8 +549,8 @@ export async function handleContradict(
   // 2. Store the contradicting entry as a new memory
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
-    l0_abstract: candidate.abstract,
-    l2_content: candidate.content,
+    summary: candidate.abstract,
+    content: candidate.content,
     memory_category: candidate.category,
     tier: "working" as const,
     access_count: 0,

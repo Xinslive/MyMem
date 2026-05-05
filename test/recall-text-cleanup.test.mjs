@@ -172,8 +172,8 @@ function makeUserMdExclusiveResults() {
           buildSmartMetadata(
             { text: "称呼偏好：宙斯", category: "preference", importance: 0.9 },
             {
-              l0_abstract: "称呼偏好：宙斯",
-              l2_content: "用户希望以后被称呼为“宙斯”。",
+              summary: "称呼偏好：宙斯",
+              content: "用户希望以后被称呼为“宙斯”。",
               memory_category: "preferences",
               fact_key: "preferences:称呼偏好",
             },
@@ -207,8 +207,8 @@ function makeLegacyAddressingResults() {
               importance: 0.95,
             },
             {
-              l0_abstract: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
-              l2_content: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              summary: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              content: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
               memory_category: "preferences",
               fact_key: "preferences:用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”",
             },
@@ -255,7 +255,7 @@ function makeGovernanceFilteredResults() {
         importance: 0.7,
         timestamp: now,
         metadata: JSON.stringify({
-          l0_abstract: "confirmed durable memory",
+          summary: "confirmed durable memory",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "durable",
@@ -274,7 +274,7 @@ function makeGovernanceFilteredResults() {
         importance: 0.7,
         timestamp: now,
         metadata: JSON.stringify({
-          l0_abstract: "pending memory should not auto-recall",
+          summary: "pending memory should not auto-recall",
           memory_category: "cases",
           state: "pending",
           memory_layer: "working",
@@ -293,7 +293,7 @@ function makeGovernanceFilteredResults() {
         importance: 0.7,
         timestamp: now,
         metadata: JSON.stringify({
-          l0_abstract: "archived memory should not auto-recall",
+          summary: "archived memory should not auto-recall",
           memory_category: "cases",
           state: "archived",
           memory_layer: "archive",
@@ -322,8 +322,8 @@ function makeReasoningStrategyResults(count = 3) {
           buildSmartMetadata(
             { text, category: "other", importance: 0.82, timestamp: now - i * 1000 },
             {
-              l0_abstract: text,
-              l2_content: text,
+              summary: text,
+              content: text,
               memory_category: "patterns",
               compiled_strategy: true,
               reasoning_strategy: true,
@@ -359,7 +359,7 @@ function makeSceneResults() {
         memory_kind: "scene",
         memory_category: "patterns",
         scene_title: "Generated file verification",
-        l0_abstract: "Generated file verification",
+        summary: "Generated file verification",
         scene_member_ids: ["member-high", "member-low", "member-archived"],
         state: "confirmed",
         memory_layer: "working",
@@ -398,7 +398,7 @@ function sceneMemberEntries() {
         {
           memory_kind: "case",
           memory_category: "cases",
-          l0_abstract: text,
+          summary: text,
           utility_score: utility,
           state: archived ? "archived" : "confirmed",
           memory_layer: archived ? "archive" : "working",
@@ -697,7 +697,7 @@ describe("recall text cleanup", () => {
                 importance: 0.7,
                 timestamp: oldTimestamp,
                 metadata: JSON.stringify({
-                  l0_abstract: "old durable memory",
+                  summary: "old durable memory",
                   memory_category: "cases",
                   state: "confirmed",
                   memory_layer: "durable",
@@ -750,7 +750,7 @@ describe("recall text cleanup", () => {
     assert.equal(capturedCreatedAt, oldTimestamp);
   });
 
-  it("defaults memory_recall to full L2 output with limit=3", async () => {
+  it("defaults memory_recall to full content output with limit=3", async () => {
     const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(7)));
     const res = await tool.execute(null, { query: "many memories" });
     const lines = extractRenderedMemoryRecallLines(res.content[0].text);
@@ -783,25 +783,25 @@ describe("recall text cleanup", () => {
     assert.doesNotMatch(lines[0], /…$/, "full text mode should not force preview truncation");
   });
 
-  it("includeFullText=true renders L2 content in output, not L0 abstract", async () => {
-    const l0 = "short L0 abstract";
-    const l2 = "Full L2 narrative: the user resolved a concurrent-write conflict by adding proper-lockfile as a write guard around all LanceDB mutation calls. Prevention: always acquire the lock before any store.add / store.update call.";
+  it("includeFullText=true renders content in output, not summary", async () => {
+    const summary = "short summary";
+    const content = "Full memory content: the user resolved a concurrent-write conflict by adding proper-lockfile as a write guard around all LanceDB mutation calls. Prevention: always acquire the lock before any store.add / store.update call.";
 
     const results = [
       {
         entry: {
           id: "case-1",
-          text: l0,
+          text: summary,
           category: "fact",
           scope: "global",
           importance: 0.85,
           timestamp: Date.now(),
           metadata: stringifySmartMetadata(
             buildSmartMetadata(
-              { text: l0, category: "fact", importance: 0.85 },
+              { text: summary, category: "fact", importance: 0.85 },
               {
-                l0_abstract: l0,
-                l2_content: l2,
+                summary: summary,
+                content: content,
                 memory_category: "cases",
                 fact_key: "cases:lancedb-write-conflict",
               },
@@ -813,46 +813,46 @@ describe("recall text cleanup", () => {
       },
     ];
 
-    // default (full) mode should show L2
+    // default (full) mode should show content
     const toolSummary = createTool(registerMemoryRecallTool, makeRecallContext(results));
     const resSummary = await toolSummary.execute(null, { query: "lancedb conflict" });
     const summaryLines = extractRenderedMemoryRecallLines(resSummary.content[0].text);
     assert.equal(summaryLines.length, 1);
-    assert.match(summaryLines[0], /Full L2 narrative/);
+    assert.match(summaryLines[0], /Full memory content/);
 
-    // includeFullText=true should show L2 in rendered output
+    // includeFullText=true should show content in rendered output
     const toolFull = createTool(registerMemoryRecallTool, makeRecallContext(results));
     const resFull = await toolFull.execute(null, { query: "lancedb conflict", includeFullText: true });
     const fullLines = extractRenderedMemoryRecallLines(resFull.content[0].text);
     assert.equal(fullLines.length, 1);
-    assert.match(fullLines[0], /Full L2 narrative/, "rendered line should contain L2 content");
-    assert.doesNotMatch(fullLines[0], new RegExp(`^.*\\[case-1\\].*${l0.slice(0, 15)}`), "rendered line should not be the L0 abstract");
+    assert.match(fullLines[0], /Full memory content/, "rendered line should contain content");
+    assert.doesNotMatch(fullLines[0], new RegExp(`^.*\\[case-1\\].*${summary.slice(0, 15)}`), "rendered line should not be the summary");
 
-    // details.memories[].fullText should carry L2
-    assert.equal(resFull.details.memories[0].fullText, l2, "details.memories[0].fullText should be L2 content");
-    // details.memories[].text still carries L0 for backwards compatibility
-    assert.equal(resFull.details.memories[0].text, l0, "details.memories[0].text should still be L0 for compatibility");
+    // details.memories[].fullText should carry content
+    assert.equal(resFull.details.memories[0].fullText, content, "details.memories[0].fullText should be content");
+    // details.memories[].text still carries summary for backwards compatibility
+    assert.equal(resFull.details.memories[0].text, summary, "details.memories[0].text should still be summary for compatibility");
   });
 
   it("includeFullText=false does not expose fullText in details.memories", async () => {
-    const l0 = "short L0 abstract";
-    const l2 = "Full L2 narrative that should not appear when includeFullText is false.";
+    const summary = "short summary";
+    const content = "Full memory content that should not appear when includeFullText is false.";
 
     const results = [
       {
         entry: {
           id: "case-2",
-          text: l0,
+          text: summary,
           category: "fact",
           scope: "global",
           importance: 0.85,
           timestamp: Date.now(),
           metadata: stringifySmartMetadata(
             buildSmartMetadata(
-              { text: l0, category: "fact", importance: 0.85 },
+              { text: summary, category: "fact", importance: 0.85 },
               {
-                l0_abstract: l0,
-                l2_content: l2,
+                summary: summary,
+                content: content,
                 memory_category: "cases",
                 fact_key: "cases:opt-in-check",
               },
@@ -868,7 +868,7 @@ describe("recall text cleanup", () => {
     const res = await tool.execute(null, { query: "opt-in check", includeFullText: false });
 
     assert.equal(res.details.memories[0].fullText, undefined, "fullText should be absent when includeFullText=false");
-    assert.equal(res.details.memories[0].text, l0, "text should still carry L0");
+    assert.equal(res.details.memories[0].text, summary, "text should still carry summary");
   });
 
   it("includeFullText=true falls back to entry.text for legacy memories without smart metadata", async () => {
@@ -1444,7 +1444,7 @@ describe("recall text cleanup", () => {
           scope: "global",
           importance: 0.9,
           timestamp: Date.now(),
-          metadata: JSON.stringify({ tier: "l1" }),
+          metadata: JSON.stringify({ tier: "full" }),
         },
         score: 0.88,
         sources: { vector: { score: 0.88, rank: 1 } },
@@ -1457,7 +1457,7 @@ describe("recall text cleanup", () => {
           scope: "global",
           importance: 0.85,
           timestamp: Date.now(),
-          metadata: JSON.stringify({ tier: "l2" }),
+          metadata: JSON.stringify({ tier: "content" }),
         },
         score: 0.82,
         sources: { vector: { score: 0.82, rank: 2 } },

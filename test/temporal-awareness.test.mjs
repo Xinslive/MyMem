@@ -195,7 +195,7 @@ async function runTest() {
         buildSmartMetadata(
           { text: expiredText, category: "fact", importance: 0.8 },
           {
-            l0_abstract: expiredText,
+            summary: expiredText,
             memory_temporal_type: "dynamic",
             valid_until: Date.now() - 86400000, // expired 1 day ago
           },
@@ -215,7 +215,7 @@ async function runTest() {
         buildSmartMetadata(
           { text: futureText, category: "fact", importance: 0.8 },
           {
-            l0_abstract: futureText,
+            summary: futureText,
             memory_temporal_type: "dynamic",
             valid_until: Date.now() + 86400000, // expires in 1 day
           },
@@ -235,7 +235,7 @@ async function runTest() {
         buildSmartMetadata(
           { text: permanentText, category: "preference", importance: 0.8 },
           {
-            l0_abstract: permanentText,
+            summary: permanentText,
             memory_temporal_type: "static",
             // No valid_until → permanent
           },

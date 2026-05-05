@@ -363,8 +363,8 @@ it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", as
     category: "other",
     scope: "global",
     metadata: JSON.stringify({
-      l0_abstract: "Prevent timeout while reading large logs",
-      l2_content: "Prevent timeout while reading large logs",
+      summary: "Prevent timeout while reading large logs",
+      content: "Prevent timeout while reading large logs",
       memory_category: "patterns",
       reasoning_strategy: true,
       strategy_kind: "preventive",
@@ -604,8 +604,8 @@ it("scanErrorFile: reads matching errors as preventive evidence without embeddin
     category: "other",
     scope: "global",
     metadata: JSON.stringify({
-      l0_abstract: "Prevent extractor stale fixture failures",
-      l2_content: "Prevent extractor stale fixture failures",
+      summary: "Prevent extractor stale fixture failures",
+      content: "Prevent extractor stale fixture failures",
       memory_category: "patterns",
       reasoning_strategy: true,
       strategy_kind: "preventive",
@@ -659,8 +659,8 @@ it("scanErrorFile: skips already-processed errors", async () => {
     category: "other",
     scope: "global",
     metadata: JSON.stringify({
-      l0_abstract: "Prevent extractor stale fixture failures",
-      l2_content: "Prevent extractor stale fixture failures",
+      summary: "Prevent extractor stale fixture failures",
+      content: "Prevent extractor stale fixture failures",
       memory_category: "patterns",
       reasoning_strategy: true,
       strategy_kind: "preventive",

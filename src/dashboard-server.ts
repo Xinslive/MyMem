@@ -108,8 +108,8 @@ type DashboardMemory = {
   };
   qualityFlags: DashboardQualityFilter[];
   details: {
-    l0: string;
-    l2: string;
+    summary: string;
+    content: string;
     factKey?: string;
     validFrom: number;
     invalidatedAt?: number;
@@ -541,8 +541,8 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
     },
     qualityFlags,
     details: {
-      l0: displayMemoryText(meta.l0_abstract),
-      l2: displayMemoryText(meta.l2_content),
+      summary: displayMemoryText(meta.summary),
+      content: displayMemoryText(meta.content),
       ...(meta.fact_key ? { factKey: meta.fact_key } : {}),
       validFrom: meta.valid_from,
       ...(meta.invalidated_at ? { invalidatedAt: meta.invalidated_at } : {}),
@@ -2191,8 +2191,8 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="config-item"><div class="config-label">记忆层级</div><div class="config-value">' + escapeHtml(memory.tierLabel) + '</div></div>' +
           '<div class="config-item"><div class="config-label">质量标记</div><div class="config-value">' + escapeHtml((memory.qualityFlags || []).map(qualityLabel).join("、") || "无") + '</div></div>' +
         '</div>' +
-        '<section class="detail-section"><h3>L0 摘要</h3><p class="detail-text">' + escapeHtml(detail.l0 || memory.preview) + '</p></section>' +
-        '<section class="detail-section"><h3>L2 原文/叙事</h3><p class="detail-text">' + escapeHtml(detail.l2 || memory.text) + '</p></section>';
+        '<section class="detail-section"><h3>摘要</h3><p class="detail-text">' + escapeHtml(detail.summary || memory.preview) + '</p></section>' +
+        '<section class="detail-section"><h3>正文</h3><p class="detail-text">' + escapeHtml(detail.content || memory.text) + '</p></section>';
       $("detailOverlay").classList.add("open");
     }
 

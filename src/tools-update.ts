@@ -184,8 +184,8 @@ export function registerMemoryUpdateTool(
                 const newMeta = buildSmartMetadata(
                   { text, category: existing.category },
                   {
-                    l0_abstract: text,
-                    l2_content: text,
+                    summary: text,
+                    content: text,
                     memory_category: meta.memory_category,
                     tier: meta.tier,
                     access_count: 0,
@@ -270,13 +270,13 @@ export function registerMemoryUpdateTool(
             const updatedMeta = buildSmartMetadata(existing, {
               ...(text
                 ? {
-                    l0_abstract: text,
-                    l2_content: text,
+                    summary: text,
+                    content: text,
                     memory_temporal_type: classifyTemporal(text),
                   }
                 : {}),
               memory_category: effectiveCategory,
-              fact_key: deriveFactKey(effectiveCategory, text ?? meta.l0_abstract),
+              fact_key: deriveFactKey(effectiveCategory, text ?? meta.summary),
               confidence:
                 importance !== undefined
                   ? clamp01(importance, 0.7)

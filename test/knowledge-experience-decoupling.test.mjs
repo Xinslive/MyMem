@@ -67,7 +67,7 @@ describe("parseSmartMetadata memory_type backfill", () => {
   it("derives memory_type from memory_category when not stored", () => {
     const raw = JSON.stringify({
       memory_category: "events",
-      l0_abstract: "shipped v1 last Tuesday",
+      summary: "shipped v1 last Tuesday",
     });
     const meta = parseSmartMetadata(raw, { text: "shipped v1 last Tuesday" });
     assert.equal(meta.memory_type, "experience");
@@ -213,7 +213,7 @@ describe("applyMemoryTypeBoost", () => {
       { entry: buildEntry("experience"), score: 0.80 },
       { entry: buildEntry("knowledge"), score: 0.60 },
     ];
-    const signal = { categories: [], depth: "l0", confidence: "low", label: "broad" };
+    const signal = { categories: [], depth: "summary", confidence: "low", label: "broad" };
     const getType = (entry) => parseSmartMetadata(entry.metadata, entry).memory_type;
     const out = applyMemoryTypeBoost(results, signal, getType);
     assert.equal(out[0].score, 0.80);
@@ -222,7 +222,7 @@ describe("applyMemoryTypeBoost", () => {
 
   it("caps boosted score at 1.0", () => {
     const results = [{ entry: buildEntry("knowledge"), score: 0.98 }];
-    const signal = { categories: [], depth: "l1", confidence: "high", label: "fact", memoryType: "knowledge" };
+    const signal = { categories: [], depth: "full", confidence: "high", label: "fact", memoryType: "knowledge" };
     const getType = (entry) => parseSmartMetadata(entry.metadata, entry).memory_type;
     const boosted = applyMemoryTypeBoost(results, signal, getType);
     assert.ok(boosted[0].score <= 1.0);

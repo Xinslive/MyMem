@@ -26,7 +26,7 @@ const normalized = parseSmartMetadata(legacyEntry.metadata, legacyEntry);
 assert.equal(normalized.memory_category, "preferences");
 assert.equal(normalized.tier, "working");
 assert.equal(normalized.access_count, 0);
-assert.equal(normalized.l0_abstract, legacyEntry.text);
+assert.equal(normalized.summary, legacyEntry.text);
 
 const strongEntry = {
   id: "strong-1",

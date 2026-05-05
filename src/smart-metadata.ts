@@ -43,8 +43,8 @@ export type MemorySource =
   | "legacy";
 
 export interface SmartMemoryMetadata {
-  l0_abstract: string;
-  l2_content: string;
+  summary: string;
+  content: string;
   memory_kind: MemoryKind;
   memory_category: MemoryCategory;
   memory_type: MemoryType;
@@ -257,11 +257,11 @@ function normalizeStringArray(value: unknown, maxItems: number): string[] | unde
 
 export function deriveFactKey(
   category: MemoryCategory,
-  abstract: string,
+  summary: string,
 ): string | undefined {
   if (!TEMPORAL_VERSIONED_CATEGORIES.has(category)) return undefined;
 
-  const trimmed = abstract.trim();
+  const trimmed = summary.trim();
   if (!trimmed) return undefined;
 
   let topic = trimmed;
@@ -325,9 +325,11 @@ export function parseSmartMetadata(
       : Date.now();
 
   const memoryCategory = reverseMapLegacyCategory(entry.category, text);
-  const l0 = normalizeText(parsed.l0_abstract, text);
-  const legacyL1 = normalizeOptionalString(parsed.l1_overview);
-  const l2 = normalizeText(parsed.l2_content, legacyL1 ?? text);
+  const legacySummary = normalizeOptionalString(parsed.l0_abstract);
+  const legacyOverview = normalizeOptionalString(parsed.l1_overview);
+  const legacyContent = normalizeOptionalString(parsed.l2_content);
+  const summary = normalizeText(parsed.summary, legacySummary ?? text);
+  const content = normalizeText(parsed.content, legacyContent ?? legacyOverview ?? text);
   const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
   const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
   const fallbackSource =
@@ -358,8 +360,8 @@ export function parseSmartMetadata(
 
   const normalized: SmartMemoryMetadata = {
     ...parsed,
-    l0_abstract: l0,
-    l2_content: l2,
+    summary,
+    content,
     memory_kind: normalizeMemoryKind(rawMemoryKind),
     memory_category: resolvedMemoryCategory,
     memory_type: resolvedMemoryType,
@@ -381,7 +383,7 @@ export function parseSmartMetadata(
         typeof parsed.memory_category === "string"
           ? (parsed.memory_category as MemoryCategory)
           : memoryCategory,
-        l0,
+        summary,
       ),
     supersedes: normalizeOptionalString(parsed.supersedes),
     superseded_by: normalizeOptionalString(parsed.superseded_by),
@@ -423,7 +425,7 @@ export function buildSmartMetadata(
   patch: Partial<SmartMemoryMetadata> = {},
 ): SmartMemoryMetadata {
   const base = parseSmartMetadata(entry.metadata, entry);
-  const l0Abstract = normalizeText(patch.l0_abstract, base.l0_abstract);
+  const summary = normalizeText(patch.summary, base.summary);
   const nextCategory =
     typeof patch.memory_category === "string"
       ? patch.memory_category
@@ -449,8 +451,8 @@ export function buildSmartMetadata(
   return {
     ...base,
     ...patch,
-    l0_abstract: l0Abstract,
-    l2_content: normalizeText(patch.l2_content, base.l2_content),
+    summary,
+    content: normalizeText(patch.content, base.content),
     memory_kind: normalizeMemoryKind(patch.memory_kind ?? base.memory_kind),
     memory_category: nextCategory,
     memory_type: nextMemoryType,
@@ -477,7 +479,7 @@ export function buildSmartMetadata(
     fact_key:
       normalizeOptionalString(patch.fact_key) ??
       base.fact_key ??
-      deriveFactKey(nextCategory, l0Abstract),
+      deriveFactKey(nextCategory, summary),
     supersedes:
       patch.supersedes === undefined
         ? base.supersedes
@@ -608,7 +610,9 @@ export function stringifySmartMetadata(
   metadata: SmartMemoryMetadata | Record<string, unknown>,
 ): string {
   const capped = { ...metadata } as Record<string, unknown>;
+  delete capped.l0_abstract;
   delete capped.l1_overview;
+  delete capped.l2_content;
 
   // Cap array fields to prevent metadata bloat
   if (Array.isArray(capped.sources) && capped.sources.length > MAX_SOURCES) {
