@@ -326,10 +326,9 @@ export function parseSmartMetadata(
 
   const memoryCategory = reverseMapLegacyCategory(entry.category, text);
   const legacySummary = normalizeOptionalString(parsed.l0_abstract);
-  const legacyOverview = normalizeOptionalString(parsed.l1_overview);
   const legacyContent = normalizeOptionalString(parsed.l2_content);
   const summary = normalizeText(parsed.summary, legacySummary ?? text);
-  const content = normalizeText(parsed.content, legacyContent ?? legacyOverview ?? text);
+  const content = normalizeText(parsed.content, legacyContent ?? text);
   const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
   const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
   const fallbackSource =

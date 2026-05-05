@@ -2187,7 +2187,6 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
           '<div class="config-item"><div class="config-label">重要性</div><div class="config-value">' + pct(memory.importance) + '</div></div>' +
           '<div class="config-item"><div class="config-label">置信度</div><div class="config-value">' + pct(memory.confidence) + '</div></div>' +
           '<div class="config-item"><div class="config-label">访问次数</div><div class="config-value">' + escapeHtml(memory.accessCount) + '</div></div>' +
-          '<div class="config-item"><div class="config-label">来源</div><div class="config-value">' + escapeHtml(memory.sourceLabel) + '</div></div>' +
           '<div class="config-item"><div class="config-label">记忆层级</div><div class="config-value">' + escapeHtml(memory.tierLabel) + '</div></div>' +
           '<div class="config-item"><div class="config-label">质量标记</div><div class="config-value">' + escapeHtml((memory.qualityFlags || []).map(qualityLabel).join("、") || "无") + '</div></div>' +
         '</div>' +

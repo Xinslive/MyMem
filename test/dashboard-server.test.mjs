@@ -230,6 +230,11 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.match(page.body, /masonry-list/);
     assert.match(page.body, /data-action="delete"/);
     assert.match(page.body, /摘要/);
+    assert.match(page.body, /正文/);
+    assert.doesNotMatch(page.body, /L0 摘要/);
+    assert.doesNotMatch(page.body, /L1 概览/);
+    assert.doesNotMatch(page.body, /L2 原文\/叙事/);
+    assert.doesNotMatch(page.body, /<div class="config-label">来源<\/div>/);
     assert.match(page.body, /处理阶段/);
     assert.match(page.body, /命中结果/);
     assert.doesNotMatch(page.body, /反馈循环/);

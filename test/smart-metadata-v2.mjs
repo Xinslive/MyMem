@@ -18,6 +18,7 @@ import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const {
     normalizeContext,
+    parseSmartMetadata,
     parseSupportInfo,
     updateSupportStats,
     SUPPORT_CONTEXT_VOCABULARY,
@@ -117,5 +118,22 @@ assert.ok(serialized.sources.length <= 20, `sources should be capped at 20, got 
 assert.ok(serialized.history.length <= 50, `history should be capped at 50, got ${serialized.history.length}`);
 assert.ok(serialized.relations.length <= 16, `relations should be capped at 16, got ${serialized.relations.length}`);
 console.log("  ✅ Metadata caps work correctly");
+
+// --- Test 8: parseSmartMetadata ignores legacy l1_overview as content ---
+console.log("\nTest 8: parseSmartMetadata ignores legacy l1_overview as content...");
+const parsedLegacyOverview = parseSmartMetadata(
+    JSON.stringify({
+        summary: "Short summary",
+        l1_overview: "Legacy overview should not survive as content",
+    }),
+    {
+        text: "Canonical entry text",
+        category: "preference",
+        timestamp: 1234,
+    },
+);
+assert.strictEqual(parsedLegacyOverview.summary, "Short summary");
+assert.strictEqual(parsedLegacyOverview.content, "Canonical entry text");
+console.log("  ✅ Legacy l1_overview no longer feeds content");
 
 console.log("\n=== All Smart Metadata V2 tests passed! ===");
