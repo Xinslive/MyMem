@@ -170,8 +170,6 @@ export function sanitizeMemoryForSerialization(results: RetrievalResult[]) {
         utility_trial_count: meta.utility_trial_count,
         scene_id: meta.scene_id,
         scene_title: meta.scene_title,
-        skill_name: meta.skill_name,
-        skill_enabled: meta.skill_enabled,
       };
     })(),
   }));
@@ -312,79 +310,4 @@ export function resolveWorkspaceDir(toolCtx: unknown, fallback?: string): string
   if (runtimePath) return runtimePath;
   if (fallback && fallback.trim()) return fallback;
   return join(homedir(), ".openclaw", "workspace");
-}
-
-export function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export interface LearningBacklogEntry {
-  id: string;
-  file: "LEARNINGS.md" | "ERRORS.md";
-  priority: string;
-  status: string;
-  area: string;
-  summary: string;
-  suggestedAction: string;
-}
-
-export function extractLearningSection(entry: string, heading: string): string {
-  const escapedHeading = escapeRegExp(heading);
-  const match = entry.match(new RegExp(`### ${escapedHeading}\\n([\\s\\S]*?)(?=\\n### |\\n---|$)`, "m"));
-  return (match?.[1] ?? "").trim();
-}
-
-export function extractLearningField(entry: string, field: string): string {
-  const escapedField = escapeRegExp(field);
-  const match = entry.match(new RegExp(`\\*\\*${escapedField}\\*\\*:\\s*(.+)`, "i"));
-  return (match?.[1] ?? "").trim();
-}
-
-export function parseLearningBacklogEntries(file: "LEARNINGS.md" | "ERRORS.md", content: string): LearningBacklogEntry[] {
-  const chunks = content.match(/^## \[(LRN|ERR)-\d{8}-\d{3}\][^\n]*[\s\S]*?(?=\n## \[(?:LRN|ERR)-|(?![\s\S]))/gm) || [];
-  return chunks.map((chunk) => {
-    const id = chunk.match(/^## \[((?:LRN|ERR)-\d{8}-\d{3})\]/m)?.[1] ?? "";
-    return {
-      id,
-      file,
-      priority: extractLearningField(chunk, "Priority") || "medium",
-      status: extractLearningField(chunk, "Status") || "pending",
-      area: extractLearningField(chunk, "Area") || "general",
-      summary: extractLearningSection(chunk, "Summary"),
-      suggestedAction: extractLearningSection(chunk, "Suggested Action"),
-    };
-  }).filter((entry) => entry.id && entry.summary);
-}
-
-export function normalizeDistillRuleText(text: string): string {
-  return text
-    .replace(/\s+/g, " ")
-    .replace(/^[-*]\s+/, "")
-    .replace(/^Review (?:possible learning|failure) before \/(?:new|reset):\s*/i, "")
-    .trim()
-    .replace(/[.。]+$/, "");
-}
-
-export function buildSelfImprovementDistillPatch(entries: LearningBacklogEntry[], targetFile: string): string {
-  const uniqueRules = new Map<string, LearningBacklogEntry>();
-  for (const entry of entries) {
-    const source = entry.suggestedAction && entry.suggestedAction !== "-" ? entry.suggestedAction : entry.summary;
-    const rule = normalizeDistillRuleText(source);
-    if (!rule) continue;
-    const key = rule.toLowerCase();
-    if (!uniqueRules.has(key)) uniqueRules.set(key, entry);
-  }
-  const lines = Array.from(uniqueRules.values()).map((entry) => {
-    const source = entry.suggestedAction && entry.suggestedAction !== "-" ? entry.suggestedAction : entry.summary;
-    const rule = normalizeDistillRuleText(source);
-    return `- ${rule}. (source: ${entry.id}, area: ${entry.area}, priority: ${entry.priority})`;
-  });
-  return [
-    `--- a/${targetFile}`,
-    `+++ b/${targetFile}`,
-    "@@",
-    "+## Self-Improvement Distilled Rules",
-    ...lines.map((line) => `+${line}`),
-    "",
-  ].join("\n");
 }

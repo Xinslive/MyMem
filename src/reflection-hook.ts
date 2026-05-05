@@ -34,7 +34,6 @@ import { storeReflectionToLanceDB, loadAgentReflectionSlicesFromEntries, DEFAULT
 import { extractReflectionLearningGovernanceCandidates, extractInjectableReflectionMappedMemoryItems } from "./reflection-slices.js";
 import { createReflectionEventId } from "./reflection-event-store.js";
 import { buildReflectionMappedMetadata } from "./reflection-mapped-metadata.js";
-import { appendSelfImprovementEntry } from "./self-improvement-files.js";
 import { dedupHookEvent } from "./hook-dedup.js";
 import { normalizeAdmissionControlConfig } from "./admission-control.js";
 import { resolveReflectionSessionSearchDirs } from "./session-recovery.js";
@@ -295,7 +294,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
     if (sessionKey) {
       const pending = helpers.getPendingReflectionErrorSignalsForPrompt(sessionKey, reflectionErrorReminderMaxEntries);
       if (pending.length > 0) {
-        blocks.push(["<error-detected>", "A tool error was detected. Consider logging this to `.learnings/ERRORS.md` if it is non-trivial or likely to recur.", "Recent error signals:", ...pending.map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary}`), "</error-detected>"].join("\n"));
+        blocks.push(["<error-detected>", "A tool error was detected. Consider preserving the lesson in MyMem if it is non-trivial or likely to recur.", "Recent error signals:", ...pending.map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary}`), "</error-detected>"].join("\n"));
       }
     }
 
@@ -427,30 +426,38 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       if (!writeOk) throw new Error(`Failed to allocate unique reflection file for ${dateStr} ${timeCompact}`);
 
       const reflectionGovernanceCandidates = extractReflectionLearningGovernanceCandidates(reflectionText);
-      if (config.selfImprovement?.enabled !== false && reflectionGovernanceCandidates.length > 0) {
+      if (singletonState?.feedbackLoop) {
         for (const candidate of reflectionGovernanceCandidates) {
-          await appendSelfImprovementEntry({
-            baseDir: workspaceDir, type: "learning", summary: candidate.summary, details: candidate.details,
-            suggestedAction: candidate.suggestedAction, category: "best_practice", area: candidate.area || "config",
-            priority: candidate.priority || "medium", status: candidate.status || "pending", source: `mymem/reflection:${relPath}`,
+          singletonState.feedbackLoop.onPreventiveLessonEvidence({
+            summary: candidate.summary,
+            details: candidate.details || candidate.suggestedAction,
+            area: candidate.area || "config",
+            source: "user_correction",
+            sessionKey,
+            scope: targetScope,
+            scopeFilter: [targetScope],
+            signatureHash: createReflectionEventId({
+              runAt: nowTs,
+              sessionKey,
+              sessionId: currentSessionId || "unknown",
+              agentId: sourceAgentId,
+              command: `governance:${candidate.summary}`,
+            }),
           });
         }
-        if (singletonState?.feedbackLoop) {
-          for (const signal of toolErrorSignals) {
-            singletonState.feedbackLoop.onPreventiveLessonEvidence({
-              summary: signal.summary,
-              source: signal.source,
-              sessionKey,
-              scope: targetScope,
-              scopeFilter: [targetScope],
-              toolName: signal.toolName,
-              signatureHash: signal.signatureHash,
-            });
-          }
-          singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch(() => {});
-          singletonState.feedbackLoop.scanErrorFile(workspaceDir).catch(() => {});
-          singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch(() => {});
+        for (const signal of toolErrorSignals) {
+          singletonState.feedbackLoop.onPreventiveLessonEvidence({
+            summary: signal.summary,
+            source: signal.source,
+            sessionKey,
+            scope: targetScope,
+            scopeFilter: [targetScope],
+            toolName: signal.toolName,
+            signatureHash: signal.signatureHash,
+          });
         }
+        singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch(() => {});
+        singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch(() => {});
       }
 
       const reflectionEventId = createReflectionEventId({ runAt: nowTs, sessionKey, sessionId: currentSessionId || "unknown", agentId: sourceAgentId, command: String(event.action || "unknown") });

@@ -548,7 +548,6 @@ describe("recall text cleanup", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -635,7 +634,6 @@ describe("recall text cleanup", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -919,7 +917,6 @@ describe("recall text cleanup", () => {
         autoRecallMaxItems: 2,
         autoRecallMaxChars: 160,
         autoRecallPerItemMaxChars: 100,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -957,7 +954,6 @@ describe("recall text cleanup", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -998,7 +994,6 @@ describe("recall text cleanup", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         reasoningStrategyRecall: { enabled: false },
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1034,7 +1029,6 @@ describe("recall text cleanup", () => {
           enabled: true,
           sceneMemory: { enabled: true, maxExpandedSceneMembers: 2 },
         },
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1076,7 +1070,6 @@ describe("recall text cleanup", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallMaxItems: 5,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
     myMemPlugin.register(harness.api);
@@ -1196,7 +1189,6 @@ describe("recall text cleanup", () => {
             enabled: true,
           },
         },
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1277,7 +1269,6 @@ describe("recall text cleanup", () => {
             enabled: true,
           },
         },
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1335,7 +1326,6 @@ describe("recall text cleanup", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
         ...extraConfig,
       },
     });

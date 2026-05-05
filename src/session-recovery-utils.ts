@@ -9,24 +9,6 @@ import { dirname, basename, join } from "node:path";
 import { sortFileNamesByMtimeDesc } from "./file-utils.js";
 import { summarizeRecentConversationMessages } from "./session-utils.js";
 import type { ReflectionErrorSignal } from "./plugin-types.js";
-import { DEFAULT_SELF_IMPROVEMENT_REMINDER } from "./plugin-constants.js";
-
-/**
- * Loads self-improvement reminder content from workspace or returns default.
- */
-export async function loadSelfImprovementReminderContent(workspaceDir?: string): Promise<string> {
-  const baseDir = typeof workspaceDir === "string" && workspaceDir.trim().length ? workspaceDir.trim() : "";
-  if (!baseDir) return DEFAULT_SELF_IMPROVEMENT_REMINDER;
-
-  const reminderPath = join(baseDir, "SELF_IMPROVEMENT_REMINDER.md");
-  try {
-    const content = await readFile(reminderPath, "utf-8");
-    const trimmed = content.trim();
-    return trimmed.length ? trimmed : DEFAULT_SELF_IMPROVEMENT_REMINDER;
-  } catch {
-    return DEFAULT_SELF_IMPROVEMENT_REMINDER;
-  }
-}
 
 /**
  * Reads session conversation from a file for reflection.

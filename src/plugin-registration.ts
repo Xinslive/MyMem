@@ -193,7 +193,7 @@ async function runGatewayMaintenanceOnce(
       `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
       `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
       `learningScenes=${learningResult ? `${learningResult.scenesCreated}/${learningResult.scenesUpdated}` : "0/0"} ` +
-      `learningSkills=${learningResult?.skillsCreated ?? 0} ` +
+      `learningPatterns=${learningResult?.patternsCreated ?? 0} ` +
       `archived=${lifecycleResult?.archived ?? 0} ` +
       `promoted=${lifecycleResult?.promoted ?? 0} demoted=${lifecycleResult?.demoted ?? 0}`,
     );

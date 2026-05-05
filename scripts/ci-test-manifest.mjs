@@ -81,7 +81,6 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/rrf-fusion.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/runtime-write-policy.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/scope-access-undefined.test.mjs", args: ["--test"] },
-  { group: "core-regression", runner: "node", file: "test/self-improvement.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-compressor.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-recovery-paths.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-summary-before-reset.test.mjs", args: ["--test"] },

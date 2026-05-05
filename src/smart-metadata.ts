@@ -34,7 +34,7 @@ export interface MemoryRelation {
 
 export type MemoryState = "pending" | "confirmed" | "archived";
 export type MemoryLayer = "durable" | "working" | "reflection" | "archive";
-export type MemoryKind = "memory" | "scene" | "case" | "pattern" | "skill";
+export type MemoryKind = "memory" | "scene" | "case" | "pattern";
 export type MemorySource =
   | "manual"
   | "auto-capture"
@@ -82,10 +82,6 @@ export interface SmartMemoryMetadata {
   case_trigger?: string;
   case_outcome?: string;
   case_steps?: string[];
-  skill_name?: string;
-  skill_enabled?: boolean;
-  skill_activation_conditions?: string[];
-  skill_source_ids?: string[];
   canonical_id?: string;
   [key: string]: unknown;
 }
@@ -170,12 +166,17 @@ function normalizeMemoryKind(value: unknown): MemoryKind {
     case "scene":
     case "case":
     case "pattern":
-    case "skill":
     case "memory":
       return value;
     default:
       return "memory";
   }
+}
+
+function stripRemovedMetadataFields(metadata: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([key]) => !key.startsWith("skill_")),
+  );
 }
 
 function deriveDefaultLayer(
@@ -352,13 +353,12 @@ export function parseSmartMetadata(
     normalizeMemoryType(parsed.memory_type) ??
     classifyMemoryType(resolvedMemoryCategory, entry.category);
   const rawMemoryKind = parsed.memory_kind ?? (
-    parsed.scene_id || parsed.scene_key ? "scene" :
-      parsed.skill_name || parsed.skill_enabled === true ? "skill" :
-        undefined
+    parsed.scene_id || parsed.scene_key ? "scene" : undefined
   );
+  const metadataWithoutRemovedFields = stripRemovedMetadataFields(parsed);
 
   const normalized: SmartMemoryMetadata = {
-    ...parsed,
+    ...metadataWithoutRemovedFields,
     summary,
     content,
     memory_kind: normalizeMemoryKind(rawMemoryKind),
@@ -409,10 +409,6 @@ export function parseSmartMetadata(
     case_trigger: normalizeOptionalString(parsed.case_trigger),
     case_outcome: normalizeOptionalString(parsed.case_outcome),
     case_steps: normalizeStringArray(parsed.case_steps, 12),
-    skill_name: normalizeOptionalString(parsed.skill_name),
-    skill_enabled: typeof parsed.skill_enabled === "boolean" ? parsed.skill_enabled : undefined,
-    skill_activation_conditions: normalizeStringArray(parsed.skill_activation_conditions, 12),
-    skill_source_ids: normalizeStringArray(parsed.skill_source_ids, 24),
     canonical_id: normalizeOptionalString(parsed.canonical_id),
   };
 
@@ -551,24 +547,6 @@ export function buildSmartMetadata(
       patch.case_steps === undefined
         ? base.case_steps
         : normalizeStringArray(patch.case_steps, 12),
-    skill_name:
-      patch.skill_name === undefined
-        ? base.skill_name
-        : normalizeOptionalString(patch.skill_name),
-    skill_enabled:
-      patch.skill_enabled === undefined
-        ? base.skill_enabled
-        : typeof patch.skill_enabled === "boolean"
-          ? patch.skill_enabled
-          : undefined,
-    skill_activation_conditions:
-      patch.skill_activation_conditions === undefined
-        ? base.skill_activation_conditions
-        : normalizeStringArray(patch.skill_activation_conditions, 12),
-    skill_source_ids:
-      patch.skill_source_ids === undefined
-        ? base.skill_source_ids
-        : normalizeStringArray(patch.skill_source_ids, 24),
     canonical_id:
       patch.canonical_id === undefined
         ? base.canonical_id

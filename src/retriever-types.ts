@@ -89,7 +89,7 @@ export interface RetrievalConfig {
    *  Queries containing these prefixes (e.g. "proj:AIF") will use BM25-only + mustContain
    *  to avoid semantic false positives from vector search. */
   tagPrefixes: string[];
-  /** Learned utility / scene / skill ranking policy. */
+  /** Learned utility / scene / pattern ranking policy. */
   learningMemory?: LearningMemoryConfig;
 }
 

@@ -103,8 +103,6 @@ type DashboardMemory = {
     sceneId?: string;
     sceneTitle?: string;
     sceneMemberIds?: string[];
-    skillName?: string;
-    skillEnabled?: boolean;
   };
   qualityFlags: DashboardQualityFilter[];
   details: {
@@ -582,8 +580,6 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
       ...(meta.scene_id ? { sceneId: meta.scene_id } : {}),
       ...(meta.scene_title ? { sceneTitle: meta.scene_title } : {}),
       ...(meta.scene_member_ids ? { sceneMemberIds: meta.scene_member_ids } : {}),
-      ...(meta.skill_name ? { skillName: meta.skill_name } : {}),
-      ...(typeof meta.skill_enabled === "boolean" ? { skillEnabled: meta.skill_enabled } : {}),
     },
     qualityFlags,
     details: {

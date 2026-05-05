@@ -52,7 +52,7 @@ describe("jsonl_distill slash-command filtering", () => {
     appendFileSync(
       sessionPath,
       [
-        makeMessage("user", "   /note self-improvement (before reset): write summary", 1),
+        makeMessage("user", "   /note session summary: write summary", 1),
         makeMessage("assistant", "✅ New session started", 2),
         makeMessage("user", "Please keep my preferred test style as concise.", 3),
         makeMessage("assistant", "Understood. I will keep tests focused and concise.", 4),
@@ -78,4 +78,3 @@ describe("jsonl_distill slash-command filtering", () => {
     ]);
   });
 });
-

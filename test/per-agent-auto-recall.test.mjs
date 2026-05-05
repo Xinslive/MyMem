@@ -321,7 +321,6 @@ describe("auto-recall metadata write-behind", () => {
         sessionStrategy: "none",
         smartExtraction: false,
         autoCapture: false,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -538,7 +537,6 @@ describe("real before_prompt_build hook", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -619,7 +617,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallIncludeAgents: ["saffron"],
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -680,7 +677,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallTimeoutMs: 25,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -749,7 +745,6 @@ describe("real before_prompt_build hook", () => {
         autoRecallMinLength: 1,
         autoRecallMaxItems: 5,
         autoRecallCandidatePoolSize: 6,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -814,7 +809,6 @@ describe("real before_prompt_build hook", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -877,7 +871,6 @@ describe("real before_prompt_build hook", () => {
         autoCapture: false,
         autoRecall: true,
         autoRecallMinLength: 1,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -940,7 +933,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallMaxQueryLength: 120,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1047,7 +1039,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallMinRepeated: 8,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1144,7 +1135,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         autoRecallMinRepeated: 8,
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 
@@ -1229,7 +1219,6 @@ describe("real before_prompt_build hook", () => {
         autoRecall: true,
         autoRecallMinLength: 1,
         learningMemory: { enabled: false },
-        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
       },
     });
 

@@ -177,10 +177,8 @@ assertSchemaDefault("learningMemory.exploration.minTrialsBeforeDecay", 3);
 assertSchemaDefault("learningMemory.casePatternDistillation.enabled", true);
 assertSchemaDefault("learningMemory.casePatternDistillation.minCaseClusterSize", 2);
 assertSchemaDefault("learningMemory.casePatternDistillation.maxPatternsPerRun", 4);
-assertSchemaDefault("learningMemory.autoSkills.enabled", true);
-assertSchemaDefault("learningMemory.autoSkills.maxSkillsPerRecall", 2);
-assertSchemaDefault("learningMemory.autoSkills.maxSkillChars", 600);
-assertSchemaDefault("learningMemory.autoSkills.minConfidence", 0.72);
+assertSchemaMissing("learningMemory.autoSkills");
+assertSchemaMissing("selfImprovement");
 assertSchemaDefault("learningMemory.llmQuality", "high");
 assertSchemaDefault("learningMemory.cooldownHours", 4);
 assertSchemaDefault("learningMemory.maxMemoriesToScan", 300);
@@ -231,7 +229,6 @@ for (const expectedPackagePath of [
   "index.ts",
   "cli.ts",
   "src",
-  "lesson",
   "scripts",
   "openclaw.plugin.json",
 ]) {
@@ -246,6 +243,8 @@ for (const forbiddenPackagePath of [".claude", ".claude/", "~", "~/", "~/.claude
     `package.json files whitelist should not include ${forbiddenPackagePath}`,
   );
 }
+assert.equal(Object.prototype.hasOwnProperty.call(manifest, "skills"), false, "manifest should not publish Codex skills");
+assert.equal(pkg.files.includes("lesson"), false, "package.json files whitelist should not include the removed lesson skill");
 
 const workDir = mkdtempSync(path.join(tmpdir(), "memory-plugin-regression-"));
 const services = [];
@@ -269,7 +268,6 @@ try {
   plugin.register(api);
   assert.equal(services.length, 1, "plugin should register its background service");
   assert.equal(typeof api.hooks.agent_end, "function", "autoCapture should remain enabled by default");
-  assert.equal(typeof api.hooks.before_reset, "function", "selfImprovement before_reset hook should be registered by default");
   assert.deepEqual(
     Object.keys(api.toolFactories).sort(),
     manifest.contracts.tools.toSorted(),
@@ -288,6 +286,10 @@ try {
     "mymem_archive",
     "mymem_compact",
     "mymem_explain_rank",
+    "self_improvement_log",
+    "self_improvement_extract_skill",
+    "self_improvement_review",
+    "self_improvement_distill",
   ]) {
     assert.equal(
       Object.prototype.hasOwnProperty.call(api.toolFactories, hiddenTool),
@@ -303,15 +305,6 @@ try {
     doctorToolDefinition.description,
     /memory seems broken, missing, slow, empty/,
     "mymem_doctor description should advertise diagnostic triggers",
-  );
-  const selfImprovementLogDefinition = api.toolFactories.self_improvement_log({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    selfImprovementLogDefinition.description,
-    /not a manual channel for ordinary user memory/,
-    "self_improvement_log description should distinguish governance backlog from user memory",
   );
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
@@ -367,11 +360,10 @@ try {
     },
   });
   plugin.register(sessionDefaultApi);
-  // selfImprovement registers before_reset by default, independent of sessionMemory config
   assert.equal(
-    typeof sessionDefaultApi.hooks.before_reset,
-    "function",
-    "before_reset hook should be registered (selfImprovement default-on)",
+    Object.prototype.hasOwnProperty.call(sessionDefaultApi.hooks, "before_reset"),
+    false,
+    "before_reset hook should not be registered when session memory is disabled",
   );
 
   const sessionEnabledApi = createMockApi({

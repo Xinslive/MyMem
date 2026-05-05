@@ -8,7 +8,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ReflectionErrorState } from "./plugin-types.js";
 import { DIAG_BUILD_TAG } from "./plugin-constants.js";
 import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, resolveLlmTimeoutMs, pruneMapIfOver } from "./config-utils.js";
-import { getDefaultDbPath, getDefaultWorkspaceDir } from "./path-utils.js";
+import { getDefaultDbPath } from "./path-utils.js";
 import { dirname, join } from "node:path";
 import { parsePluginConfig } from "./plugin-config-parser.js";
 import { getPluginVersion } from "./version-utils.js";
@@ -152,7 +152,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const recencyConfig = config.retrieval ?? {};
   const feedbackLoopConfig = normalizeFeedbackLoopConfig(config.feedbackLoop);
   const feedbackLoopAdmissionConfig = normalizeAdmissionControlConfig(config.admissionControl);
-  const feedbackLoopWorkspaceDir = getDefaultWorkspaceDir();
   const recencyEngine = new RecencyEngine({
     ...DEFAULT_RECENCY_CONFIG,
     halfLifeDays: recencyConfig.timeDecayHalfLifeDays ?? recencyConfig.recencyHalfLifeDays ?? DEFAULT_RECENCY_CONFIG.halfLifeDays,
@@ -268,7 +267,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
-            workspaceDir: feedbackLoopWorkspaceDir,
             dbPath: resolvedDbPath,
             admissionConfig: feedbackLoopAdmissionConfig,
           },
@@ -284,7 +282,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
           config: feedbackLoopConfig,
           debugLog: (msg: string) => api.logger.debug(msg),
           runtimeContext: {
-            workspaceDir: feedbackLoopWorkspaceDir,
             dbPath: resolvedDbPath,
             admissionConfig: feedbackLoopAdmissionConfig,
           },
@@ -299,7 +296,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       config: feedbackLoopConfig,
       debugLog: (msg: string) => api.logger.debug(msg),
       runtimeContext: {
-        workspaceDir: feedbackLoopWorkspaceDir,
         dbPath: resolvedDbPath,
         admissionConfig: feedbackLoopAdmissionConfig,
       },

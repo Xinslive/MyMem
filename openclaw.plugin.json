@@ -4,16 +4,9 @@
   "description": "Enhanced LanceDB-backed long-term memory with hybrid retrieval, multi-scope isolation, long-context chunking, and management CLI",
   "version": "2026.5.4",
   "kind": "memory",
-  "skills": [
-    "./lesson"
-  ],
   "contracts": {
     "tools": [
-      "mymem_doctor",
-      "self_improvement_log",
-      "self_improvement_extract_skill",
-      "self_improvement_review",
-      "self_improvement_distill"
+      "mymem_doctor"
     ]
   },
   "configSchema": {
@@ -135,7 +128,7 @@
       "enableManagementTools": {
         "type": "boolean",
         "default": true,
-        "description": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor plus self_improvement tools; memory write, recall, and governance are handled automatically."
+        "description": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor; memory write, recall, and governance are handled automatically."
       },
       "sessionStrategy": {
         "type": "string",
@@ -629,7 +622,7 @@
       "learningMemory": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Default-on learned memory layer: utility-aware ranking, scene memories, case/pattern distillation, and auto-enabled learned skills.",
+        "description": "Default-on learned memory layer: utility-aware ranking, scene memories, and case/pattern distillation.",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
           "sceneMemory": {
@@ -668,16 +661,6 @@
               "enabled": { "type": "boolean", "default": true },
               "minCaseClusterSize": { "type": "integer", "minimum": 2, "maximum": 20, "default": 2 },
               "maxPatternsPerRun": { "type": "integer", "minimum": 1, "maximum": 20, "default": 4 }
-            }
-          },
-          "autoSkills": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "enabled": { "type": "boolean", "default": true },
-              "maxSkillsPerRecall": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
-              "maxSkillChars": { "type": "integer", "minimum": 120, "maximum": 2000, "default": 600 },
-              "minConfidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.72 }
             }
           },
           "llmQuality": {
@@ -851,29 +834,6 @@
             "maximum": 100,
             "default": 15,
             "description": "Legacy compatibility field. Mapped to memoryReflection.messageCount."
-          }
-        }
-      },
-      "selfImprovement": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "beforeResetNote": {
-            "type": "boolean",
-            "default": true,
-            "description": "Run before_reset self-improvement capture. This now writes review entries before reset instead of injecting a note into the next session."
-          },
-          "skipSubagentBootstrap": {
-            "type": "boolean",
-            "default": true
-          },
-          "ensureLearningFiles": {
-            "type": "boolean",
-            "default": true
           }
         }
       },
@@ -1267,7 +1227,7 @@
       "feedbackLoop": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Feedback loops connecting self-improvement errors, corrections, and admission rejections back into admission priors and preventive lessons.",
+        "description": "Feedback loops connecting runtime evidence, corrections, and admission rejections back into admission priors and preventive lessons.",
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -1340,7 +1300,7 @@
               "fromErrors": {
                 "type": "boolean",
                 "default": true,
-                "description": "Learn preventive lessons from tool errors, tool error output, test failures, and logged self-improvement errors."
+                "description": "Learn preventive lessons from tool errors, tool error output, and test failures."
               },
               "fromCorrections": {
                 "type": "boolean",
@@ -1373,7 +1333,7 @@
                 "minimum": 1,
                 "maximum": 10,
                 "default": 3,
-                "description": "Maximum preventive lessons learned or updated per feedback scan."
+                "description": "Maximum preventive lessons learned or updated per feedback drain."
               }
             }
           }
@@ -1825,25 +1785,6 @@
       "help": "memoryReflection / systemSessionMemory / none",
       "advanced": true
     },
-    "selfImprovement.enabled": {
-      "label": "Self-Improvement",
-      "help": "Enable self-improvement reminder and governance tools"
-    },
-    "selfImprovement.beforeResetNote": {
-      "label": "Reset Reminder Note",
-      "help": "Append /note reminder before /new and /reset",
-      "advanced": true
-    },
-    "selfImprovement.skipSubagentBootstrap": {
-      "label": "Skip Subagent Bootstrap",
-      "help": "Do not inject reminder file into subagent bootstrap context",
-      "advanced": true
-    },
-    "selfImprovement.ensureLearningFiles": {
-      "label": "Ensure Learning Files",
-      "help": "Auto-create .learnings files when missing",
-      "advanced": true
-    },
     "memoryReflection.storeToLanceDB": {
       "label": "Store Reflection To LanceDB",
       "help": "Persist reflection event + item rows to the separate reflection LanceDB (effective only under memoryReflection strategy)",
@@ -1936,7 +1877,7 @@
     },
     "enableManagementTools": {
       "label": "Management Tools",
-      "help": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor plus self_improvement tools.",
+      "help": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor.",
       "advanced": true
     },
     "mdMirror.enabled": {
@@ -2043,12 +1984,7 @@
     },
     "learningMemory.enabled": {
       "label": "Learning Memory",
-      "help": "Enable utility-aware ranking, scene memories, and learned skills.",
-      "advanced": true
-    },
-    "learningMemory.autoSkills.enabled": {
-      "label": "Learned Skills",
-      "help": "Inject auto-enabled reusable skills distilled from prior cases.",
+      "help": "Enable utility-aware ranking, scene memories, and case/pattern distillation.",
       "advanced": true
     },
     "sessionCompression.enabled": {

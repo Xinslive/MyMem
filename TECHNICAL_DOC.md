@@ -15,7 +15,7 @@
 7. [智能提取管线](#7-智能提取管线)
 8. [衰减与生命周期管理](#8-衰减与生命周期管理)
 9. [噪声过滤系统](#9-噪声过滤系统)
-10. [反馈闭环与自我改进](#10-反馈闭环与自我改进)
+10. [反馈闭环与记忆治理](#10-反馈闭环与记忆治理)
 11. [反思系统](#11-反思系统)
 12. [记忆压缩与渐进式摘要](#12-记忆压缩与渐进式摘要)
 13. [偏好蒸馏与经验编译](#13-偏好蒸馏与经验编译)
@@ -37,7 +37,7 @@ MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是
 
 ```
 对话 → 自动捕获 → 智能提取 → 去重/准入 → 持久化 → 混合检索
-→ Learning Memory 排序 → 场景/技能注入 → 反思沉淀 → 生命周期维护 → 自我改进
+→ Learning Memory 排序 → 场景展开 → 反思沉淀 → 生命周期维护 → 记忆治理
 ```
 
 ### 1.2 技术栈
@@ -69,7 +69,7 @@ MyMem-main/
 │   ├── store.ts             # LanceDB 存储层
 │   ├── embedder.ts          # Embedding 抽象层
 │   ├── retriever.ts         # 混合检索引擎
-│   ├── learning-memory.ts   # 场景记忆、效用学习、case/pattern/skill 蒸馏
+│   ├── learning-memory.ts   # 场景记忆、效用学习、case/pattern 蒸馏
 │   ├── smart-extractor.ts   # LLM 智能提取管线
 │   ├── decay-engine.ts      # Weibull 衰减模型
 │   ├── tier-manager.ts      # 三层记忆升降级
@@ -79,8 +79,7 @@ MyMem-main/
 │   └── ... (104 个模块)
 ├── test/                    # 98 个测试文件
 ├── scripts/                 # CI/版本同步脚本
-├── benchmark/               # 性能基准
-└── lesson/                  # /lesson 技能定义
+└── benchmark/               # 性能基准
 ```
 
 ---
@@ -193,7 +192,7 @@ interface SmartMemoryMetadata {
   l2_content: string;
 
   // 分类与层级
-  memory_kind: "memory" | "scene" | "case" | "pattern" | "skill";
+  memory_kind: "memory" | "scene" | "case" | "pattern";
   memory_category: MemoryCategory;  // 6 类分类
   memory_type: MemoryType;          // "knowledge" | "experience"
   tier: MemoryTier;                 // "core" | "working" | "peripheral"
@@ -239,14 +238,10 @@ interface SmartMemoryMetadata {
   scene_member_ids?: string[];
   scene_summary_version?: number;
 
-  // case / skill 蒸馏
+  // case / pattern 蒸馏
   case_trigger?: string;
   case_outcome?: string;
   case_steps?: string[];
-  skill_name?: string;
-  skill_enabled?: boolean;
-  skill_activation_conditions?: string[];
-  skill_source_ids?: string[];
 }
 ```
 
@@ -763,14 +758,14 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 
 ---
 
-## 10. 反馈闭环与自我改进
+## 10. 反馈闭环与记忆治理
 
 ### 10.1 双循环反馈
 
 `src/feedback-loop.ts` 实现两个反馈循环：
 
 **循环 1：预防教训**
-- 来源：工具错误 + 用户修正 + 错误文件
+- 来源：工具错误 + 用户修正 + 运行时证据缓冲
 - 动作：将反复出现的问题证据更新到 preventive lesson 记忆
 
 **循环 2：先验适应**
@@ -778,16 +773,9 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 - 动作：调整 `AdmissionTypePriors`（各类别的准入先验）
 - 配置：10 分钟适应间隔，学习率 0.1，最大调整幅度 0.15
 
-### 10.2 自我改进学习文件
+### 10.2 MyMem 反思治理
 
-`src/self-improvement-files.ts` 维护持久化的学习文件，记录：
-
-- 用户纠正（"不对，应该是..."）
-- 工具失败（错误信号和签名）
-- 成功案例
-- 坏召回反馈
-
-这些学习文件在新会话启动时注入为上下文，帮助 Agent 避免重复犯错。
+反思和 feedback-loop 会把用户纠正、工具失败、成功案例和坏召回反馈写入 MyMem store 的普通记忆、反思项或 preventive lesson 记忆，并通过治理状态、置信度和效用信号控制后续召回。
 
 ### 10.3 Hook 增强系统
 
@@ -810,7 +798,7 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 
 Learning Memory 把反馈信号沉淀到每条主记忆的 metadata：
 
-- **正信号**：记忆被确认使用、被 `mymem_update` / `mymem_promote` 强化、召回内容被用户继续沿用、case 或 skill 成功复用
+- **正信号**：记忆被确认使用、被 `mymem_update` / `mymem_promote` 强化、召回内容被用户继续沿用、case 或 pattern 成功复用
 - **负信号**：坏召回反馈、用户纠正、自纠正命中冲突、召回后短时间内被忽略并重复注入
 
 更新通过 `buildUtilityPatch()`、`buildBadRecallUtilityPatch()` 和批量 metadata patch 完成，避免每次注入都立即写 LanceDB。后台维护还会根据成功/失败计数做 smoothing，把 `utility_score` 拉向更稳定的经验值。
@@ -910,21 +898,20 @@ Learning Memory 把反馈信号沉淀到每条主记忆的 metadata：
 
 `src/temporal-classifier.ts` 对记忆的时间特征进行分类，区分静态事实和动态事实，支持时间版本化替换。
 
-### 13.3 Case / Pattern / Skill 蒸馏
+### 13.3 Case / Pattern 蒸馏
 
-Learning Memory 在主库中用 `memory_kind` 扩展出三类经验结构：
+Learning Memory 在主库中用 `memory_kind` 扩展出两类经验结构：
 
 - **case**：一次成功或失败轨迹，保留触发条件、结果和步骤
 - **pattern**：多个相似 case 聚合出的可复用处理模式
-- **skill**：高置信 pattern 生成的运行时 learned skill，默认启用
 
 后台维护流程由 `src/learning-memory.ts` 执行：
 
 ```
-case 记忆 → 按触发轴聚类 → pattern upsert → skill upsert → 自动召回注入 <learned-skills>
+case 记忆 → 按触发轴聚类 → pattern upsert → 后续召回与治理复用
 ```
 
-LLM 可用于蒸馏标题、摘要、步骤和激活条件；当 LLM 不可用或返回无效 JSON 时，系统退回确定性摘要和聚类。`skill` 作为普通主记忆存储，运行时通过 MyMem auto-recall 注入，不依赖 OpenClaw 动态重载插件 manifest。需要审计或导出时，可以再把 skill 生成独立的 Markdown 草稿。
+LLM 可用于蒸馏标题、摘要和步骤；当 LLM 不可用或返回无效 JSON 时，系统退回确定性摘要和聚类。pattern 作为普通主记忆存储，并通过常规召回治理复用。
 
 ---
 
@@ -985,14 +972,14 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 ```
 提示词构建前 → 读取最近用户消息 → 检索记忆 → 治理过滤
-→ scene 成员展开 → learned skill 匹配 → 预算裁剪 → 上下文注入
+→ scene 成员展开 → 预算裁剪 → 上下文注入
 ```
 
 默认 `recallMode` 为 `full`，此时自动召回不执行规则式意图分析；设置 `recallMode: "adaptive"` 后才会使用 `intent-analyzer` 做类别和知识/经验通道提升。查询扩展目前只应用在手动工具调用和 CLI 检索路径，自动召回路径为了降低延迟直接使用原查询。
 
-当召回结果包含 `memory_kind: "scene"` 时，Hook 会按 `scene_member_ids` 读取成员记忆，并最多展开 `learningMemory.sceneMemory.maxExpandedSceneMembers` 条高效用成员，默认 2 条。启用的 `skill` 记忆会按 `skill_activation_conditions` 做轻量匹配，并注入到独立的 `<learned-skills>` 块；默认最多注入 2 条、总长度受 `maxSkillChars` 和 auto-recall 总预算共同限制。
+当召回结果包含 `memory_kind: "scene"` 时，Hook 会按 `scene_member_ids` 读取成员记忆，并最多展开 `learningMemory.sceneMemory.maxExpandedSceneMembers` 条高效用成员，默认 2 条。其他历史数据按普通记忆治理和召回路径处理。
 
-自动召回阶段不调用 LLM。Learning Memory 的场景刷新、case/pattern/skill 蒸馏和效用平滑都在后台维护任务中运行。
+自动召回阶段不调用 LLM。Learning Memory 的场景刷新、case/pattern 蒸馏和效用平滑都在后台维护任务中运行。
 
 关键配置：
 - `autoRecall`：是否启用（默认 true）
@@ -1005,15 +992,11 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 `src/session-memory-hook.ts` 注册会话生命周期事件，在会话开始和结束时执行记忆相关的维护操作。
 
-### 15.4 自我改进 Hook
-
-`src/self-improvement-hook.ts` 注册自我改进相关的生命周期事件，在 agent bootstrap 时注入提醒，并在 `/new` / `/reset` 前从当前对话中记录可能的学习项或错误项到 `.learnings`。技能提取不是自动动作，需要后续通过 `self_improvement_extract_skill` 指定学习项和技能名生成草稿。
-
-### 15.5 插件注册与网关维护
+### 15.4 插件注册与网关维护
 
 `src/plugin-registration.ts` 负责注册网关维护任务，包括生命周期维护、衰减评分、层级转换和 Learning Memory 维护的定时执行。
 
-Learning Memory 维护复用现有网关启动/后台维护入口，按 `learningMemory.cooldownHours` 控制运行间隔，默认 4 小时。维护器会扫描主库中最多 `maxMemoriesToScan` 条候选，执行 scene refresh、utility smoothing、case distill、pattern upsert 和 skill generation。它复用配置好的 LLM 客户端，`llmQuality` 作为 Learning Memory 配置项保留；实时 auto-recall 不使用该客户端。
+Learning Memory 维护复用现有网关启动/后台维护入口，按 `learningMemory.cooldownHours` 控制运行间隔，默认 4 小时。维护器会扫描主库中最多 `maxMemoriesToScan` 条候选，执行 scene refresh、utility smoothing、case distill 和 pattern upsert。它复用配置好的 LLM 客户端，`llmQuality` 作为 Learning Memory 配置项保留；实时 auto-recall 不使用该客户端。
 
 ---
 
@@ -1044,18 +1027,7 @@ Learning Memory 维护复用现有网关启动/后台维护入口，按 `learnin
 
 管理工具随 `enableManagementTools` 启用（默认 `true`）。
 
-### 16.3 自我改进工具
-
-| 工具 | 文件 | 功能 |
-|------|------|------|
-| `self_improvement_log` | `tools-self-improvement.ts` | 记录学习条目 |
-| `self_improvement_extract_skill` | `tools-self-improvement.ts` | 从学习中提取技能 |
-| `self_improvement_review` | `tools-self-improvement.ts` | 审阅学习记录 |
-| `self_improvement_distill` | `tools-self-improvement.ts` | 蒸馏学习结论 |
-
-`self_improvement_log` 始终启用；后三个工具随 `selfImprovement.enabled` 启用（默认 `true`）。
-
-### 16.4 工具注册总入口
+### 16.3 工具注册总入口
 
 `src/tools.ts` 提供 `registerAllMemoryTools()` 函数，统一注册所有工具：
 
@@ -1063,31 +1035,16 @@ Learning Memory 维护复用现有网关启动/后台维护入口，按 `learnin
 export function registerAllMemoryTools(
   api: OpenClawPluginApi,
   context: ToolContext,
-  options: { enableManagementTools?: boolean; enableSelfImprovementTools?: boolean }
+  options: { enableManagementTools?: boolean }
 ) {
-  // 核心工具（始终注册）
-  registerMemoryRecallTool(api, context);
-  registerMemoryStoreTool(api, context);
-  registerMemoryForgetTool(api, context);
-  registerMemoryUpdateTool(api, context);
-
-  // 管理工具
+  // 运行时只注册诊断工具；写入、召回和治理由自动管线处理
   if (options.enableManagementTools) {
-    registerMemoryStatsTool(api, context);
     registerMemoryDoctorTool(api, context);
-    // ... 其他管理工具
-  }
-
-  // 自我改进工具
-  if (options.enableSelfImprovementTools) {
-    registerSelfImprovementLogTool(api, context);
-    registerSelfImprovementExtractSkillTool(api, context);
-    // ... 其他自我改进工具
   }
 }
 ```
 
-### 16.5 工具 schema 验证
+### 16.4 工具 schema 验证
 
 所有工具参数使用 `@sinclair/typebox` 进行运行时类型验证。
 
@@ -1224,7 +1181,7 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 | `embedder.ts` | Embedding 抽象层，多 Provider，自动分块，缓存 |
 | `retriever.ts` | 混合检索引擎，RRF 融合，重排序，多样性过滤，Learning Policy 调用 |
 | `smart-extractor.ts` | LLM 智能提取管线，6 类分类，去重/合并 |
-| `learning-memory.ts` | Learning Memory 配置归一化、效用排序、场景维护、case/pattern/skill 蒸馏 |
+| `learning-memory.ts` | Learning Memory 配置归一化、效用排序、场景维护、case/pattern 蒸馏 |
 | `decay-engine.ts` | Weibull 衰减模型，知识/经验解耦 |
 | `tier-manager.ts` | 三层记忆升降级管理 |
 | `scopes.ts` | 多作用域访问控制系统 |
@@ -1295,8 +1252,6 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 | 模块 | 功能 |
 |------|------|
 | `feedback-loop.ts` | 双循环反馈（预防教训 + 先验适应） |
-| `self-improvement-hook.ts` | 自我改进 Hook |
-| `self-improvement-files.ts` | 学习文件持久化 |
 | `hook-enhancements.ts` | Hook 级增强（10 种软干预） |
 | `hook-dedup.ts` | Hook 事件去重 |
 | `preference-slots.ts` | 偏好槽位管理 |
@@ -1306,7 +1261,7 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 
 | 模块 | 功能 |
 |------|------|
-| `auto-recall-hook.ts` | 自动召回 Hook（before_prompt_build），scene 展开与 learned skill 注入 |
+| `auto-recall-hook.ts` | 自动召回 Hook（before_prompt_build），scene 展开与预算裁剪 |
 | `auto-capture-hook.ts` | 自动捕获 Hook（agent_end） |
 | `auto-capture-cleanup.ts` | 捕获文本规范化 |
 | `auto-capture-utils.ts` | 捕获工具函数 |
@@ -1324,7 +1279,6 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 | `tools-forget.ts` | mymem_forget 工具 |
 | `tools-update.ts` | mymem_update 工具 |
 | `tools-management.ts` | 管理工具集 (stats/debug/explain/list/promote/archive/compact/explain_rank) |
-| `tools-self-improvement.ts` | 自我改进工具集 |
 | `tools-shared.ts` | 工具共享类型和工具函数 |
 | `memory-doctor-tool.ts` | mymem_doctor 诊断工具 |
 
@@ -1473,12 +1427,6 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
     enabled: true,
     minCaseClusterSize: 2,
     maxPatternsPerRun: 4,
-  },
-  autoSkills: {
-    enabled: true,
-    maxSkillsPerRecall: 2,
-    maxSkillChars: 600,
-    minConfidence: 0.72,
   },
   llmQuality: "high",
   cooldownHours: 4,

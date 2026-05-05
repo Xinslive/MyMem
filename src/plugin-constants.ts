@@ -35,24 +35,6 @@ export const CAPTURE_EXCLUDE_PATTERNS = [
   /(删除|刪除|清理|清除).{0,12}(记忆|記憶|memory)/i,
 ];
 
-export const DEFAULT_SELF_IMPROVEMENT_REMINDER = `## Self-Improvement Reminder
-
-After completing tasks, evaluate if any learnings should be captured:
-
-**Log when:**
-- User corrects you -> .learnings/LEARNINGS.md
-- Command/operation fails -> .learnings/ERRORS.md
-- You discover your knowledge was wrong -> .learnings/LEARNINGS.md
-- You find a better approach -> .learnings/LEARNINGS.md
-
-**Promote when pattern is proven:**
-- Behavioral patterns -> SOUL.md
-- Workflow improvements -> AGENTS.md
-- Tool gotchas -> TOOLS.md
-
-Keep entries simple: date, title, what happened, what to do differently.`;
-
-export const SELF_IMPROVEMENT_NOTE_PREFIX = "/note self-improvement (before reset):";
 export const DEFAULT_REFLECTION_MESSAGE_COUNT = 120;
 export const DEFAULT_REFLECTION_MAX_INPUT_CHARS = 24_000;
 export const DEFAULT_REFLECTION_TIMEOUT_MS = 90_000;

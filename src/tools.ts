@@ -11,14 +11,6 @@ export { MEMORY_CATEGORIES } from "./memory-categories.js";
 export { _resetWarnedMissingAgentIdState } from "./tools-shared.js";
 export type { MdMirrorWriter, ToolContext } from "./tools-shared.js";
 
-// Re-export self-improvement tools
-export {
-  registerSelfImprovementLogTool,
-  registerSelfImprovementExtractSkillTool,
-  registerSelfImprovementReviewTool,
-  registerSelfImprovementDistillTool,
-} from "./tools-self-improvement.js";
-
 // Re-export core tools
 export { registerMemoryRecallTool } from "./tools-recall.js";
 export { registerMemoryStoreTool } from "./tools-store.js";
@@ -38,27 +30,14 @@ export {
 } from "./tools-management.js";
 
 import type { ToolContext } from "./tools-shared.js";
-import {
-  registerSelfImprovementLogTool,
-  registerSelfImprovementExtractSkillTool,
-  registerSelfImprovementReviewTool,
-  registerSelfImprovementDistillTool,
-} from "./tools-self-improvement.js";
 
 export function registerAllMemoryTools(
   api: OpenClawPluginApi,
   context: ToolContext,
   options: {
     enableManagementTools?: boolean;
-    enableSelfImprovementTools?: boolean;
   } = {},
 ) {
+  void options;
   registerMemoryDoctorTool(api, context);
-
-  if (options.enableSelfImprovementTools !== false) {
-    registerSelfImprovementLogTool(api, context);
-    registerSelfImprovementExtractSkillTool(api, context);
-    registerSelfImprovementReviewTool(api, context);
-    registerSelfImprovementDistillTool(api, context);
-  }
 }

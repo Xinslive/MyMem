@@ -17,7 +17,6 @@ const {
   applyLearningPolicy,
   buildUtilitySmoothingPatch,
   buildUtilityPatch,
-  formatLearnedSkillLine,
   formatSceneExpandedLine,
   pickHighValueSceneMembers,
   runLearningMemoryMaintenance,
@@ -59,24 +58,22 @@ describe("learning memory metadata", () => {
     assert.equal(meta.utility_trial_count, 0);
   });
 
-  it("round-trips scene and skill metadata", () => {
+  it("round-trips scene and pattern metadata", () => {
     const built = buildSmartMetadata({ text: "scene", category: "other", timestamp: 1 }, {
-      memory_kind: "skill",
+      memory_kind: "pattern",
       memory_category: "patterns",
       utility_score: 0.8,
-      skill_name: "Verify generated files",
-      skill_enabled: true,
-      skill_activation_conditions: ["generated file", "completion report"],
-      skill_source_ids: ["case-1", "case-2"],
+      case_trigger_axes: ["generated file", "completion report"],
+      case_steps: ["inspect path", "run focused check"],
       scene_member_ids: ["m1", "m2"],
     });
     const parsed = parseSmartMetadata(stringifySmartMetadata(built), { text: "scene", category: "other", timestamp: 1 });
-    assert.equal(parsed.memory_kind, "skill");
+    assert.equal(parsed.memory_kind, "pattern");
     assert.equal(parsed.utility_score, 0.8);
-    assert.equal(parsed.skill_enabled, true);
-    assert.deepEqual(parsed.skill_activation_conditions, ["generated file", "completion report"]);
-    assert.deepEqual(parsed.skill_source_ids, ["case-1", "case-2"]);
+    assert.deepEqual(parsed.case_trigger_axes, ["generated file", "completion report"]);
+    assert.deepEqual(parsed.case_steps, ["inspect path", "run focused check"]);
     assert.deepEqual(parsed.scene_member_ids, ["m1", "m2"]);
+    assert.equal(parsed.skill_enabled, undefined);
   });
 });
 
@@ -133,20 +130,15 @@ describe("learning policy", () => {
   });
 });
 
-describe("learned skills and maintenance", () => {
-  it("formats learned skills for auto-recall injection", () => {
-    const meta = buildSmartMetadata({ text: "skill", category: "other", timestamp: 1 }, {
+describe("scene and pattern maintenance", () => {
+  it("treats legacy skill metadata as ordinary memory", () => {
+    const parsed = parseSmartMetadata(JSON.stringify({
       memory_kind: "skill",
       memory_category: "patterns",
-      skill_name: "Verify generated files",
       skill_enabled: true,
-      skill_activation_conditions: ["after codegen"],
-      case_steps: ["inspect path", "run focused check"],
-    });
-    const line = formatLearnedSkillLine(entry("skill-1", "skill", meta), 200);
-    assert.match(line, /\[skill:global\]/);
-    assert.match(line, /Verify generated files/);
-    assert.match(line, /inspect path/);
+    }), { text: "legacy skill", category: "other", timestamp: 1 });
+    assert.equal(parsed.memory_kind, "memory");
+    assert.equal(parsed.skill_enabled, undefined);
   });
 
   it("expands scene memories with high-value member memories", () => {
@@ -187,7 +179,7 @@ describe("learned skills and maintenance", () => {
     assert.doesNotMatch(line, /Old archived detail/);
   });
 
-  it("creates scene and skill memories from existing cases", async () => {
+  it("creates scene and pattern memories from existing cases", async () => {
     const stored = [];
     const updated = [];
     const caseMeta = (text) => stringifySmartMetadata(buildSmartMetadata({ text, category: "fact", timestamp: 1 }, {
@@ -230,22 +222,21 @@ describe("learned skills and maintenance", () => {
       enabled: true,
       sceneMemory: { enabled: true, maxScenesPerRun: 2, maxSceneMembers: 4 },
       casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 2 },
-      autoSkills: { enabled: true },
     });
 
     assert.equal(result.scanned, 2);
     assert.equal(result.scenesCreated, 1);
-    assert.equal(result.skillsCreated, 1);
     assert.equal(result.patternsCreated, 1);
-    assert.equal(stored.length, 3);
+    assert.equal(result.skillsCreated, undefined);
+    assert.equal(stored.length, 2);
     const metas = stored.map((memory) => parseSmartMetadata(memory.metadata, memory));
     assert.ok(metas.some((meta) => meta.memory_kind === "scene"));
     assert.ok(metas.some((meta) => meta.memory_kind === "pattern"));
-    assert.ok(metas.some((meta) => meta.memory_kind === "skill" && meta.skill_enabled === true));
+    assert.ok(!metas.some((meta) => meta.memory_kind === "skill"));
     assert.equal(updated.length, 0);
   });
 
-  it("creates independent patterns even when auto skills are disabled", async () => {
+  it("creates independent patterns without skill generation", async () => {
     const stored = [];
     const rows = [
       entry("case-1", "Case: deploy rollback required dry run", {
@@ -279,11 +270,10 @@ describe("learned skills and maintenance", () => {
       enabled: true,
       sceneMemory: { enabled: false },
       casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 1 },
-      autoSkills: { enabled: false },
     });
 
     assert.equal(result.patternsCreated, 1);
-    assert.equal(result.skillsCreated, 0);
+    assert.equal(result.skillsCreated, undefined);
     assert.equal(stored.length, 1);
     assert.equal(parseSmartMetadata(stored[0].metadata, stored[0]).memory_kind, "pattern");
   });

@@ -8,7 +8,6 @@
     "index.ts",
     "cli.ts",
     "src",
-    "lesson",
     "scripts",
     "benchmark",
     "openclaw.plugin.json",

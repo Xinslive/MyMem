@@ -32,12 +32,6 @@ export interface LearningMemoryConfig {
     minCaseClusterSize?: number;
     maxPatternsPerRun?: number;
   };
-  autoSkills?: {
-    enabled?: boolean;
-    maxSkillsPerRecall?: number;
-    maxSkillChars?: number;
-    minConfidence?: number;
-  };
   llmQuality?: "low" | "medium" | "high";
   cooldownHours?: number;
   maxMemoriesToScan?: number;
@@ -161,12 +155,6 @@ export interface PluginConfig {
   enableManagementTools?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionMemory?: { enabled?: boolean; messageCount?: number };
-  selfImprovement?: {
-    enabled?: boolean;
-    beforeResetNote?: boolean;
-    skipSubagentBootstrap?: boolean;
-    ensureLearningFiles?: boolean;
-  };
   memoryReflection?: {
     enabled?: boolean;
     storeToLanceDB?: boolean;

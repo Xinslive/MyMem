@@ -1,5 +1,5 @@
 /**
- * Feedback Loop — connects self-improvement errors and admission rejections
+ * Feedback Loop — connects runtime error evidence and admission rejections
  * back into admission prior tuning and preventive lessons.
  *
  * Two loops:
@@ -8,8 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { open, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { open } from "node:fs/promises";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
@@ -50,7 +49,6 @@ export interface FeedbackLoopConfig {
 }
 
 export interface FeedbackLoopRuntimeContext {
-  workspaceDir?: string;
   dbPath?: string;
   admissionConfig?: AdmissionControlConfig;
 }
@@ -59,8 +57,7 @@ export type PreventiveLessonSource =
   | "tool_error"
   | "tool_output"
   | "test_failure"
-  | "user_correction"
-  | "error_file";
+  | "user_correction";
 
 export interface PreventiveLessonEvidence {
   summary: string;
@@ -93,17 +90,16 @@ export interface FeedbackLoopStatus {
     promoted: number;
     skipped: number;
     failed: number;
-    scanCycles: number;
-    lastScanAt: number | null;
+    drainCycles: number;
+    lastDrainedAt: number | null;
   };
   runtime: {
-    hasWorkspaceDir: boolean;
     hasDbPath: boolean;
     hasAdmissionConfig: boolean;
   };
 }
 
-const FEEDBACK_SCAN_INTERVAL_MS = 300_000; // 5 minutes
+const FEEDBACK_DRAIN_INTERVAL_MS = 300_000; // 5 minutes
 
 export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
   enabled: true,
@@ -181,12 +177,10 @@ function buildPreventionText(evidence: PreventiveLessonEvidence): string {
     case "tool_error":
     case "tool_output":
       return `After a tool failure${toolPart}, inspect the exact error text, retry only the narrow failing step, and verify the fix before continuing.`;
-    case "error_file":
-      return "When this logged error recurs, use the prior failure summary as a checklist before attempting a wider change.";
   }
 }
 
-function buildPreventiveLessonText(evidence: PreventiveLessonEvidence): string {
+export function buildPreventiveLessonText(evidence: PreventiveLessonEvidence): string {
   const source = classifyPreventiveLessonSource(evidence);
   const summary = clip(evidence.summary, 260);
   const details = evidence.details ? clip(evidence.details, 260) : "";
@@ -200,46 +194,6 @@ function canonicalLessonId(evidence: PreventiveLessonEvidence): string {
   if (evidence.signatureHash) return `preventive:${classifyPreventiveLessonSource(evidence)}:${evidence.signatureHash}`;
   const key = normalizeLessonText(`${evidence.summary}\n${evidence.details ?? ""}`).slice(0, 240);
   return `preventive:${classifyPreventiveLessonSource(evidence)}:${hashText(key).slice(0, 16)}`;
-}
-
-// ============================================================================
-// Error File Parser
-// ============================================================================
-
-const ERR_HEADING_RE = /^##\s+\[(ERR-\d{8}-\d{3})\]\s*(.+)$/;
-
-interface ParsedErrorEntry {
-  id: string;
-  area: string;
-  summary: string;
-  details: string;
-}
-
-function parseErrorsFile(content: string): ParsedErrorEntry[] {
-  const entries: ParsedErrorEntry[] = [];
-  const lines = content.split("\n");
-  let current: ParsedErrorEntry | null = null;
-  let section: "summary" | "details" | null = null;
-
-  for (const line of lines) {
-    const headingMatch = ERR_HEADING_RE.exec(line);
-    if (headingMatch) {
-      if (current) entries.push(current);
-      current = { id: headingMatch[1], area: headingMatch[2].trim(), summary: "", details: "" };
-      section = null;
-      continue;
-    }
-    if (!current) continue;
-
-    if (line.startsWith("### Summary")) { section = "summary"; continue; }
-    if (line.startsWith("### Details")) { section = "details"; continue; }
-    if (line.startsWith("### ")) { section = null; continue; }
-
-    if (section === "summary") current.summary += (current.summary ? "\n" : "") + line.trim();
-    if (section === "details") current.details += (current.details ? "\n" : "") + line.trim();
-  }
-  if (current) entries.push(current);
-  return entries;
 }
 
 const MAX_REJECTION_AUDIT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -299,26 +253,6 @@ function isRejectedAuditEntry(value: unknown): value is AdmissionRejectionAuditE
 }
 
 // ============================================================================
-// Processed Error Tracker (in-memory dedup)
-// ============================================================================
-
-class ProcessedErrorTracker {
-  private processed = new Set<string>();
-
-  has(id: string): boolean {
-    return this.processed.has(id);
-  }
-
-  add(id: string): void {
-    this.processed.add(id);
-  }
-
-  get size(): number {
-    return this.processed.size;
-  }
-}
-
-// ============================================================================
 // Feedback Loop
 // ============================================================================
 
@@ -330,7 +264,6 @@ export class FeedbackLoop {
   private debugLog: (msg: string) => void;
   private runtimeContext: FeedbackLoopRuntimeContext;
 
-  private processedPreventiveLessonErrors = new ProcessedErrorTracker();
   private preventiveLessonBuffer: PreventiveLessonEvidence[] = [];
   private admittedTimestampsByCategory: Record<string, number[]> = {};
   private learnedPreventiveLessons = 0;
@@ -338,12 +271,12 @@ export class FeedbackLoop {
   private promotedPreventiveLessons = 0;
   private skippedPreventiveLessons = 0;
   private failedPreventiveLessons = 0;
-  private scanCycles = 0;
+  private drainCycles = 0;
   private adaptationCycles = 0;
-  private lastScanAt: number | null = null;
+  private lastDrainedAt: number | null = null;
   private lastAdaptedAt: number | null = null;
   private lastAdaptiveTypePriors: AdmissionTypePriors | null = null;
-  private scanTimer: ReturnType<typeof setInterval> | null = null;
+  private drainTimer: ReturnType<typeof setInterval> | null = null;
   private adaptationTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
 
@@ -372,12 +305,12 @@ export class FeedbackLoop {
 
   start(): void {
     if (this.disposed || !this.config.enabled) return;
-    if (this.scanTimer || this.adaptationTimer) return;
+    if (this.drainTimer || this.adaptationTimer) return;
 
     if (this.config.preventiveLessons.enabled && this.config.preventiveLessons.fromErrors && this.lessonStore) {
-      this.scanTimer = setInterval(
-        () => void this.runFeedbackScanCycle().catch(() => {}),
-        FEEDBACK_SCAN_INTERVAL_MS,
+      this.drainTimer = setInterval(
+        () => void this.runFeedbackDrainCycle().catch(() => {}),
+        FEEDBACK_DRAIN_INTERVAL_MS,
       );
     }
     if (this.config.priorAdaptation.enabled && this.admissionController) {
@@ -392,7 +325,7 @@ export class FeedbackLoop {
 
   dispose(): void {
     this.disposed = true;
-    if (this.scanTimer) { clearInterval(this.scanTimer); this.scanTimer = null; }
+    if (this.drainTimer) { clearInterval(this.drainTimer); this.drainTimer = null; }
     if (this.adaptationTimer) { clearInterval(this.adaptationTimer); this.adaptationTimer = null; }
     this.debugLog("feedback-loop: disposed");
   }
@@ -425,11 +358,10 @@ export class FeedbackLoop {
         promoted: this.promotedPreventiveLessons,
         skipped: this.skippedPreventiveLessons,
         failed: this.failedPreventiveLessons,
-        scanCycles: this.scanCycles,
-        lastScanAt: this.lastScanAt,
+        drainCycles: this.drainCycles,
+        lastDrainedAt: this.lastDrainedAt,
       },
       runtime: {
-        hasWorkspaceDir: Boolean(this.runtimeContext.workspaceDir),
         hasDbPath: Boolean(this.runtimeContext.dbPath),
         hasAdmissionConfig: Boolean(this.runtimeContext.admissionConfig),
       },
@@ -454,18 +386,6 @@ export class FeedbackLoop {
     this.pruneAdmittedTimestamps(now);
   }
 
-  onSelfImprovementError(params: { summary: string; details?: string; area?: string }): void {
-    if (this.disposed || !this.config.enabled) return;
-    if (this.config.preventiveLessons.fromErrors) {
-      this.onPreventiveLessonEvidence({
-        summary: params.summary,
-        details: params.details,
-        area: params.area,
-        source: "tool_error",
-      });
-    }
-  }
-
   onPreventiveLessonEvidence(evidence: PreventiveLessonEvidence): void {
     if (this.disposed || !this.config.enabled || !this.config.preventiveLessons.enabled) return;
     if (!this.lessonStore) return;
@@ -477,47 +397,6 @@ export class FeedbackLoop {
     if (this.preventiveLessonBuffer.length > maxBuffered) {
       this.preventiveLessonBuffer.splice(0, this.preventiveLessonBuffer.length - maxBuffered);
     }
-  }
-
-  // --- Error File Scanning ---
-
-  async scanErrorFile(baseDir: string): Promise<void> {
-    this.rememberRuntimeContext({ workspaceDir: baseDir });
-    const learnLessons =
-      this.config.preventiveLessons.enabled &&
-      this.config.preventiveLessons.fromErrors &&
-      Boolean(this.lessonStore);
-    if (this.disposed || !learnLessons) return;
-    this.scanCycles++;
-    this.lastScanAt = Date.now();
-
-    try {
-      const filePath = join(baseDir, ".learnings", "ERRORS.md");
-      const content = await readFile(filePath, "utf-8");
-      const entries = parseErrorsFile(content);
-
-      const maxPerScan = this.config.preventiveLessons.maxLearnPerScan;
-      let processed = 0;
-      for (const entry of entries) {
-        if (processed >= maxPerScan) break;
-        const lessonProcessed = this.processedPreventiveLessonErrors.has(entry.id);
-        if (lessonProcessed) continue;
-
-        this.onPreventiveLessonEvidence({
-          summary: entry.summary,
-          details: entry.details,
-          area: entry.area,
-          source: "error_file",
-          signatureHash: entry.id,
-        });
-        this.processedPreventiveLessonErrors.add(entry.id);
-        processed++;
-      }
-    } catch {
-      // File doesn't exist yet — not an error
-    }
-
-    await this.drainPreventiveLessonBuffer();
   }
 
   async drainPreventiveLessonBuffer(): Promise<void> {
@@ -534,6 +413,8 @@ export class FeedbackLoop {
         this.debugLog(`feedback-loop: preventive lesson learn failed: ${String(err)}`);
       }
     }
+    this.drainCycles++;
+    this.lastDrainedAt = Date.now();
   }
 
   private async learnPreventiveLesson(evidence: PreventiveLessonEvidence): Promise<void> {
@@ -748,15 +629,10 @@ export class FeedbackLoop {
 
   // --- Internal Cycle Runners ---
 
-  private async runFeedbackScanCycle(): Promise<void> {
+  private async runFeedbackDrainCycle(): Promise<void> {
     if (this.disposed) return;
-    const workspaceDir = this.runtimeContext.workspaceDir;
     try {
-      if (workspaceDir) {
-        await this.scanErrorFile(workspaceDir);
-      } else {
-        await this.drainPreventiveLessonBuffer();
-      }
+      await this.drainPreventiveLessonBuffer();
     } catch {
       // Non-critical: swallow
     }
@@ -777,9 +653,6 @@ export class FeedbackLoop {
 
   private rememberRuntimeContext(context?: FeedbackLoopRuntimeContext): void {
     if (!context) return;
-    if (typeof context.workspaceDir === "string" && context.workspaceDir.trim().length > 0) {
-      this.runtimeContext.workspaceDir = context.workspaceDir.trim();
-    }
     if (typeof context.dbPath === "string" && context.dbPath.trim().length > 0) {
       this.runtimeContext.dbPath = context.dbPath.trim();
     }

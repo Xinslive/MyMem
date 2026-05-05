@@ -303,19 +303,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as PluginConfig["scopes"] : undefined,
     enableManagementTools: cfg.enableManagementTools !== false,
     sessionStrategy,
-    selfImprovement: typeof cfg.selfImprovement === "object" && cfg.selfImprovement !== null
-      ? {
-        enabled: (cfg.selfImprovement as Record<string, unknown>).enabled !== false,
-        beforeResetNote: (cfg.selfImprovement as Record<string, unknown>).beforeResetNote !== false,
-        skipSubagentBootstrap: (cfg.selfImprovement as Record<string, unknown>).skipSubagentBootstrap !== false,
-        ensureLearningFiles: (cfg.selfImprovement as Record<string, unknown>).ensureLearningFiles !== false,
-      }
-      : {
-        enabled: true,
-        beforeResetNote: true,
-        skipSubagentBootstrap: true,
-        ensureLearningFiles: true,
-      },
     memoryReflection: memoryReflectionRaw
       ? {
         enabled: sessionStrategy === "memoryReflection",
@@ -471,10 +458,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         typeof raw?.casePatternDistillation === "object" && raw.casePatternDistillation !== null
           ? raw.casePatternDistillation as Record<string, unknown>
           : null;
-      const skillsRaw =
-        typeof raw?.autoSkills === "object" && raw.autoSkills !== null
-          ? raw.autoSkills as Record<string, unknown>
-          : null;
       const llmQuality = raw?.llmQuality === "low" || raw?.llmQuality === "medium" || raw?.llmQuality === "high"
         ? raw.llmQuality
         : "high";
@@ -513,15 +496,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           enabled: distillRaw?.enabled !== false,
           minCaseClusterSize: clampInt(parsePositiveInt(distillRaw?.minCaseClusterSize) ?? 2, 2, 20),
           maxPatternsPerRun: clampInt(parsePositiveInt(distillRaw?.maxPatternsPerRun) ?? 4, 1, 20),
-        },
-        autoSkills: {
-          enabled: skillsRaw?.enabled !== false,
-          maxSkillsPerRecall: clampInt(parsePositiveInt(skillsRaw?.maxSkillsPerRecall) ?? 2, 0, 5),
-          maxSkillChars: clampInt(parsePositiveInt(skillsRaw?.maxSkillChars) ?? 600, 120, 2000),
-          minConfidence:
-            typeof skillsRaw?.minConfidence === "number"
-              ? Math.max(0, Math.min(1, skillsRaw.minConfidence))
-              : 0.72,
         },
         llmQuality,
         cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,

@@ -72,7 +72,6 @@ import { registerSessionMemoryHook } from "./src/session-memory-hook.js";
 import { createAutoBackup } from "./src/auto-backup.js";
 import { registerAutoCaptureHook } from "./src/auto-capture-hook.js";
 import { registerAutoRecallHook } from "./src/auto-recall-hook.js";
-import { registerSelfImprovementHook } from "./src/self-improvement-hook.js";
 import { registerHookEnhancements } from "./src/hook-enhancements.js";
 import { registerGatewayMaintenance } from "./src/plugin-registration.js";
 
@@ -264,7 +263,6 @@ const myMemPlugin = {
       },
       {
         enableManagementTools: config.enableManagementTools,
-        enableSelfImprovementTools: config.selfImprovement?.enabled !== false,
       }
     );
 
@@ -375,12 +373,6 @@ const myMemPlugin = {
       mdMirror: mdMirror ?? undefined,
       isCliMode,
     });
-
-    // ========================================================================
-    // Integrated Self-Improvement (inheritance + derived)
-    // ========================================================================
-
-    registerSelfImprovementHook({ api, config, isCliMode });
 
     // ========================================================================
     // Integrated Memory Reflection (reflection)

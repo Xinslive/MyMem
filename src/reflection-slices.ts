@@ -184,7 +184,7 @@ export function extractReflectionLessons(reflectionText: string): string[] {
 }
 
 export function extractReflectionLearningGovernanceCandidates(reflectionText: string): ReflectionGovernanceEntry[] {
-  const section = extractSectionMarkdown(reflectionText, "Learning governance candidates (.learnings / promotion / skill extraction)");
+  const section = extractSectionMarkdown(reflectionText, "Memory governance candidates");
   if (!section) return [];
 
   const entryBlocks = section
@@ -199,7 +199,7 @@ export function extractReflectionLearningGovernanceCandidates(reflectionText: st
   if (parsed.length > 0) return parsed;
 
   const fallbackBullets = sanitizeReflectionSliceLines(
-    parseSectionBullets(reflectionText, "Learning governance candidates (.learnings / promotion / skill extraction)")
+    parseSectionBullets(reflectionText, "Memory governance candidates")
   );
   if (fallbackBullets.length === 0) return [];
 
@@ -207,9 +207,9 @@ export function extractReflectionLearningGovernanceCandidates(reflectionText: st
     priority: "medium",
     status: "pending",
     area: "config",
-    summary: "Reflection learning governance candidates",
+    summary: "Reflection memory governance candidates",
     details: fallbackBullets.map((line) => `- ${line}`).join("\n"),
-    suggestedAction: "Review the governance candidates, promote durable rules to AGENTS.md / SOUL.md / TOOLS.md when stable, and extract a skill if the pattern becomes reusable.",
+    suggestedAction: "Review the governance candidates and preserve durable rules as MyMem memories or project rules when stable.",
   }];
 }
 

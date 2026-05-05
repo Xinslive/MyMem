@@ -175,7 +175,7 @@ describe("memory reflection", () => {
 
       writeFileSync(
         sessionPath,
-        [messageLine("user", "/new", 1), messageLine("assistant", "/note self-improvement (before reset): ...", 2)].join("\n") + "\n",
+        [messageLine("user", "/new", 1), messageLine("assistant", "/note session summary: ...", 2)].join("\n") + "\n",
         "utf-8"
       );
       writeFileSync(
@@ -526,7 +526,6 @@ describe("memory reflection", () => {
           autoCapture: false,
           autoRecall: false,
           sessionStrategy: "memoryReflection",
-          selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
           memoryReflection: {
             dbPath: reflectionDbPath,
             storeToLanceDB: true,
@@ -607,7 +606,6 @@ describe("memory reflection", () => {
           autoCapture: false,
           autoRecall: false,
           sessionStrategy: "memoryReflection",
-          selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
           memoryReflection: {
             dbPath: reflectionDbPath,
             storeToLanceDB: false,

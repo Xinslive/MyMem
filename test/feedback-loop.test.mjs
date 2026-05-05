@@ -265,14 +265,13 @@ it("FeedbackLoop: getStatus exposes runtime context, lessons, and admitted count
       preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
     },
     runtimeContext: {
-      workspaceDir: "/tmp/workspace",
       dbPath: "/tmp/db",
       admissionConfig: makeAdmissionConfig(),
     },
   });
 
   loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
-  loop.onSelfImprovementError({ area: "extraction", summary: "extractor returned no useful candidate" });
+  loop.onPreventiveLessonEvidence({ source: "tool_error", area: "extraction", summary: "extractor returned no useful candidate" });
   loop.onPreventiveLessonEvidence({ source: "user_correction", summary: "Don't use stale recall.", scope: "global" });
   loop.onAdmissionAdmitted("preferences");
 
@@ -284,7 +283,6 @@ it("FeedbackLoop: getStatus exposes runtime context, lessons, and admitted count
   assert.equal(status.priorAdaptation.enabled, true);
   assert.equal(status.priorAdaptation.observedAdmitted, 1);
   assert.deepStrictEqual(status.runtime, {
-    hasWorkspaceDir: true,
     hasDbPath: true,
     hasAdmissionConfig: true,
   });
@@ -595,7 +593,7 @@ it("forceAdaptationCycle: limits prior adaptation to the recent audit tail", asy
   }
 });
 
-it("scanErrorFile: reads matching errors as preventive evidence without embedding", async () => {
+it("FeedbackLoop: runtime error evidence updates existing preventive lessons without embedding", async () => {
   const lessonStore = makeLessonStore();
   const existing = await lessonStore.store({
     text: "Prevent extractor stale fixture failures",
@@ -609,7 +607,7 @@ it("scanErrorFile: reads matching errors as preventive evidence without embeddin
       memory_category: "patterns",
       reasoning_strategy: true,
       strategy_kind: "preventive",
-      canonical_id: "preventive:test_failure:ERR-20260419-001",
+      canonical_id: "preventive:test_failure:runtime-test-failure",
       state: "pending",
       evidence_count: 1,
       confidence: 0.4,
@@ -625,34 +623,28 @@ it("scanErrorFile: reads matching errors as preventive evidence without embeddin
     },
   });
 
-  const dir = tmpDir();
-  try {
-    mkdirSync(join(dir, ".learnings"), { recursive: true });
-    writeFileSync(join(dir, ".learnings", "ERRORS.md"), `## [ERR-20260419-001] extraction
+  loop.onPreventiveLessonEvidence({
+    source: "test_failure",
+    area: "extraction",
+    summary: "Test error summary text here",
+    details: "Test error details",
+    signatureHash: "runtime-test-failure",
+  });
+  await loop.drainPreventiveLessonBuffer();
 
-### Summary
-Test error summary text here
-
-### Details
-Test error details
-`, "utf-8");
-
-    await loop.scanErrorFile(dir);
-
-    const entry = lessonStore.entries.get(existing.id);
-    const meta = parseSmartMetadata(entry.metadata, entry);
-    assert.equal(meta.evidence_count, 2);
-    assert.equal(loop.getStatus().preventiveLessons.updated, 1);
-    assert.equal(loop.getStatus().preventiveLessons.scanCycles, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    loop.dispose();
-  }
+  const entry = lessonStore.entries.get(existing.id);
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  assert.equal(meta.evidence_count, 2);
+  const status = loop.getStatus().preventiveLessons;
+  assert.equal(status.updated, 1);
+  assert.equal(status.drainCycles, 1);
+  assert.ok(status.lastDrainedAt);
+  loop.dispose();
 });
 
-it("scanErrorFile: skips already-processed errors", async () => {
+it("FeedbackLoop: repeated runtime evidence updates the same canonical lesson", async () => {
   const lessonStore = makeLessonStore();
-  await lessonStore.store({
+  const existing = await lessonStore.store({
     text: "Prevent extractor stale fixture failures",
     vector: [0.1, 0.2],
     importance: 0.72,
@@ -664,7 +656,7 @@ it("scanErrorFile: skips already-processed errors", async () => {
       memory_category: "patterns",
       reasoning_strategy: true,
       strategy_kind: "preventive",
-      canonical_id: "preventive:test_failure:ERR-20260419-001",
+      canonical_id: "preventive:test_failure:runtime-test-failure",
       state: "pending",
       evidence_count: 1,
       confidence: 0.4,
@@ -676,26 +668,29 @@ it("scanErrorFile: skips already-processed errors", async () => {
     config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
-  const dir = tmpDir();
-  try {
-    mkdirSync(join(dir, ".learnings"), { recursive: true });
-    writeFileSync(join(dir, ".learnings", "ERRORS.md"), `## [ERR-20260419-001] extraction
+  loop.onPreventiveLessonEvidence({
+    source: "test_failure",
+    area: "extraction",
+    summary: "Test",
+    signatureHash: "runtime-test-failure",
+  });
+  loop.onPreventiveLessonEvidence({
+    source: "test_failure",
+    area: "extraction",
+    summary: "Test",
+    signatureHash: "runtime-test-failure",
+  });
+  await loop.drainPreventiveLessonBuffer();
 
-### Summary
-Test
-`, "utf-8");
-
-    await loop.scanErrorFile(dir);
-    await loop.scanErrorFile(dir);
-
-    assert.equal(loop.getStatus().preventiveLessons.updated, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    loop.dispose();
-  }
+  assert.equal(loop.getStatus().preventiveLessons.updated, 2);
+  assert.equal(lessonStore.entries.size, 1);
+  const entry = lessonStore.entries.get(existing.id);
+  const meta = parseSmartMetadata(entry.metadata, entry);
+  assert.equal(meta.evidence_count, 3);
+  loop.dispose();
 });
 
-it("scanErrorFile: processes errors regardless of area", async () => {
+it("FeedbackLoop: processes runtime error evidence regardless of area", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     admissionController: null,
@@ -703,32 +698,15 @@ it("scanErrorFile: processes errors regardless of area", async () => {
     config: DEFAULT_FEEDBACK_LOOP_CONFIG,
   });
 
-  const dir = tmpDir();
-  try {
-    mkdirSync(join(dir, ".learnings"), { recursive: true });
-    writeFileSync(join(dir, ".learnings", "ERRORS.md"), `## [ERR-20260419-001] ui-bug
-
-### Summary
-UI related error
-`, "utf-8");
-
-    await loop.scanErrorFile(dir);
-    assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
-    assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
-    assert.ok(lessonStore.entries.size > 0, "lesson should be created for any area");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    loop.dispose();
-  }
-});
-
-it("scanErrorFile: handles missing file gracefully", async () => {
-  const loop = new FeedbackLoop({
-    admissionController: null,
-    store: makeLessonStore(),
-    config: DEFAULT_FEEDBACK_LOOP_CONFIG,
+  loop.onPreventiveLessonEvidence({
+    source: "tool_error",
+    area: "ui-bug",
+    summary: "UI related error",
   });
+  await loop.drainPreventiveLessonBuffer();
 
-  await loop.scanErrorFile("/nonexistent/path");
+  assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
+  assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
+  assert.ok(lessonStore.entries.size > 0, "lesson should be created for any runtime area");
   loop.dispose();
 });

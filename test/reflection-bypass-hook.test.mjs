@@ -85,7 +85,6 @@ function makePluginConfig(workDir) {
     smartExtraction: false,
     autoCapture: false,
     autoRecall: false,
-    selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
   };
 }
 

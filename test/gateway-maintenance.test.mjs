@@ -142,7 +142,6 @@ describe("gateway maintenance", () => {
           scenesCreated: 0,
           scenesUpdated: 0,
           patternsCreated: 0,
-          skillsCreated: 0,
           utilitySmoothed: 0,
           skipped: 0,
           llmRefined: 0,
