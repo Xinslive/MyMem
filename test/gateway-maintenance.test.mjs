@@ -95,7 +95,7 @@ describe("gateway maintenance", () => {
     assert.match(infoLogs[0], /promoted=3 demoted=4\b/);
   });
 
-  it("passes the quality-specific learning LLM to learning maintenance", async () => {
+  it("passes the shared learning LLM to learning maintenance", async () => {
     const learningLlm = { completeJson: async () => null, getLastError: () => null };
     const smartLlm = { completeJson: async () => null, getLastError: () => null };
     let seenLlm = null;

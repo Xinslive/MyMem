@@ -58,6 +58,16 @@ function assertAnyOfTypes(pathExpression, expectedTypes) {
   assert.deepEqual(actual, [...expectedTypes].sort(), `${pathExpression} should allow ${expectedTypes.join(" or ")}`);
 }
 
+function assertSchemaMissing(pathExpression) {
+  const parts = pathExpression.split(".");
+  let current = manifest.configSchema;
+  for (const part of parts) {
+    current = current?.properties?.[part];
+    if (!current) return;
+  }
+  assert.fail(`configSchema should not declare ${pathExpression}`);
+}
+
 function assertToolCategoryEnum(toolDefinition, toolName) {
   const categorySchema = toolDefinition.parameters.properties.category;
   assert.ok(categorySchema, `${toolName} should expose a category parameter`);
@@ -180,9 +190,14 @@ assertSchemaDefault("sessionCompression.enabled", true);
 assertSchemaDefault("extractionThrottle.skipLowValue", true);
 assertSchemaDefault("embedding.chunking", true);
 assert.equal(schemaAt("embedding.omitDimensions").type, "boolean", "embedding.omitDimensions should be declared in the plugin schema");
-assert.equal(schemaAt("llm.lowModel").type, "string", "llm.lowModel should be declared in the plugin schema");
-assert.equal(schemaAt("llm.mediumModel").type, "string", "llm.mediumModel should be declared in the plugin schema");
-assert.equal(schemaAt("llm.highModel").type, "string", "llm.highModel should be declared in the plugin schema");
+for (const removedLearningModelField of ["llm.lowModel", "llm.mediumModel", "llm.highModel"]) {
+  assertSchemaMissing(removedLearningModelField);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(manifest.uiHints, removedLearningModelField),
+    false,
+    `uiHints should not expose ${removedLearningModelField}`,
+  );
+}
 assertSchemaDefault("sessionMemory.enabled", false);
 assertSchemaDefault("telemetry.persist", true);
 assertSchemaDefault("telemetry.maxRecords", 1000);

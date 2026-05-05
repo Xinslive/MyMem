@@ -189,6 +189,30 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     );
   });
 
+  it("ignores legacy quality-specific learning LLM model fields", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      llm: {
+        apiKey: "llm-key",
+        model: "shared-model",
+        lowModel: "low-model",
+        mediumModel: "medium-model",
+        highModel: "high-model",
+        baseURL: "https://llm.example/v1",
+      },
+    });
+
+    assert.deepEqual(parsed.llm, {
+      auth: "api-key",
+      apiKey: "llm-key",
+      model: "shared-model",
+      baseURL: "https://llm.example/v1",
+      oauthProvider: undefined,
+      oauthPath: undefined,
+      timeoutMs: 90000,
+    });
+  });
+
   it("requires rerank endpoint and model when rerank apiKey is configured", () => {
     assert.throws(
       () => parsePluginConfig({ ...baseConfig(), retrieval: { rerankApiKey: "rerank-key", rerankModel: "Rerank" } }),

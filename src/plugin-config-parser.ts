@@ -289,13 +289,12 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         throw new Error("llm.model is required when llm auth/apiKey is configured");
       }
       return {
-        ...raw,
         auth: raw.auth === "oauth" ? "oauth" : "api-key",
+        apiKey: typeof raw.apiKey === "string" ? raw.apiKey : undefined,
         model: typeof raw.model === "string" ? raw.model.trim() : undefined,
-        lowModel: typeof raw.lowModel === "string" ? raw.lowModel.trim() : undefined,
-        mediumModel: typeof raw.mediumModel === "string" ? raw.mediumModel.trim() : undefined,
-        highModel: typeof raw.highModel === "string" ? raw.highModel.trim() : undefined,
         baseURL: typeof raw.baseURL === "string" ? resolveEnvVars(raw.baseURL.trim()) : undefined,
+        oauthProvider: typeof raw.oauthProvider === "string" ? raw.oauthProvider.trim() : undefined,
+        oauthPath: typeof raw.oauthPath === "string" ? raw.oauthPath.trim() : undefined,
         timeoutMs: parsePositiveInt(raw.timeoutMs) ?? 90000,
       } as PluginConfig["llm"];
     })(),
