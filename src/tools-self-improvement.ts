@@ -26,7 +26,7 @@ export function registerSelfImprovementLogTool(api: OpenClawPluginApi, context: 
     (toolCtx) => ({
       name: "self_improvement_log",
       label: "Self-Improvement Log",
-      description: "Log a structured agent learning or recurring error into .learnings when a workflow mistake, tool failure, correction, or best practice should be reviewed later. This is a governance backlog entry, not normal user memory; use mymem_store for durable cross-turn user/project memory.",
+      description: "Log a structured agent learning or recurring error into .learnings when a workflow mistake, tool failure, correction, or best practice should be reviewed later. This is a governance backlog entry, not a manual channel for ordinary user memory; normal memory capture and recall are handled automatically.",
       parameters: Type.Object({
         type: stringEnum(["learning", "error"]),
         summary: Type.String({ description: "One-line learning/error summary focused on the reusable lesson." }),

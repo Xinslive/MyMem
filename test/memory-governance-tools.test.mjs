@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
-const { registerAllMemoryTools } = jiti("../src/tools.ts");
+const {
+  registerMemoryArchiveTool,
+  registerMemoryCompactTool,
+  registerMemoryExplainRankTool,
+  registerMemoryListTool,
+  registerMemoryPromoteTool,
+  registerMemoryUpdateTool,
+} = jiti("../src/tools.ts");
 const {
   buildSmartMetadata,
   parseSmartMetadata,
@@ -18,7 +25,12 @@ function createToolSet(context) {
     },
     logger: { info() {}, warn() {}, debug() {} },
   };
-  registerAllMemoryTools(api, context, { enableManagementTools: true });
+  registerMemoryPromoteTool(api, context);
+  registerMemoryArchiveTool(api, context);
+  registerMemoryCompactTool(api, context);
+  registerMemoryExplainRankTool(api, context);
+  registerMemoryListTool(api, context);
+  registerMemoryUpdateTool(api, context);
   return {
     get(name) {
       const factory = creators.get(name);

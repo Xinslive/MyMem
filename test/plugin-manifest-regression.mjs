@@ -18,6 +18,7 @@ Module._initPaths();
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const plugin = jiti("../index.ts");
 const { __resetSingletonForTesting__ } = plugin;
+const { Embedder } = jiti("../src/embedder.ts");
 
 const manifest = JSON.parse(
   readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
@@ -274,60 +275,26 @@ try {
     manifest.contracts.tools.toSorted(),
     "contracts.tools should list every tool registered by the default plugin configuration",
   );
-  const storeToolDefinition = api.toolFactories.mymem_store({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    storeToolDefinition.description,
-    /ONLY when auto-capture's single-turn extraction is insufficient/,
-    "mymem_store description should emphasize that manual writes complement auto-capture's single-turn limit",
-  );
-  assert.match(
-    storeToolDefinition.description,
-    /DO NOT use this tool to duplicate a single message/,
-    "mymem_store description should discourage duplicating auto-captured current-turn facts",
-  );
-  assert.match(
-    storeToolDefinition.parameters.properties.text.description,
-    /cross-turn synthesis/,
-    "mymem_store text parameter should guide agents toward curated cross-turn memories",
-  );
-  assertToolCategoryEnum(storeToolDefinition, "mymem_store");
-  const recallToolDefinition = api.toolFactories.mymem_recall({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    recallToolDefinition.description,
-    /auto-recall did not provide enough context/,
-    "mymem_recall description should teach agents to use manual recall when auto-recall is insufficient",
-  );
-  assertToolCategoryEnum(recallToolDefinition, "mymem_recall");
-  const updateToolDefinition = api.toolFactories.mymem_update({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    updateToolDefinition.description,
-    /wrong, stale, incomplete, or superseded/,
-    "mymem_update description should emphasize correction and supersede use cases",
-  );
-  assertToolCategoryEnum(updateToolDefinition, "mymem_update");
-  const listToolDefinition = api.toolFactories.mymem_list({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assertToolCategoryEnum(listToolDefinition, "mymem_list");
-  const forgetToolDefinition = api.toolFactories.mymem_forget({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    forgetToolDefinition.description,
-    /Prefer mymem_archive/,
-    "mymem_forget description should steer stale cleanup toward archive instead of permanent deletion",
-  );
+  for (const hiddenTool of [
+    "mymem_recall",
+    "mymem_store",
+    "mymem_forget",
+    "mymem_update",
+    "mymem_stats",
+    "mymem_debug",
+    "mymem_explain",
+    "mymem_list",
+    "mymem_promote",
+    "mymem_archive",
+    "mymem_compact",
+    "mymem_explain_rank",
+  ]) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(api.toolFactories, hiddenTool),
+      false,
+      `${hiddenTool} should not be registered by the default plugin configuration`,
+    );
+  }
   const doctorToolDefinition = api.toolFactories.mymem_doctor({
     agentId: "main",
     sessionKey: "agent:main:test",
@@ -337,22 +304,13 @@ try {
     /memory seems broken, missing, slow, empty/,
     "mymem_doctor description should advertise diagnostic triggers",
   );
-  const archiveToolDefinition = api.toolFactories.mymem_archive({
-    agentId: "main",
-    sessionKey: "agent:main:test",
-  });
-  assert.match(
-    archiveToolDefinition.description,
-    /stale, low-value, noisy, or superseded/,
-    "mymem_archive description should advertise cleanup triggers",
-  );
   const selfImprovementLogDefinition = api.toolFactories.self_improvement_log({
     agentId: "main",
     sessionKey: "agent:main:test",
   });
   assert.match(
     selfImprovementLogDefinition.description,
-    /not normal user memory/,
+    /not a manual channel for ordinary user memory/,
     "self_improvement_log description should distinguish governance backlog from user memory",
   );
   const originalSetTimeout = globalThis.setTimeout;
@@ -487,87 +445,44 @@ try {
   const embeddingBaseURL = `http://127.0.0.1:${embeddingPort}/v1`;
 
   try {
-    const chunkingOffApi = createMockApi({
-      dbPath: path.join(workDir, "db-chunking-off"),
-      autoCapture: false,
-      autoRecall: false,
-      embedding: {
-        provider: "openai-compatible",
-        apiKey: "dummy",
-        model: "text-embedding-3-small",
-        baseURL: embeddingBaseURL,
-        dimensions: 4,
-        chunking: false,
-      },
+    const chunkingOffEmbedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "dummy",
+      model: "text-embedding-3-small",
+      baseURL: embeddingBaseURL,
+      dimensions: 4,
+      chunking: false,
     });
-    __resetSingletonForTesting__();
-    plugin.register(chunkingOffApi);
-    const chunkingOffTool = chunkingOffApi.toolFactories.mymem_store({
-      agentId: "main",
-      sessionKey: "agent:main:test",
-    });
-    const chunkingOffResult = await chunkingOffTool.execute("tool-1", {
-      text: longText,
-      scope: "global",
-    });
-    assert.equal(
-      chunkingOffResult.details.error,
-      "store_failed",
+    await assert.rejects(
+      () => chunkingOffEmbedder.embedPassage(longText),
+      /context length exceeded/i,
       "embedding.chunking=false should let long-document embedding fail",
     );
 
-    const chunkingOnApi = createMockApi({
-      dbPath: path.join(workDir, "db-chunking-on"),
-      autoCapture: false,
-      autoRecall: false,
-      embedding: {
-        provider: "openai-compatible",
-        apiKey: "dummy",
-        model: "text-embedding-3-small",
-        baseURL: embeddingBaseURL,
-        dimensions: 4,
-        chunking: true,
-      },
+    const chunkingOnEmbedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "dummy",
+      model: "text-embedding-3-small",
+      baseURL: embeddingBaseURL,
+      dimensions: 4,
+      chunking: true,
     });
-    __resetSingletonForTesting__();
-    plugin.register(chunkingOnApi);
-    const chunkingOnTool = chunkingOnApi.toolFactories.mymem_store({
-      agentId: "main",
-      sessionKey: "agent:main:test",
-    });
-    const chunkingOnResult = await chunkingOnTool.execute("tool-2", {
-      text: longText,
-      scope: "global",
-    });
+    const chunkingOnVector = await chunkingOnEmbedder.embedPassage(longText);
     assert.equal(
-      chunkingOnResult.details.action,
-      "created",
+      chunkingOnVector.length,
+      4,
       "embedding.chunking=true should recover from long-document embedding errors",
     );
 
-    const withDimensionsApi = createMockApi({
-      dbPath: path.join(workDir, "db-with-dimensions"),
-      autoCapture: false,
-      autoRecall: false,
-      embedding: {
-        provider: "openai-compatible",
-        apiKey: "dummy",
-        model: "text-embedding-3-small",
-        baseURL: embeddingBaseURL,
-        dimensions: 4,
-      },
-    });
-    __resetSingletonForTesting__();
-    plugin.register(withDimensionsApi);
-    const withDimensionsTool = withDimensionsApi.toolFactories.mymem_store({
-      agentId: "main",
-      sessionKey: "agent:main:test",
+    const withDimensionsEmbedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "dummy",
+      model: "text-embedding-3-small",
+      baseURL: embeddingBaseURL,
+      dimensions: 4,
     });
     const requestCountBeforeWithDimensions = embeddingRequests.length;
-    await withDimensionsTool.execute("tool-3", {
-      text: "dimensions should be sent by default",
-      scope: "global",
-    });
+    await withDimensionsEmbedder.embedPassage("dimensions should be sent by default");
     const withDimensionsRequest = embeddingRequests.at(requestCountBeforeWithDimensions);
     assert.equal(
       withDimensionsRequest?.dimensions,
@@ -575,30 +490,16 @@ try {
       "embedding.dimensions should be forwarded by default",
     );
 
-    const omitDimensionsApi = createMockApi({
-      dbPath: path.join(workDir, "db-omit-dimensions"),
-      autoCapture: false,
-      autoRecall: false,
-      embedding: {
-        provider: "openai-compatible",
-        apiKey: "dummy",
-        model: "text-embedding-3-small",
-        baseURL: embeddingBaseURL,
-        dimensions: 4,
-        omitDimensions: true,
-      },
-    });
-    __resetSingletonForTesting__();
-    plugin.register(omitDimensionsApi);
-    const omitDimensionsTool = omitDimensionsApi.toolFactories.mymem_store({
-      agentId: "main",
-      sessionKey: "agent:main:test",
+    const omitDimensionsEmbedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "dummy",
+      model: "text-embedding-3-small",
+      baseURL: embeddingBaseURL,
+      dimensions: 4,
+      omitDimensions: true,
     });
     const requestCountBeforeOmitDimensions = embeddingRequests.length;
-    await omitDimensionsTool.execute("tool-4", {
-      text: "dimensions should be omitted when configured",
-      scope: "global",
-    });
+    await omitDimensionsEmbedder.embedPassage("dimensions should be omitted when configured");
     const omitDimensionsRequest = embeddingRequests.at(requestCountBeforeOmitDimensions);
     assert.equal(
       Object.prototype.hasOwnProperty.call(omitDimensionsRequest, "dimensions"),

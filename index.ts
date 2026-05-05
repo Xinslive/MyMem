@@ -164,10 +164,10 @@ const myMemPlugin = {
     // Dual-memory model warning: help users understand the two-layer architecture
     // Runs synchronously and logs warnings; does NOT block gateway startup.
     logReg(
-      `[mymem] mymem_recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
+      `[mymem] auto-recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
       `  - Plugin memory (LanceDB) = primary recall source for semantic search\n` +
       `  - MEMORY.md / memory/YYYY-MM-DD.md = startup context / journal only\n` +
-      `  - Auto-capture handles single-turn facts; use mymem_store for explicit cross-turn synthesis, corrections, and durable lessons.\n`
+      `  - Auto-capture, auto-recall, and automatic governance own memory writes, retrieval, and cleanup; manual memory tools are not registered.\n`
     );
 
     // Health status for memory runtime stub (reflects actual plugin health)

@@ -38,18 +38,6 @@ export {
 } from "./tools-management.js";
 
 import type { ToolContext } from "./tools-shared.js";
-import { registerMemoryRecallTool } from "./tools-recall.js";
-import { registerMemoryStoreTool } from "./tools-store.js";
-import { registerMemoryForgetTool } from "./tools-forget.js";
-import { registerMemoryUpdateTool } from "./tools-update.js";
-import { registerMemoryStatsTool } from "./tools-management.js";
-import { registerMemoryDebugTool } from "./tools-management.js";
-import { registerMemoryExplainTool } from "./tools-management.js";
-import { registerMemoryListTool } from "./tools-management.js";
-import { registerMemoryPromoteTool } from "./tools-management.js";
-import { registerMemoryArchiveTool } from "./tools-management.js";
-import { registerMemoryCompactTool } from "./tools-management.js";
-import { registerMemoryExplainRankTool } from "./tools-management.js";
 import {
   registerSelfImprovementLogTool,
   registerSelfImprovementExtractSkillTool,
@@ -65,30 +53,12 @@ export function registerAllMemoryTools(
     enableSelfImprovementTools?: boolean;
   } = {},
 ) {
-  // Core tools (always enabled)
-  registerMemoryRecallTool(api, context);
-  registerMemoryStoreTool(api, context);
-  registerMemoryForgetTool(api, context);
-  registerMemoryUpdateTool(api, context);
+  registerMemoryDoctorTool(api, context);
 
-  // Management tools (optional)
-  if (options.enableManagementTools) {
-    registerMemoryStatsTool(api, context);
-    registerMemoryDoctorTool(api, context);
-    registerMemoryDebugTool(api, context);
-    registerMemoryExplainTool(api, context);
-    registerMemoryListTool(api, context);
-    registerMemoryPromoteTool(api, context);
-    registerMemoryArchiveTool(api, context);
-    registerMemoryCompactTool(api, context);
-    registerMemoryExplainRankTool(api, context);
-  }
   if (options.enableSelfImprovementTools !== false) {
     registerSelfImprovementLogTool(api, context);
-    if (options.enableManagementTools) {
-      registerSelfImprovementExtractSkillTool(api, context);
-      registerSelfImprovementReviewTool(api, context);
-      registerSelfImprovementDistillTool(api, context);
-    }
+    registerSelfImprovementExtractSkillTool(api, context);
+    registerSelfImprovementReviewTool(api, context);
+    registerSelfImprovementDistillTool(api, context);
   }
 }

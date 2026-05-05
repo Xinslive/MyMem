@@ -9,19 +9,7 @@
   ],
   "contracts": {
     "tools": [
-      "mymem_recall",
-      "mymem_store",
-      "mymem_forget",
-      "mymem_update",
-      "mymem_stats",
       "mymem_doctor",
-      "mymem_debug",
-      "mymem_explain",
-      "mymem_list",
-      "mymem_promote",
-      "mymem_archive",
-      "mymem_compact",
-      "mymem_explain_rank",
       "self_improvement_log",
       "self_improvement_extract_skill",
       "self_improvement_review",
@@ -147,7 +135,7 @@
       "enableManagementTools": {
         "type": "boolean",
         "default": true,
-        "description": "Enable management/debug tools such as mymem_list, mymem_stats, mymem_doctor, and governance-oriented self-improvement review/extract actions"
+        "description": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor plus self_improvement tools; memory write, recall, and governance are handled automatically."
       },
       "sessionStrategy": {
         "type": "string",
@@ -221,7 +209,7 @@
         "minimum": 4,
         "maximum": 30,
         "default": 12,
-        "description": "Candidate pool cap used only for auto-recall. Lower values reduce startup latency while manual mymem_recall can keep a larger retrieval.candidatePoolSize."
+        "description": "Candidate pool cap used for auto-recall. Lower values reduce startup latency while retrieval.candidatePoolSize can remain larger for internal retrieval paths."
       },
       "maxRecallPerTurn": {
         "type": "integer",
@@ -1948,7 +1936,7 @@
     },
     "enableManagementTools": {
       "label": "Management Tools",
-      "help": "Enable management/debug tools such as mymem_list, mymem_stats, mymem_doctor, and governance-oriented self-improvement review/extract actions.",
+      "help": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor plus self_improvement tools.",
       "advanced": true
     },
     "mdMirror.enabled": {
@@ -1981,7 +1969,7 @@
     },
     "workspaceBoundary.userMdExclusive.filterRecall": {
       "label": "Filter USER.md Facts From Recall",
-      "help": "Hide USER.md-exclusive facts from plugin auto-recall and mymem_recall output.",
+      "help": "Hide USER.md-exclusive facts from plugin auto-recall output.",
       "advanced": true
     },
     "llm.auth": {
@@ -2007,7 +1995,7 @@
     },
     "memoryCompaction.enabled": {
       "label": "Auto Compaction",
-      "help": "Automatically consolidate similar old memories at gateway startup. Also available on-demand via the mymem_compact tool (requires enableManagementTools)."
+      "help": "Automatically consolidate similar old memories at gateway startup."
     },
     "memoryCompaction.minAgeDays": {
       "label": "Min Age (days)",
