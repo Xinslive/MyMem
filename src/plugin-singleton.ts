@@ -61,7 +61,6 @@ export interface PluginSingletonState {
   migrator: ReturnType<typeof createMigrator>;
   smartExtractor: SmartExtractor | null;
   smartExtractionLlmClient: LlmClient | null;
-  learningMemoryLlmClient: LlmClient | null;
   extractionRateLimiter: ReturnType<typeof createExtractionRateLimiter>;
   feedbackLoop: FeedbackLoop | null;
   telemetryStore: TelemetryStore | null;
@@ -186,7 +185,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
   let smartExtractor: SmartExtractor | null = null;
   let smartExtractionLlmClient: LlmClient | null = null;
-  let learningMemoryLlmClient: LlmClient | null = null;
   let feedbackLoop: FeedbackLoop | null = null;
   if (config.smartExtraction !== false) {
     try {
@@ -219,7 +217,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         warnLog: (msg: string) => api.logger.warn(msg),
       });
       smartExtractionLlmClient = llmClient;
-      learningMemoryLlmClient = llmClient;
 
       const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(config, resolvedDbPath, api);
 
@@ -357,7 +354,6 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     migrator,
     smartExtractor,
     smartExtractionLlmClient,
-    learningMemoryLlmClient,
     extractionRateLimiter,
     feedbackLoop,
     telemetryStore,

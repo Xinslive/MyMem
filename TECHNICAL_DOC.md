@@ -37,7 +37,7 @@ MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是
 
 ```
 对话 → 自动捕获 → 智能提取 → 去重/准入 → 持久化 → 混合检索
-→ Learning Memory 排序 → 场景展开 → 反思沉淀 → 生命周期维护 → 记忆治理
+→ Learning Memory 排序 → 反思沉淀 → 生命周期维护 → 记忆治理
 ```
 
 ### 1.2 技术栈
@@ -48,7 +48,7 @@ MyMem 是一个面向 OpenClaw 个人助理的**长期记忆系统**。它不是
 | 向量数据库 | LanceDB (v0.27.2, 本地嵌入式) |
 | Embedding API | OpenAI 兼容接口 (支持 OpenAI/Jina/Google/本地模型) |
 | Rerank API | Jina / SiliconFlow / Voyage / Pinecone / DashScope / TEI |
-| LLM API | OpenAI 兼容接口 (用于智能提取/反思/压缩/Learning Memory 后台维护) |
+| LLM API | OpenAI 兼容接口 (用于智能提取/反思/压缩) |
 | 运行时 | Node.js + OpenClaw 插件系统 |
 | 类型验证 | @sinclair/typebox (运行时 schema 验证) |
 | 文件锁 | proper-lockfile (跨进程互斥) |
@@ -69,7 +69,7 @@ MyMem-main/
 │   ├── store.ts             # LanceDB 存储层
 │   ├── embedder.ts          # Embedding 抽象层
 │   ├── retriever.ts         # 混合检索引擎
-│   ├── learning-memory.ts   # 场景记忆、效用学习、case/pattern 蒸馏
+│   ├── learning-memory.ts   # 效用学习与探索排序
 │   ├── smart-extractor.ts   # LLM 智能提取管线
 │   ├── decay-engine.ts      # Weibull 衰减模型
 │   ├── tier-manager.ts      # 三层记忆升降级
@@ -231,14 +231,7 @@ interface SmartMemoryMetadata {
   utility_trial_count: number;
   last_utility_update_at?: number;
 
-  // 场景合成记忆
-  scene_id?: string;
-  scene_key?: string;
-  scene_title?: string;
-  scene_member_ids?: string[];
-  scene_summary_version?: number;
-
-  // case / pattern 蒸馏
+  // case / pattern 兼容字段
   case_trigger?: string;
   case_outcome?: string;
   case_steps?: string[];
@@ -508,14 +501,12 @@ function applyMMRDiversity(
 final_score = semantic_score
             + utility_boost
             + exploration_boost
-            + scene_boost
             - bad_recall_penalty
 ```
 
 关键分量：
 - **utility_boost**：根据 `utility_score` 调整长期有用记忆的排名
 - **exploration_boost**：对低试验次数记忆给 UCB 风格探索奖励，避免新记忆长期无曝光
-- **scene_boost**：`scene` 合成记忆和场景成员获得小幅提升
 - **bad_recall_penalty**：`bad_recall_count` 越高，惩罚越强，单条最高惩罚 0.35
 
 `mymem_explain` / `mymem_explain_rank` 会展示 learning 分数拆解，便于排查某条记忆为什么被提升或压低。设置 `learningMemory.enabled=false` 后，该阶段直接返回原候选，保留旧排序行为。
@@ -798,7 +789,7 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [...]; // 诊断产物
 
 Learning Memory 把反馈信号沉淀到每条主记忆的 metadata：
 
-- **正信号**：记忆被确认使用、被 `mymem_update` / `mymem_promote` 强化、召回内容被用户继续沿用、case 或 pattern 成功复用
+- **正信号**：记忆被确认使用、被 `mymem_update` / `mymem_promote` 强化、召回内容被用户继续沿用
 - **负信号**：坏召回反馈、用户纠正、自纠正命中冲突、召回后短时间内被忽略并重复注入
 
 更新通过 `buildUtilityPatch()`、`buildBadRecallUtilityPatch()` 和批量 metadata patch 完成，避免每次注入都立即写 LanceDB。后台维护还会根据成功/失败计数做 smoothing，把 `utility_score` 拉向更稳定的经验值。
@@ -898,20 +889,14 @@ Learning Memory 把反馈信号沉淀到每条主记忆的 metadata：
 
 `src/temporal-classifier.ts` 对记忆的时间特征进行分类，区分静态事实和动态事实，支持时间版本化替换。
 
-### 13.3 Case / Pattern 蒸馏
+### 13.3 Case / Pattern 兼容
 
-Learning Memory 在主库中用 `memory_kind` 扩展出两类经验结构：
+主库中 `memory_kind` 仍兼容两类历史经验结构：
 
 - **case**：一次成功或失败轨迹，保留触发条件、结果和步骤
-- **pattern**：多个相似 case 聚合出的可复用处理模式
+- **pattern**：历史版本中由多个相似 case 聚合出的可复用处理模式
 
-后台维护流程由 `src/learning-memory.ts` 执行：
-
-```
-case 记忆 → 按触发轴聚类 → pattern upsert → 后续召回与治理复用
-```
-
-LLM 可用于蒸馏标题、摘要和步骤；当 LLM 不可用或返回无效 JSON 时，系统退回确定性摘要和聚类。pattern 作为普通主记忆存储，并通过常规召回治理复用。
+当前 Learning Memory 后台维护不再从 case 生成 pattern；历史 pattern 按普通主记忆存储，并通过常规召回治理复用。
 
 ---
 
@@ -972,14 +957,12 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 ```
 提示词构建前 → 读取最近用户消息 → 检索记忆 → 治理过滤
-→ scene 成员展开 → 预算裁剪 → 上下文注入
+→ 预算裁剪 → 上下文注入
 ```
 
 默认 `recallMode` 为 `full`，此时自动召回不执行规则式意图分析；设置 `recallMode: "adaptive"` 后才会使用 `intent-analyzer` 做类别和知识/经验通道提升。查询扩展目前只应用在手动工具调用和 CLI 检索路径，自动召回路径为了降低延迟直接使用原查询。
 
-当召回结果包含 `memory_kind: "scene"` 时，Hook 会按 `scene_member_ids` 读取成员记忆，并最多展开 `learningMemory.sceneMemory.maxExpandedSceneMembers` 条高效用成员，默认 2 条。其他历史数据按普通记忆治理和召回路径处理。
-
-自动召回阶段不调用 LLM。Learning Memory 的场景刷新、case/pattern 蒸馏和效用平滑都在后台维护任务中运行。
+自动召回阶段不调用 LLM。Learning Memory 的效用平滑在后台维护任务中运行；历史 `memory_kind: "scene"` 或 `"pattern"` 数据按普通记忆治理和召回路径处理。
 
 关键配置：
 - `autoRecall`：是否启用（默认 true）
@@ -996,7 +979,7 @@ Agent 会话结束 → 提取消息 → 噪声过滤 → 速率限制检查 → 
 
 `src/plugin-registration.ts` 负责注册网关维护任务，包括生命周期维护、衰减评分、层级转换和 Learning Memory 维护的定时执行。
 
-Learning Memory 维护复用现有网关启动/后台维护入口，按 `learningMemory.cooldownHours` 控制运行间隔，默认 4 小时。维护器会扫描主库中最多 `maxMemoriesToScan` 条候选，执行 scene refresh、utility smoothing、case distill 和 pattern upsert。它复用配置好的 LLM 客户端，`llmQuality` 作为 Learning Memory 配置项保留；实时 auto-recall 不使用该客户端。
+Learning Memory 维护复用现有网关启动/后台维护入口，按 `learningMemory.cooldownHours` 控制运行间隔，默认 4 小时。维护器会扫描主库中最多 `maxMemoriesToScan` 条候选，执行 utility smoothing；实时 auto-recall 不使用 LLM 客户端。
 
 ---
 
@@ -1181,7 +1164,7 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 | `embedder.ts` | Embedding 抽象层，多 Provider，自动分块，缓存 |
 | `retriever.ts` | 混合检索引擎，RRF 融合，重排序，多样性过滤，Learning Policy 调用 |
 | `smart-extractor.ts` | LLM 智能提取管线，6 类分类，去重/合并 |
-| `learning-memory.ts` | Learning Memory 配置归一化、效用排序、场景维护、case/pattern 蒸馏 |
+| `learning-memory.ts` | Learning Memory 配置归一化、效用排序、探索加权和效用平滑 |
 | `decay-engine.ts` | Weibull 衰减模型，知识/经验解耦 |
 | `tier-manager.ts` | 三层记忆升降级管理 |
 | `scopes.ts` | 多作用域访问控制系统 |
@@ -1261,7 +1244,7 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 
 | 模块 | 功能 |
 |------|------|
-| `auto-recall-hook.ts` | 自动召回 Hook（before_prompt_build），scene 展开与预算裁剪 |
+| `auto-recall-hook.ts` | 自动召回 Hook（before_prompt_build），治理过滤与预算裁剪 |
 | `auto-capture-hook.ts` | 自动捕获 Hook（agent_end） |
 | `auto-capture-cleanup.ts` | 捕获文本规范化 |
 | `auto-capture-utils.ts` | 捕获工具函数 |
@@ -1406,12 +1389,6 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
 // Learning Memory
 {
   enabled: true,
-  sceneMemory: {
-    enabled: true,
-    maxScenesPerRun: 8,
-    maxSceneMembers: 8,
-    maxExpandedSceneMembers: 2,
-  },
   utilityLearning: {
     enabled: true,
     positiveReward: 0.12,
@@ -1423,12 +1400,6 @@ const EMBED_TIMEOUT_MS = 3_000;              // Embedding 超时
     weight: 0.08,
     minTrialsBeforeDecay: 3,
   },
-  casePatternDistillation: {
-    enabled: true,
-    minCaseClusterSize: 2,
-    maxPatternsPerRun: 4,
-  },
-  llmQuality: "high",
   cooldownHours: 4,
   maxMemoriesToScan: 300,
 }

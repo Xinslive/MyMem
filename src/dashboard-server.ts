@@ -100,9 +100,6 @@ type DashboardMemory = {
     utilitySuccessCount: number;
     utilityFailureCount: number;
     utilityTrialCount: number;
-    sceneId?: string;
-    sceneTitle?: string;
-    sceneMemberIds?: string[];
   };
   qualityFlags: DashboardQualityFilter[];
   details: {
@@ -583,9 +580,6 @@ function serializeMemory(entry: MemoryEntry): DashboardMemory {
       utilitySuccessCount: meta.utility_success_count,
       utilityFailureCount: meta.utility_failure_count,
       utilityTrialCount: meta.utility_trial_count,
-      ...(meta.scene_id ? { sceneId: meta.scene_id } : {}),
-      ...(meta.scene_title ? { sceneTitle: meta.scene_title } : {}),
-      ...(meta.scene_member_ids ? { sceneMemberIds: meta.scene_member_ids } : {}),
     },
     qualityFlags,
     details: {

@@ -623,19 +623,9 @@
       "learningMemory": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Default-on learned memory layer: utility-aware ranking, scene memories, and case/pattern distillation.",
+        "description": "Default-on learned memory layer: utility-aware ranking and exploration.",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
-          "sceneMemory": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "enabled": { "type": "boolean", "default": true },
-              "maxScenesPerRun": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
-              "maxSceneMembers": { "type": "integer", "minimum": 2, "maximum": 24, "default": 8 },
-              "maxExpandedSceneMembers": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 }
-            }
-          },
           "utilityLearning": {
             "type": "object",
             "additionalProperties": false,
@@ -654,20 +644,6 @@
               "weight": { "type": "number", "minimum": 0, "maximum": 0.5, "default": 0.08 },
               "minTrialsBeforeDecay": { "type": "integer", "minimum": 0, "maximum": 50, "default": 3 }
             }
-          },
-          "casePatternDistillation": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "enabled": { "type": "boolean", "default": true },
-              "minCaseClusterSize": { "type": "integer", "minimum": 2, "maximum": 20, "default": 2 },
-              "maxPatternsPerRun": { "type": "integer", "minimum": 1, "maximum": 20, "default": 4 }
-            }
-          },
-          "llmQuality": {
-            "type": "string",
-            "enum": ["low", "medium", "high"],
-            "default": "high"
           },
           "cooldownHours": { "type": "integer", "minimum": 1, "default": 4 },
           "maxMemoriesToScan": { "type": "integer", "minimum": 20, "maximum": 2000, "default": 300 }
@@ -1997,7 +1973,7 @@
     },
     "learningMemory.enabled": {
       "label": "学习记忆",
-      "help": "启用基于效用的排序、场景记忆，以及案例/模式提炼。",
+      "help": "启用基于效用和探索的排序。",
       "advanced": true
     },
     "sessionCompression.enabled": {

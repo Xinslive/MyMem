@@ -88,12 +88,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     },
     learningMemory: {
       enabled: true,
-      sceneMemory: {
-        enabled: true,
-        maxScenesPerRun: 8,
-        maxSceneMembers: 8,
-        maxExpandedSceneMembers: 2,
-      },
       utilityLearning: {
         enabled: true,
         positiveReward: 0.12,
@@ -105,12 +99,6 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
         weight: 0.08,
         minTrialsBeforeDecay: 3,
       },
-      casePatternDistillation: {
-        enabled: true,
-        minCaseClusterSize: 2,
-        maxPatternsPerRun: 4,
-      },
-      llmQuality: "high",
       cooldownHours: 4,
       maxMemoriesToScan: 300,
     },
@@ -175,11 +163,8 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     },
     learningMemory: {
       enabled: true,
-      sceneMemory: { enabled: true, maxScenesPerRun: 4, maxSceneMembers: 6, maxExpandedSceneMembers: 1 },
       utilityLearning: { enabled: true, positiveReward: 0.1, negativeReward: 0.18, smoothing: 0.3 },
       exploration: { enabled: true, weight: 0.04, minTrialsBeforeDecay: 4 },
-      casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 2 },
-      llmQuality: "medium",
       cooldownHours: 12,
       maxMemoriesToScan: 180,
     },
@@ -244,11 +229,8 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     },
     learningMemory: {
       enabled: true,
-      sceneMemory: { enabled: true, maxScenesPerRun: 12, maxSceneMembers: 10, maxExpandedSceneMembers: 2 },
       utilityLearning: { enabled: true, positiveReward: 0.12, negativeReward: 0.16, smoothing: 0.25 },
       exploration: { enabled: true, weight: 0.12, minTrialsBeforeDecay: 2 },
-      casePatternDistillation: { enabled: true, minCaseClusterSize: 2, maxPatternsPerRun: 6 },
-      llmQuality: "high",
       cooldownHours: 4,
       maxMemoriesToScan: 420,
     },
@@ -313,11 +295,8 @@ const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
     },
     learningMemory: {
       enabled: true,
-      sceneMemory: { enabled: true, maxScenesPerRun: 6, maxSceneMembers: 8, maxExpandedSceneMembers: 2 },
       utilityLearning: { enabled: true, positiveReward: 0.1, negativeReward: 0.22, smoothing: 0.25 },
       exploration: { enabled: true, weight: 0.04, minTrialsBeforeDecay: 4 },
-      casePatternDistillation: { enabled: true, minCaseClusterSize: 3, maxPatternsPerRun: 3 },
-      llmQuality: "high",
       cooldownHours: 8,
       maxMemoriesToScan: 240,
     },

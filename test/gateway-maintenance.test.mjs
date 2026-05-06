@@ -95,10 +95,9 @@ describe("gateway maintenance", () => {
     assert.match(infoLogs[0], /提升=3 降级=4\b/);
   });
 
-  it("passes the shared learning LLM to learning maintenance", async () => {
-    const learningLlm = { completeJson: async () => null, getLastError: () => null };
+  it("runs learning maintenance without an LLM client", async () => {
     const smartLlm = { completeJson: async () => null, getLastError: () => null };
-    let seenLlm = null;
+    let seenDeps = null;
     const ctx = {
       api: {
         logger: {
@@ -111,7 +110,6 @@ describe("gateway maintenance", () => {
         learningMemory: {
           enabled: true,
           cooldownHours: 4,
-          llmQuality: "high",
         },
       },
       store: {
@@ -122,7 +120,6 @@ describe("gateway maintenance", () => {
       decayEngine: {},
       tierManager: {},
       smartExtractionLlmClient: smartLlm,
-      learningMemoryLlmClient: learningLlm,
       resolvedDbPath: path.join(tmpdir(), "mymem-gateway-maintenance-learning", "db"),
     };
     const deps = {
@@ -136,22 +133,17 @@ describe("gateway maintenance", () => {
       runCompaction: async () => null,
       recordCompactionRun: async () => {},
       runLearningMemoryMaintenance: async (depsArg) => {
-        seenLlm = depsArg.llm;
+        seenDeps = depsArg;
         return {
           scanned: 0,
-          scenesCreated: 0,
-          scenesUpdated: 0,
-          patternsCreated: 0,
           utilitySmoothed: 0,
-          skipped: 0,
-          llmRefined: 0,
-          fallbackUsed: 0,
         };
       },
     };
 
     await __test__.runGatewayMaintenanceOnce(ctx, deps);
 
-    assert.equal(seenLlm, learningLlm);
+    assert.ok(seenDeps);
+    assert.equal(seenDeps.llm, undefined);
   });
 });

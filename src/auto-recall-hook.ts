@@ -24,16 +24,10 @@ import type { TierManager } from "./tier-manager.js";
 import type { PluginConfig } from "./plugin-types.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ScopeManager } from "./scopes.js";
-import type { MemoryEntry, MemoryStore } from "./store.js";
+import type { MemoryStore } from "./store.js";
 import type { MemoryRetriever, RetrievalContext, RetrievalResult } from "./retriever.js";
 import { recordInjectedMemoriesForEnhancements, type HookEnhancementState } from "./hook-enhancements.js";
 import { isRecallSuppressedForSession } from "./recall-suppression.js";
-import {
-  formatSceneExpandedLine,
-  formatSceneLine,
-  normalizeLearningMemoryConfig,
-  pickHighValueSceneMembers,
-} from "./learning-memory.js";
 
 interface RecallResult {
   entry: {
@@ -50,8 +44,6 @@ interface RecallResult {
 }
 
 type LegacyStoreCategory = "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
-
-type SceneMemberStore = Pick<MemoryStore, "getByIds"> & Partial<Pick<MemoryStore, "getById">>;
 
 type RecallHookResult = { prependContext: string; ephemeral: boolean };
 
@@ -102,11 +94,6 @@ function isCompiledReasoningPattern(result: RecallResult): boolean {
   return meta.memory_category === "patterns" && meta.reasoning_strategy === true;
 }
 
-function isSceneMemory(result: RecallResult): boolean {
-  const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, toSmartMetadataEntry(result.entry));
-  return meta.memory_kind === "scene";
-}
-
 function formatReasoningStrategyLine(result: RecallResult, maxChars: number): RecallSelection {
   const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, toSmartMetadataEntry(result.entry));
   const strategyKind = typeof meta.strategy_kind === "string" ? meta.strategy_kind : "strategy";
@@ -131,29 +118,6 @@ function formatReasoningStrategyLine(result: RecallResult, maxChars: number): Re
     meta,
     entry: result.entry,
   };
-}
-
-async function loadSceneMemberMap(
-  store: SceneMemberStore,
-  sceneMetas: SmartMemoryMetadata[],
-  maxPerScene: number,
-  scopeFilter?: string[],
-): Promise<Map<string, MemoryEntry>> {
-  if (maxPerScene <= 0) return new Map();
-  const ids = [...new Set(sceneMetas.flatMap((meta) => meta.scene_member_ids ?? []))];
-  if (ids.length === 0) return new Map();
-  if (typeof store.getByIds === "function") {
-    const entries = await store.getByIds(ids);
-    if (!scopeFilter || scopeFilter.length === 0) return entries;
-    return new Map([...entries.entries()].filter(([, entry]) => scopeFilter.includes(entry.scope)));
-  }
-  const entries = new Map<string, MemoryEntry>();
-  if (!store.getById) return entries;
-  await Promise.all(ids.map(async (id) => {
-    const entry = await store.getById?.(id, scopeFilter).catch(() => null);
-    if (entry) entries.set(entry.id, entry);
-  }));
-  return entries;
 }
 
 function collectRecallMessageCacheKeys(params: {
@@ -421,7 +385,6 @@ export function registerAutoRecallHook(params: {
       const reasoningStrategyMinScore = typeof reasoningStrategyConfig.minScore === "number"
         ? Math.max(0, Math.min(1, reasoningStrategyConfig.minScore))
         : 0.62;
-      const learningCfg = normalizeLearningMemoryConfig(config.learningMemory);
       const throwIfAborted = () => {
         if (signal.aborted) throw signal.reason ?? new Error("auto-recall aborted");
       };
@@ -567,15 +530,6 @@ export function registerAutoRecallHook(params: {
         );
         return;
       }
-      const sceneMemberMap = await loadSceneMemberMap(
-        params.store,
-        governanceEligible
-          .map((result) => result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, toSmartMetadataEntry(result.entry)))
-          .filter((meta) => meta.memory_kind === "scene"),
-        learningCfg.sceneMemory.maxExpandedSceneMembers,
-        accessibleScopes,
-      );
-
       const effectivePerItemMaxChars = (() => {
         if (recallMode === "summary") return Math.min(autoRecallPerItemMaxChars, 80);
         if (!intent) return Math.min(autoRecallPerItemMaxChars * 3, 1000);
@@ -613,25 +567,9 @@ export function registerAutoRecallHook(params: {
           if (metaObj.source) parts.push("(" + metaObj.source + ")");
           return parts.join(" ");
         };
-        const contentText = isSceneMemory(r)
-          ? (() => {
-              const sceneEntry = {
-                ...r.entry,
-                category: isLegacyStoreCategory(r.entry.category) ? r.entry.category : "other",
-                vector: [],
-              };
-              const members = pickHighValueSceneMembers(
-                metaObj,
-                sceneMemberMap,
-                learningCfg.sceneMemory.maxExpandedSceneMembers,
-              );
-              return members.length > 0
-                ? formatSceneExpandedLine(sceneEntry, members, effectivePerItemMaxChars)
-                : formatSceneLine(sceneEntry, effectivePerItemMaxChars);
-            })()
-          : recallMode === "summary"
-            ? (metaObj.summary || r.entry.text)
-            : (metaObj.content || r.entry.text);
+        const contentText = recallMode === "summary"
+          ? (metaObj.summary || r.entry.text)
+          : (metaObj.content || r.entry.text);
         const summary = sanitizeForContext(contentText, effectivePerItemMaxChars);
         const linePrefix = "- " + buildPrefix() + " ";
         const line = linePrefix + summary;

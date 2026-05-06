@@ -11,7 +11,6 @@ export interface LearningScoreBreakdown {
   utility: number;
   utilityBoost: number;
   explorationBoost: number;
-  sceneBoost: number;
   badRecallPenalty: number;
   finalScore: number;
 }
@@ -89,7 +88,7 @@ export interface RetrievalConfig {
    *  Queries containing these prefixes (e.g. "proj:AIF") will use BM25-only + mustContain
    *  to avoid semantic false positives from vector search. */
   tagPrefixes: string[];
-  /** Learned utility / scene / pattern ranking policy. */
+  /** Learned utility and exploration ranking policy. */
   learningMemory?: LearningMemoryConfig;
 }
 

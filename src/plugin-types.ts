@@ -10,12 +10,6 @@ import type { TuningPreset } from "./tuning-presets.js";
 
 export interface LearningMemoryConfig {
   enabled?: boolean;
-  sceneMemory?: {
-    enabled?: boolean;
-    maxScenesPerRun?: number;
-    maxSceneMembers?: number;
-    maxExpandedSceneMembers?: number;
-  };
   utilityLearning?: {
     enabled?: boolean;
     positiveReward?: number;
@@ -27,12 +21,6 @@ export interface LearningMemoryConfig {
     weight?: number;
     minTrialsBeforeDecay?: number;
   };
-  casePatternDistillation?: {
-    enabled?: boolean;
-    minCaseClusterSize?: number;
-    maxPatternsPerRun?: number;
-  };
-  llmQuality?: "low" | "medium" | "high";
   cooldownHours?: number;
   maxMemoriesToScan?: number;
 }

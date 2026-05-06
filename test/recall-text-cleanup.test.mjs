@@ -26,7 +26,6 @@ const origCreateEmbedder = embedderModuleForMock.createEmbedder;
 const pluginModule = jiti("../index.ts");
 const myMemPlugin = pluginModule.default || pluginModule;
 const { __resetSingletonForTesting__ } = pluginModule;
-const { getSingletonState } = jiti("../src/plugin-singleton.ts");
 const { registerAutoRecallHook } = jiti("../src/auto-recall-hook.ts");
 const { registerMemoryRecallTool, registerMemoryStoreTool } = jiti("../src/tools.ts");
 const { MemoryRetriever } = jiti("../src/retriever.js");
@@ -348,69 +347,6 @@ function makeReasoningStrategyResults(count = 3) {
       },
     };
   });
-}
-
-function makeSceneResults() {
-  const now = Date.now();
-  const sceneMeta = stringifySmartMetadata(
-    buildSmartMetadata(
-      { text: "Scene: Generated file verification", category: "other", importance: 0.9, timestamp: now },
-      {
-        memory_kind: "scene",
-        memory_category: "patterns",
-        scene_title: "Generated file verification",
-        summary: "Generated file verification",
-        scene_member_ids: ["member-high", "member-low", "member-archived"],
-        state: "confirmed",
-        memory_layer: "working",
-        source: "reflection",
-      },
-    ),
-  );
-  return [{
-    entry: {
-      id: "scene-1",
-      text: "Scene: Generated file verification",
-      category: "other",
-      scope: "global",
-      importance: 0.9,
-      timestamp: now,
-      metadata: sceneMeta,
-    },
-    score: 0.95,
-    sources: { vector: { score: 0.95, rank: 1 } },
-  }];
-}
-
-function sceneMemberEntries() {
-  const now = Date.now();
-  const makeMember = (id, text, utility, archived = false) => ({
-    id,
-    text,
-    vector: [0.1, 0.2, 0.3],
-    category: "fact",
-    scope: "global",
-    importance: utility,
-    timestamp: now,
-    metadata: stringifySmartMetadata(
-      buildSmartMetadata(
-        { text, category: "fact", importance: utility, timestamp: now },
-        {
-          memory_kind: "case",
-          memory_category: "cases",
-          summary: text,
-          utility_score: utility,
-          state: archived ? "archived" : "confirmed",
-          memory_layer: archived ? "archive" : "working",
-        },
-      ),
-    ),
-  });
-  return new Map([
-    ["member-high", makeMember("member-high", "Verify the generated file path before reporting success", 0.9)],
-    ["member-low", makeMember("member-low", "Mention the generated file path in final response", 0.3)],
-    ["member-archived", makeMember("member-archived", "Archived generated-file note", 1, true)],
-  ]);
 }
 
 function makeRecallContext(results = makeResults()) {
@@ -1069,49 +1005,6 @@ describe("recall text cleanup", () => {
     assert.ok(output);
     assert.doesNotMatch(output.prependContext, /<reasoning-strategies>/);
     assert.match(output.prependContext, /<relevant-memories>/);
-  });
-
-  it("expands scene hits with at most configured high-value member memories", async () => {
-    currentMockRetrieve = () => makeSceneResults();
-    const members = sceneMemberEntries();
-
-    const harness = createPluginApiHarness({
-      resolveRoot: workspaceDir,
-      pluginConfig: {
-        dbPath: path.join(workspaceDir, "db"),
-        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
-        sessionStrategy: "none",
-        smartExtraction: false,
-        autoCapture: false,
-        autoRecall: true,
-        autoRecallMinLength: 1,
-        autoRecallPerItemMaxChars: 600,
-        learningMemory: {
-          enabled: true,
-          sceneMemory: { enabled: true, maxExpandedSceneMembers: 2 },
-        },
-      },
-    });
-
-    myMemPlugin.register(harness.api);
-    const singleton = getSingletonState();
-    singleton.store.getByIds = async (ids) => new Map(ids.flatMap((id) => {
-      const entry = members.get(id);
-      return entry ? [[id, entry]] : [];
-    }));
-
-    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
-    const [{ handler: autoRecallHook }] = hooks;
-    const output = await autoRecallHook(
-      { prompt: "Recall generated file verification scene." },
-      { sessionId: "scene-expand", sessionKey: "agent:main:session:scene-expand", agentId: "main" },
-    );
-
-    assert.ok(output);
-    assert.match(output.prependContext, /<relevant-memories>/);
-    assert.match(output.prependContext, /member: Verify the generated file path before reporting success/);
-    assert.match(output.prependContext, /member: Mention the generated file path in final response/);
-    assert.doesNotMatch(output.prependContext, /Archived generated-file note/);
   });
 
   it("auto-recall only injects confirmed non-archived memories", async () => {

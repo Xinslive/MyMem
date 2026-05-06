@@ -442,10 +442,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         typeof cfg.learningMemory === "object" && cfg.learningMemory !== null
           ? (cfg.learningMemory as Record<string, unknown>)
           : null;
-      const sceneRaw =
-        typeof raw?.sceneMemory === "object" && raw.sceneMemory !== null
-          ? raw.sceneMemory as Record<string, unknown>
-          : null;
       const utilityRaw =
         typeof raw?.utilityLearning === "object" && raw.utilityLearning !== null
           ? raw.utilityLearning as Record<string, unknown>
@@ -454,21 +450,8 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         typeof raw?.exploration === "object" && raw.exploration !== null
           ? raw.exploration as Record<string, unknown>
           : null;
-      const distillRaw =
-        typeof raw?.casePatternDistillation === "object" && raw.casePatternDistillation !== null
-          ? raw.casePatternDistillation as Record<string, unknown>
-          : null;
-      const llmQuality = raw?.llmQuality === "low" || raw?.llmQuality === "medium" || raw?.llmQuality === "high"
-        ? raw.llmQuality
-        : "high";
       return {
         enabled: raw?.enabled !== false,
-        sceneMemory: {
-          enabled: sceneRaw?.enabled !== false,
-          maxScenesPerRun: clampInt(parsePositiveInt(sceneRaw?.maxScenesPerRun) ?? 8, 1, 50),
-          maxSceneMembers: clampInt(parsePositiveInt(sceneRaw?.maxSceneMembers) ?? 8, 2, 24),
-          maxExpandedSceneMembers: clampInt(parsePositiveInt(sceneRaw?.maxExpandedSceneMembers) ?? 2, 0, 5),
-        },
         utilityLearning: {
           enabled: utilityRaw?.enabled !== false,
           positiveReward:
@@ -492,12 +475,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
               : 0.08,
           minTrialsBeforeDecay: clampInt(parsePositiveInt(explorationRaw?.minTrialsBeforeDecay) ?? 3, 0, 50),
         },
-        casePatternDistillation: {
-          enabled: distillRaw?.enabled !== false,
-          minCaseClusterSize: clampInt(parsePositiveInt(distillRaw?.minCaseClusterSize) ?? 2, 2, 20),
-          maxPatternsPerRun: clampInt(parsePositiveInt(distillRaw?.maxPatternsPerRun) ?? 4, 1, 20),
-        },
-        llmQuality,
         cooldownHours: parsePositiveInt(raw?.cooldownHours) ?? 4,
         maxMemoriesToScan: clampInt(parsePositiveInt(raw?.maxMemoriesToScan) ?? 300, 20, 2000),
       };

@@ -74,11 +74,6 @@ export interface SmartMemoryMetadata {
   utility_failure_count: number;
   utility_trial_count: number;
   last_utility_update_at?: number;
-  scene_id?: string;
-  scene_key?: string;
-  scene_title?: string;
-  scene_member_ids?: string[];
-  scene_summary_version?: number;
   case_trigger?: string;
   case_outcome?: string;
   case_steps?: string[];
@@ -176,7 +171,9 @@ function normalizeMemoryKind(value: unknown): MemoryKind {
 
 function stripRemovedMetadataFields(metadata: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(metadata).filter(([key]) => !key.startsWith("skill_")),
+    Object.entries(metadata).filter(([key]) =>
+      !key.startsWith("skill_") && !key.startsWith("scene_"),
+    ),
   );
 }
 
@@ -240,12 +237,6 @@ function normalizeTimestamp(value: unknown, fallback: number): number {
 function normalizeOptionalTimestamp(value: unknown): number | undefined {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n);
-}
-
-function normalizeOptionalPositiveInt(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.floor(n);
 }
 
@@ -353,9 +344,7 @@ export function parseSmartMetadata(
   const resolvedMemoryType: MemoryType =
     normalizeMemoryType(parsed.memory_type) ??
     classifyMemoryType(resolvedMemoryCategory, entry.category);
-  const rawMemoryKind = parsed.memory_kind ?? (
-    parsed.scene_id || parsed.scene_key ? "scene" : undefined
-  );
+  const rawMemoryKind = parsed.memory_kind;
   const metadataWithoutRemovedFields = stripRemovedMetadataFields(parsed);
 
   const normalized: SmartMemoryMetadata = {
@@ -402,11 +391,6 @@ export function parseSmartMetadata(
     utility_failure_count: clampCount(parsed.utility_failure_count, 0),
     utility_trial_count: clampCount(parsed.utility_trial_count, 0),
     last_utility_update_at: normalizeOptionalTimestamp(parsed.last_utility_update_at),
-    scene_id: normalizeOptionalString(parsed.scene_id),
-    scene_key: normalizeOptionalString(parsed.scene_key),
-    scene_title: normalizeOptionalString(parsed.scene_title),
-    scene_member_ids: normalizeStringArray(parsed.scene_member_ids, 24),
-    scene_summary_version: normalizeOptionalPositiveInt(parsed.scene_summary_version),
     case_trigger: normalizeOptionalString(parsed.case_trigger),
     case_outcome: normalizeOptionalString(parsed.case_outcome),
     case_steps: normalizeStringArray(parsed.case_steps, 12),
@@ -421,6 +405,7 @@ export function buildSmartMetadata(
   patch: Partial<SmartMemoryMetadata> = {},
 ): SmartMemoryMetadata {
   const base = parseSmartMetadata(entry.metadata, entry);
+  const patchWithoutRemovedFields = stripRemovedMetadataFields(patch);
   const summary = normalizeText(patch.summary, base.summary);
   const nextCategory =
     typeof patch.memory_category === "string"
@@ -446,7 +431,7 @@ export function buildSmartMetadata(
       : normalizeOptionalTimestamp(patch.invalidated_at);
   return {
     ...base,
-    ...patch,
+    ...patchWithoutRemovedFields,
     summary,
     content: normalizeText(patch.content, base.content),
     memory_kind: normalizeMemoryKind(patch.memory_kind ?? base.memory_kind),
@@ -522,20 +507,6 @@ export function buildSmartMetadata(
       patch.last_utility_update_at === undefined
         ? base.last_utility_update_at
         : normalizeOptionalTimestamp(patch.last_utility_update_at),
-    scene_id:
-      patch.scene_id === undefined ? base.scene_id : normalizeOptionalString(patch.scene_id),
-    scene_key:
-      patch.scene_key === undefined ? base.scene_key : normalizeOptionalString(patch.scene_key),
-    scene_title:
-      patch.scene_title === undefined ? base.scene_title : normalizeOptionalString(patch.scene_title),
-    scene_member_ids:
-      patch.scene_member_ids === undefined
-        ? base.scene_member_ids
-        : normalizeStringArray(patch.scene_member_ids, 24),
-    scene_summary_version:
-      patch.scene_summary_version === undefined
-        ? base.scene_summary_version
-        : normalizeOptionalPositiveInt(patch.scene_summary_version),
     case_trigger:
       patch.case_trigger === undefined
         ? base.case_trigger
@@ -591,6 +562,9 @@ export function stringifySmartMetadata(
   delete capped.l0_abstract;
   delete capped.l1_overview;
   delete capped.l2_content;
+  for (const key of Object.keys(capped)) {
+    if (key.startsWith("scene_")) delete capped[key];
+  }
 
   // Cap array fields to prevent metadata bloat
   if (Array.isArray(capped.sources) && capped.sources.length > MAX_SOURCES) {

@@ -1174,13 +1174,13 @@ describe("real before_prompt_build hook", () => {
     const memoryResult = {
       entry: {
         id: "plain-memory-1",
-        text: "plain memory should inject without scene expansion",
+        text: "plain memory should inject with the legacy shape",
         category: "fact",
         scope: "global",
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          summary: "plain memory should inject without scene expansion",
+          summary: "plain memory should inject with the legacy shape",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",

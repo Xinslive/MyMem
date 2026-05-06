@@ -47,7 +47,6 @@ export interface PluginRegistrationContext {
   decayEngine: DecayEngine;
   tierManager: TierManager;
   smartExtractionLlmClient: LlmClient | null;
-  learningMemoryLlmClient?: LlmClient | null;
   resolvedDbPath: string;
 }
 
@@ -81,7 +80,7 @@ async function runGatewayMaintenanceOnce(
   ctx: PluginRegistrationContext,
   deps: GatewayMaintenanceDeps = defaultGatewayMaintenanceDeps,
 ): Promise<void> {
-  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, learningMemoryLlmClient, resolvedDbPath } = ctx;
+  const { api, config, store, embedder, decayEngine, tierManager, smartExtractionLlmClient, resolvedDbPath } = ctx;
   const compactionStateFile = join(dirname(resolvedDbPath), ".compaction-state.json");
   const lifecycleStateFile = join(dirname(resolvedDbPath), ".lifecycle-maintenance-state.json");
   const distillerStateFile = join(dirname(resolvedDbPath), ".preference-distiller-state.json");
@@ -173,7 +172,7 @@ async function runGatewayMaintenanceOnce(
 
   if (runLearning && config.learningMemory?.enabled) {
     learningResult = await deps.runLearningMemoryMaintenance(
-      { store, embedder, llm: learningMemoryLlmClient ?? smartExtractionLlmClient, logger: api.logger },
+      { store, logger: api.logger },
       config.learningMemory,
     );
     await deps.recordCompactionRun(learningStateFile);
@@ -192,8 +191,8 @@ async function runGatewayMaintenanceOnce(
       `LLM精炼=${compactionResult?.llmRefined ?? 0} ` +
       `兜底合并=${compactionResult?.fallbackMerged ?? 0} ` +
       `失败聚类=${compactionResult?.failedClusters ?? 0} ` +
-      `学习场景=${learningResult ? `${learningResult.scenesCreated}/${learningResult.scenesUpdated}` : "0/0"} ` +
-      `学习模式=${learningResult?.patternsCreated ?? 0} ` +
+      `学习扫描=${learningResult?.scanned ?? 0} ` +
+      `效用平滑=${learningResult?.utilitySmoothed ?? 0} ` +
       `归档=${lifecycleResult?.archived ?? 0} ` +
       `提升=${lifecycleResult?.promoted ?? 0} 降级=${lifecycleResult?.demoted ?? 0}`,
     );

@@ -168,8 +168,6 @@ export function sanitizeMemoryForSerialization(results: RetrievalResult[]) {
         utility_success_count: meta.utility_success_count,
         utility_failure_count: meta.utility_failure_count,
         utility_trial_count: meta.utility_trial_count,
-        scene_id: meta.scene_id,
-        scene_title: meta.scene_title,
       };
     })(),
   }));
