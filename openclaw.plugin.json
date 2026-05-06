@@ -6,6 +6,7 @@
   "kind": "memory",
   "contracts": {
     "tools": [
+      "mymem_recall",
       "mymem_doctor"
     ]
   },
@@ -128,7 +129,7 @@
       "enableManagementTools": {
         "type": "boolean",
         "default": true,
-        "description": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor; memory write, recall, and governance are handled automatically."
+        "description": "Legacy compatibility flag. Default runtime tool registration includes mymem_recall and mymem_doctor; memory write and governance are handled automatically."
       },
       "sessionStrategy": {
         "type": "string",
@@ -1889,7 +1890,7 @@
     },
     "enableManagementTools": {
       "label": "Management Tools",
-      "help": "Legacy compatibility flag. Runtime tool registration is limited to mymem_doctor.",
+      "help": "Legacy compatibility flag. Default runtime tool registration includes mymem_recall and mymem_doctor.",
       "advanced": true
     },
     "mdMirror.enabled": {

@@ -276,7 +276,6 @@ try {
     "contracts.tools should list every tool registered by the default plugin configuration",
   );
   for (const hiddenTool of [
-    "mymem_recall",
     "mymem_store",
     "mymem_forget",
     "mymem_update",
@@ -307,6 +306,15 @@ try {
     doctorToolDefinition.description,
     /memory seems broken, missing, slow, empty/,
     "mymem_doctor description should advertise diagnostic triggers",
+  );
+  const recallToolDefinition = api.toolFactories.mymem_recall({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    recallToolDefinition.description,
+    /Fallback manual memory recall/,
+    "mymem_recall should be registered as a fallback manual recall tool",
   );
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
