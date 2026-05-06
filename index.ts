@@ -159,15 +159,6 @@ const myMemPlugin = {
     );
     logReg(`mymem：诊断构建标记已加载（${DIAG_BUILD_TAG}）`);
 
-    // Dual-memory model warning: help users understand the two-layer architecture
-    // Runs synchronously and logs warnings; does NOT block gateway startup.
-    logReg(
-      `[mymem] 自动召回查询插件数据库（LanceDB），不是 MEMORY.md。\n` +
-      `  - 插件记忆（LanceDB）= 语义搜索的主要召回来源\n` +
-      `  - MEMORY.md / memory/YYYY-MM-DD.md = 启动上下文 / 日志副本\n` +
-      `  - 自动捕获、自动召回和自动治理负责写入、检索和清理记忆；手动记忆工具不会注册。\n`,
-    );
-
     // Health status for memory runtime stub (reflects actual plugin health)
     // Updated by runStartupChecks after testing embedder and retriever
     let embedHealth: { ok: boolean; error?: string } = { ok: false, error: "startup not complete" };
