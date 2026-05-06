@@ -459,7 +459,7 @@ export function registerAutoRecallHook(params: {
           )
         : categoryBoosted;
 
-      const minRepeated = config.autoRecallMinRepeated ?? 8;
+      const minRepeated = config.autoRecallMinRepeated ?? 3;
       let dedupFilteredCount = 0;
       let finalResults = rankedResults;
 

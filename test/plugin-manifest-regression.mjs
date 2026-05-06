@@ -135,7 +135,7 @@ for (const pathExpression of ["llm.auth", "llm.oauthPath", "llm.oauthProvider"])
   schemaAt(pathExpression);
 }
 
-assertSchemaDefault("autoRecallMinRepeated", 8);
+assertSchemaDefault("autoRecallMinRepeated", 3);
 assertSchemaDefault("extractMinMessages", 8);
 assertSchemaDefault("sessionStrategy", "memoryReflection");
 assertSchemaDefault("autoRecall", true);

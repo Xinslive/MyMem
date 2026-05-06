@@ -213,7 +213,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoCapture: cfg.autoCapture !== false,
     autoRecall: cfg.autoRecall !== false,
     autoRecallMinLength: parsePositiveInt(cfg.autoRecallMinLength) ?? 6,
-    autoRecallMinRepeated: parsePositiveInt(cfg.autoRecallMinRepeated) ?? 8,
+    autoRecallMinRepeated: parsePositiveInt(cfg.autoRecallMinRepeated) ?? 3,
     autoRecallMaxItems: parsePositiveInt(cfg.autoRecallMaxItems) ?? 5,
     autoRecallMaxChars: parsePositiveInt(cfg.autoRecallMaxChars) ?? 1000,
     autoRecallPerItemMaxChars: parsePositiveInt(cfg.autoRecallPerItemMaxChars) ?? 180,
