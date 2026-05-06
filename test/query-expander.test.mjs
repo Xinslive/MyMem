@@ -122,6 +122,8 @@ describe("retriever BM25 query expansion gating", () => {
       finalResultCount: 1,
       stageCounts: {
         afterMinScore: 1,
+        afterCandidateCap: 1,
+        afterSoftMinScore: 1,
         rerankInput: 1,
         afterRerank: 1,
         afterRecency: 1,
@@ -196,10 +198,16 @@ describe("retriever BM25 query expansion gating", () => {
     assert.equal(results.length, 1);
     assert.deepEqual(retriever.getLastDiagnostics()?.dropSummary, [
       {
-        stage: "limit",
+        stage: "candidateCap",
         before: 3,
+        after: 2,
+        dropped: 1,
+      },
+      {
+        stage: "limit",
+        before: 2,
         after: 1,
-        dropped: 2,
+        dropped: 1,
       },
     ]);
   });
@@ -238,6 +246,8 @@ describe("retriever BM25 query expansion gating", () => {
       finalResultCount: 1,
       stageCounts: {
         afterMinScore: 1,
+        afterCandidateCap: 1,
+        afterSoftMinScore: 1,
         rerankInput: 1,
         afterRerank: 1,
         afterRecency: 1,
@@ -382,6 +392,8 @@ describe("cli search source tagging", () => {
             finalResultCount: 1,
             stageCounts: {
               afterMinScore: 3,
+              afterCandidateCap: 3,
+              afterSoftMinScore: 3,
               rerankInput: 3,
               afterRerank: 3,
               afterRecency: 3,
@@ -480,6 +492,8 @@ describe("cli search source tagging", () => {
             finalResultCount: 0,
             stageCounts: {
               afterMinScore: 0,
+              afterCandidateCap: 0,
+              afterSoftMinScore: 0,
               rerankInput: 0,
               afterRerank: 0,
               afterRecency: 0,
@@ -583,6 +597,8 @@ describe("cli search source tagging", () => {
             finalResultCount: 0,
             stageCounts: {
               afterMinScore: 0,
+              afterCandidateCap: 0,
+              afterSoftMinScore: 0,
               rerankInput: 0,
               afterRerank: 0,
               afterRecency: 0,
@@ -658,6 +674,8 @@ describe("cli search source tagging", () => {
         finalResultCount: 0,
         stageCounts: {
           afterMinScore: 0,
+          afterCandidateCap: 0,
+          afterSoftMinScore: 0,
           rerankInput: 0,
           afterRerank: 0,
           afterRecency: 0,
@@ -788,6 +806,8 @@ describe("cli search source tagging", () => {
         },
         stageCounts: {
           afterMinScore: 0,
+          afterCandidateCap: 0,
+          afterSoftMinScore: 0,
           rerankInput: 0,
           afterRerank: 0,
           afterRecency: 0,

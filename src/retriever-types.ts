@@ -163,6 +163,8 @@ export interface RetrievalDiagnostics {
   currentStageStartedAt?: number;
   stageCounts: {
     afterMinScore: number;
+    afterCandidateCap: number;
+    afterSoftMinScore: number;
     rerankInput: number;
     afterRerank: number;
     afterRecency: number;
@@ -177,7 +179,8 @@ export interface RetrievalDiagnostics {
   dropSummary: Array<{
     stage:
       | "minScore"
-      | "rerankWindow"
+      | "candidateCap"
+      | "softMinScore"
       | "rerank"
       | "recencyBoost"
       | "importanceWeight"
