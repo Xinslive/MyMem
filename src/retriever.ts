@@ -15,6 +15,7 @@ import {
   getDecayableFromEntry,
   isMemoryExpired,
   parseSmartMetadata,
+  stringifySmartMetadata,
 } from "./smart-metadata.js";
 import { TraceCollector, type RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector } from "./retrieval-stats.js";
@@ -73,6 +74,7 @@ export { DEFAULT_RETRIEVAL_CONFIG } from "./retriever-types.js";
 
 export class MemoryRetriever {
   private accessTracker: AccessTracker | null = null;
+  private fallbackAccessTracker: AccessTracker | null = null;
   private lastDiagnostics: RetrievalDiagnostics | null = null;
   private tierManager: TierManager | null = null;
   private _statsCollector: RetrievalStatsCollector | null = null;
@@ -88,6 +90,20 @@ export class MemoryRetriever {
 
   setAccessTracker(tracker: AccessTracker): void {
     this.accessTracker = tracker;
+  }
+
+  private queueAccessRetry(id: string): void {
+    if (this.accessTracker) {
+      this.accessTracker.recordAccess([id]);
+      return;
+    }
+    this.fallbackAccessTracker ??= new AccessTracker({
+      store: this.store,
+      logger: {
+        warn: (...args: unknown[]) => this.logger.warn(String(args[0]), ...args.slice(1)),
+      },
+    });
+    this.fallbackAccessTracker.recordAccess([id]);
   }
 
   setTierManager(manager: TierManager): void {
@@ -556,7 +572,6 @@ export class MemoryRetriever {
         diagnostics,
         candidateCap: limit * 2,
       });
-      if (diagnostics) diagnostics.stageCounts.afterRerank = mapped.length;
       return finalResults;
     } catch (error) {
       if (diagnostics) {
@@ -662,7 +677,7 @@ export class MemoryRetriever {
     try {
       const candidatePoolSize = candidatePoolSizeOverride
         ? clampInt(candidatePoolSizeOverride, limit, 100)
-        : Math.max(this.config.candidatePoolSize, limit * 2);
+        : Math.max(this.config.candidatePoolSize, limit * 4);
       const cancelSearchOnAbort = source !== "manual" && source !== "cli";
       markStage("hybrid.embedQuery");
       const t0 = Date.now();
@@ -1064,15 +1079,20 @@ export class MemoryRetriever {
         const transition = this.tierManager.evaluate(updatedMemory, ds, now);
         if (transition) {
           meta.tier = transition.toTier;
+          meta.tier_updated_at = now;
+          if (transition.fromTier === "core" && transition.toTier === "working") {
+            meta.tier_demoted_at = now;
+          }
         }
       }
 
       try {
         await this.store.update(r.entry.id, {
-          metadata: JSON.stringify(meta),
+          metadata: stringifySmartMetadata(meta),
         });
       } catch (err) {
         this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);
+        this.queueAccessRetry(r.entry.id);
       }
     }
   }

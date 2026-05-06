@@ -97,6 +97,8 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.lifecycleMaintenance?.dryRun, false);
     assert.equal(parsed.lifecycleMaintenance?.deleteMode, "archive");
     assert.deepEqual(parsed.lifecycleMaintenance?.hardDeleteReasons, ["duplicate_cluster_source", "noise", "superseded_fragment"]);
+    assert.equal(parsed.admissionControl?.enabled, true);
+    assert.equal(parsed.admissionControl?.utilityMode, "off");
     assert.equal(parsed.preferenceDistiller?.enabled, true);
     assert.equal(parsed.preferenceDistiller?.cooldownHours, 4);
     assert.equal(parsed.preferenceDistiller?.maxSessions, 12);

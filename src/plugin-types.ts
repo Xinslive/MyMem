@@ -134,6 +134,7 @@ export interface PluginConfig {
     peripheralAgeDays?: number;
     workingAccessThreshold?: number;
     workingCompositeThreshold?: number;
+    demotionCooldownDays?: number;
   };
   smartExtraction?: boolean;
   llm?: {

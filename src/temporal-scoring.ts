@@ -55,7 +55,7 @@ export function applyDecayBoost(
 
   const reranked = results.map((result, index) => ({
     ...result,
-    score: clamp01(scored[index].score, result.score * 0.3),
+    score: clamp01(scored[index].score, result.score),
   }));
 
   return reranked;

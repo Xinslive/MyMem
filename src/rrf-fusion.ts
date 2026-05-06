@@ -62,9 +62,7 @@ export async function fuseResults(
     entry: RetrievalResult["entry"];
     rrfRaw: number;
     bm25Floor: number;
-    isBm25Only: boolean;
     weightedScore: number;
-    bm25RawScore: number;
     sources: RetrievalResult["sources"];
   }> = [];
   let maxRrfRaw = 0;
@@ -103,9 +101,7 @@ export async function fuseResults(
       bm25Floor: bm25Result && bm25Result.score >= 0.75
         ? bm25Result.score * 0.92
         : 0,
-      isBm25Only: !vectorResult,
       weightedScore,
-      bm25RawScore: bm25Result?.score ?? 0,
       sources: {
         vector: vectorResult
           ? { score: vectorResult.score, rank: vectorResult.rank }
@@ -125,13 +121,8 @@ export async function fuseResults(
   const fusedResults: RetrievalResult[] = [];
 
   for (const raw of rawResults) {
-    // BM25-only results use raw BM25 score (already in [0, 1])
-    const rrfNormalized = raw.isBm25Only
-      ? raw.bm25RawScore
-      : raw.rrfRaw * rrfScale;
-    const scoreBase = raw.isBm25Only
-      ? rrfNormalized
-      : (rrfNormalized * 0.35 + raw.weightedScore * 0.65);
+    const rrfNormalized = raw.rrfRaw * rrfScale;
+    const scoreBase = rrfNormalized * 0.35 + raw.weightedScore * 0.65;
 
     // BM25 high-score floor protects exact keyword matches
     const fusedScore = clamp01(

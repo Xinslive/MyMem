@@ -10,20 +10,24 @@ const SHORT_KEY_THRESHOLD = 200;
  * 64-bit non-cryptographic hash via two independent FNV-1a 32-bit passes.
  * Collision probability ~10⁻¹⁵ at 256 entries (vs ~10⁻⁶ for 32-bit).
  * ~10x faster than SHA-256 for typical embedding text lengths.
+ * Iterates by Unicode code point so astral characters do not hash as split
+ * surrogate halves.
  */
 function hash64(input: string): string {
   // First pass: standard FNV-1a
   let h1 = 0x811c9dc5;
   // Second pass: different offset basis for independence
   let h2 = 0x62b821d5;
-  for (let i = 0; i < input.length; i++) {
-    const c = input.charCodeAt(i);
+  for (const char of input) {
+    const c = char.codePointAt(0) ?? 0;
     h1 ^= c;
     h1 = Math.imul(h1, 0x01000193);
     h2 ^= c;
     h2 = Math.imul(h2, 0x1b873593);
   }
-  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+  return `${input.length}:` +
+    (h1 >>> 0).toString(16).padStart(8, "0") +
+    (h2 >>> 0).toString(16).padStart(8, "0");
 }
 
 export class EmbeddingCache {

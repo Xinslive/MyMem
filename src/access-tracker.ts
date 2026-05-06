@@ -48,6 +48,8 @@ const MAX_ACCESS_COUNT = 10_000;
 /** Access count itself decays with a 30-day half-life */
 const ACCESS_DECAY_HALF_LIFE_DAYS = 30;
 
+const RETRY_TTL_MS = 15 * 60_000;
+
 // ============================================================================
 // Utility
 // ============================================================================
@@ -227,6 +229,7 @@ export class AccessTracker {
   private readonly pending: Map<string, number> = new Map();
   // Tracks retry count per ID so that delta is never amplified across failures.
   private readonly _retryCount = new Map<string, number>();
+  private readonly _retryFirstFailureAt = new Map<string, number>();
   private readonly _maxRetries = 5;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private flushPromise: Promise<void> | null = null;
@@ -321,10 +324,12 @@ export class AccessTracker {
         .finally(() => {
           this.pending.clear();
           this._retryCount.clear();
+          this._retryFirstFailureAt.clear();
         });
     } else {
       this.pending.clear();
       this._retryCount.clear();
+      this._retryFirstFailureAt.clear();
     }
   }
 
@@ -372,6 +377,7 @@ export class AccessTracker {
       const entry = entries.get(id);
       if (!entry) {
         this._retryCount.delete(id);
+        this._retryFirstFailureAt.delete(id);
         continue;
       }
       patches.push({ id, metadata: buildUpdatedMetadata(entry.metadata, delta) });
@@ -384,6 +390,7 @@ export class AccessTracker {
       await store.updateBatchMetadata(patches);
       for (const patch of patches) {
         this._retryCount.delete(patch.id);
+        this._retryFirstFailureAt.delete(patch.id);
       }
     } catch (err) {
       this.requeueFailedPatches(batch, patches, err);
@@ -397,11 +404,13 @@ export class AccessTracker {
         const current = await this.store.getById(id);
         if (!current) {
           this._retryCount.delete(id);
+          this._retryFirstFailureAt.delete(id);
           continue;
         }
         const updatedMeta = buildUpdatedMetadata(current.metadata, delta);
         await this.store.update(id, { metadata: updatedMeta });
         this._retryCount.delete(id);
+        this._retryFirstFailureAt.delete(id);
       } catch (err) {
         this.handleSingleFailure(id, delta, err);
       }
@@ -415,9 +424,10 @@ export class AccessTracker {
     err: unknown,
   ): void {
     for (const patch of patches) {
-      const retryCount = (this._retryCount.get(patch.id) ?? 0) + 1;
+      const retryCount = this.nextRetryCount(patch.id);
       if (retryCount > this._maxRetries) {
         this._retryCount.delete(patch.id);
+        this._retryFirstFailureAt.delete(patch.id);
         this.logger.error?.(
           `access-tracker: dropping ${patch.id.slice(0, 8)} after ${retryCount} failed retries`,
         );
@@ -435,9 +445,10 @@ export class AccessTracker {
 
   /** Handle single-entry failure (individual flush path). */
   private handleSingleFailure(id: string, delta: number, err: unknown): void {
-    const retryCount = (this._retryCount.get(id) ?? 0) + 1;
+    const retryCount = this.nextRetryCount(id);
     if (retryCount > this._maxRetries) {
       this._retryCount.delete(id);
+      this._retryFirstFailureAt.delete(id);
       this.logger.error?.(
         `access-tracker: dropping ${id.slice(0, 8)} after ${retryCount} failed retries`,
       );
@@ -449,6 +460,19 @@ export class AccessTracker {
         err,
       );
     }
+  }
+
+  private nextRetryCount(id: string): number {
+    const now = Date.now();
+    const firstFailureAt = this._retryFirstFailureAt.get(id);
+    if (firstFailureAt === undefined || now - firstFailureAt > RETRY_TTL_MS) {
+      this._retryFirstFailureAt.set(id, now);
+      this._retryCount.set(id, 1);
+      return 1;
+    }
+    const retryCount = (this._retryCount.get(id) ?? 0) + 1;
+    this._retryCount.set(id, retryCount);
+    return retryCount;
   }
 
   private resetTimer(): void {

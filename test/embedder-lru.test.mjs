@@ -25,6 +25,22 @@ test("EmbeddingCache moves an existing key to most-recent position when re-set",
   assert.deepEqual(cache.get("key3", undefined), [0, 0, 1]);
 });
 
+test("EmbeddingCache long keys include Unicode code points in the hash", () => {
+  const embedder = new Embedder({
+    provider: "openai-compatible",
+    apiKey: "test-key",
+    model: "text-embedding-3-small",
+  });
+  const cache = embedder._cache;
+  const prefix = "x".repeat(220);
+
+  const keyA = cache.key(`${prefix}😀`, undefined);
+  const keyB = cache.key(`${prefix}😃`, undefined);
+
+  assert.notEqual(keyA, keyB);
+  assert.match(keyA, /^\d+:[0-9a-f]{16}$/);
+});
+
 test("concurrent identical query embeddings share one provider request", async () => {
   const embedder = new Embedder({
     provider: "openai-compatible",

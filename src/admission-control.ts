@@ -133,8 +133,8 @@ function cloneAdmissionControlConfig(config: AdmissionControlConfig): AdmissionC
 export const ADMISSION_CONTROL_PRESETS: Record<AdmissionControlPreset, AdmissionControlConfig> = {
   balanced: {
     preset: "balanced",
-    enabled: false,
-    utilityMode: "standalone",
+    enabled: true,
+    utilityMode: "off",
     weights: DEFAULT_WEIGHTS,
     rejectThreshold: 0.45,
     admitThreshold: 0.6,
@@ -301,7 +301,7 @@ export function normalizeAdmissionControlConfig(raw: unknown): AdmissionControlC
 
   return {
     preset,
-    enabled: obj.enabled === true,
+    enabled: typeof obj.enabled === "boolean" ? obj.enabled : base.enabled,
     utilityMode:
       obj.utilityMode === "off"
         ? "off"
@@ -394,21 +394,24 @@ function tokenizeText(value: string): string[] {
 
 function lcsLength(left: string[], right: string[]): number {
   if (left.length === 0 || right.length === 0) return 0;
-  const dp = Array.from({ length: left.length + 1 }, () =>
-    Array<number>(right.length + 1).fill(0),
-  );
+  const [shorter, longer] =
+    left.length <= right.length ? [left, right] : [right, left];
+  let previous = new Array<number>(shorter.length + 1).fill(0);
+  let current = new Array<number>(shorter.length + 1).fill(0);
 
-  for (let i = 1; i <= left.length; i++) {
-    for (let j = 1; j <= right.length; j++) {
-      if (left[i - 1] === right[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
+  for (let i = 1; i <= longer.length; i++) {
+    for (let j = 1; j <= shorter.length; j++) {
+      if (longer[i - 1] === shorter[j - 1]) {
+        current[j] = previous[j - 1] + 1;
       } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        current[j] = Math.max(previous[j], current[j - 1]);
       }
     }
+    [previous, current] = [current, previous];
+    current.fill(0);
   }
 
-  return dp[left.length][right.length];
+  return previous[shorter.length];
 }
 
 function rougeLikeF1(left: string[], right: string[]): number {

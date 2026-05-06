@@ -204,6 +204,8 @@ assertSchemaDefault("telemetry.sampleRate", 1);
 assertSchemaEnumIncludes("retrieval.rerankProvider", "tei");
 assertSchemaEnumIncludes("admissionControl.preset", "conservative");
 assertSchemaEnumIncludes("admissionControl.preset", "high-recall");
+assertSchemaDefault("admissionControl.enabled", true);
+assertSchemaDefault("admissionControl.utilityMode", "off");
 assertSchemaDefault("retrieval.rerank", "cross-encoder");
 assertSchemaDefault("retrieval.hardMinScore", 0.55);
 assertSchemaDefault("retrieval.candidatePoolSize", 12);

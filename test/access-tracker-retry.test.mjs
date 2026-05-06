@@ -182,6 +182,45 @@ async function testMaxRetriesDrops() {
   return true;
 }
 
+async function testRetryTtlResetsFailureBudget() {
+  console.log("Testing retry TTL resets failure budget...");
+
+  const mockStore = new MockStore(999); // Always fail
+  mockStore.data.set("memT", { metadata: JSON.stringify({ accessCount: 0, lastAccessedAt: 0 }) });
+  const tracker = new AccessTracker({
+    store: mockStore,
+    logger: { warn: () => {}, error: () => {} }
+  });
+  const realNow = Date.now;
+  let fakeNow = 1_000_000;
+  Date.now = () => fakeNow;
+
+  try {
+    tracker.recordAccess(["memT"]);
+    for (let i = 0; i < 5; i++) {
+      await tracker.flush();
+    }
+    if (!tracker.getPendingUpdates().has("memT")) {
+      console.error("FAIL: expected pending retry before TTL jump");
+      process.exit(1);
+    }
+
+    fakeNow += 16 * 60 * 1_000;
+    await tracker.flush();
+
+    if (!tracker.getPendingUpdates().has("memT")) {
+      console.error("FAIL: expected retry TTL to preserve pending write after transient window");
+      process.exit(1);
+    }
+  } finally {
+    Date.now = realNow;
+    tracker.destroy();
+  }
+
+  console.log("PASS  retry TTL resets failure budget");
+  return true;
+}
+
 async function main() {
   console.log("Running access-tracker-retry regression tests...\n");
   
@@ -189,11 +228,13 @@ async function main() {
     await testRetryCountDoesNotAmplify();
     await testRetryWithNewWrites_PreciseCount();
     await testMaxRetriesDrops();
+    await testRetryTtlResetsFailureBudget();
     
     console.log("\n=== ALL TESTS PASSED ===");
     console.log("retry delta not amplify: OK");
     console.log("precise metadata count: OK");
     console.log("max retries drops: OK");
+    console.log("retry TTL reset: OK");
     process.exit(0);
   } catch (err) {
     console.error("\n=== TEST FAILED ===");

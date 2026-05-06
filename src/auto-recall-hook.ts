@@ -849,7 +849,13 @@ export function registerAutoRecallHook(params: {
         const applied = await params.store.patchMetadataBatch(
           transitions.map((t) => ({
             id: t.memoryId,
-            patch: { tier: t.toTier, tier_updated_at: now },
+            patch: {
+              tier: t.toTier,
+              tier_updated_at: now,
+              ...(t.fromTier === "core" && t.toTier === "working"
+                ? { tier_demoted_at: now }
+                : {}),
+            },
           })),
           scopeFilter,
         );

@@ -55,6 +55,24 @@ function createMockEmbedder() {
 // ============================================================
 
 describe("MemoryRetriever - decayEngine recency double-boost regression (Bug 7)", () => {
+  it("keeps high-importance core knowledge decaying with linear importance modulation", () => {
+    const now = Date.now();
+    const dayMs = 86_400_000;
+    const engine = createDecayEngine(DEFAULT_DECAY_CONFIG);
+    const score = engine.score({
+      id: "core-knowledge-old",
+      importance: 0.8,
+      confidence: 1,
+      tier: "core",
+      accessCount: 0,
+      createdAt: now - 300 * dayMs,
+      lastAccessedAt: now - 300 * dayMs,
+      memoryType: "knowledge",
+    }, now);
+
+    assert.ok(score.recency < 0.5, `expected old core knowledge to decay below half, got ${score.recency}`);
+  });
+
   it("should NOT double-boost recency when decayEngine is active in vector-only mode", async () => {
     // Two entries: very recent (1 day) vs old (60 days)
     const recentEntry = makeEntry("recent-1", "Recent decision about API design", 1);

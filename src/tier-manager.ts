@@ -32,6 +32,8 @@ export interface TierConfig {
   workingAccessThreshold: number;
   /** Minimum composite for Working promotion from Peripheral (default: 0.4) */
   workingCompositeThreshold: number;
+  /** Days after a demotion before another demotion can occur (default: 1) */
+  demotionCooldownDays: number;
 }
 
 export const DEFAULT_TIER_CONFIG: TierConfig = {
@@ -42,6 +44,7 @@ export const DEFAULT_TIER_CONFIG: TierConfig = {
   peripheralAgeDays: 60,
   workingAccessThreshold: 3,
   workingCompositeThreshold: 0.4,
+  demotionCooldownDays: 1,
 };
 
 export interface TierTransition {
@@ -58,6 +61,7 @@ export interface TierableMemory {
   importance: number;
   accessCount: number;
   createdAt: number;
+  tierDemotedAt?: number;
 }
 
 export interface TierManager {
@@ -90,12 +94,20 @@ const MS_PER_DAY = 86_400_000;
 export function createTierManager(
   config: TierConfig = DEFAULT_TIER_CONFIG,
 ): TierManager {
+  const effectiveConfig = { ...DEFAULT_TIER_CONFIG, ...config };
+
   function evaluate(
     memory: TierableMemory,
     decayScore: DecayScore,
     now: number = Date.now(),
   ): TierTransition | null {
     const ageDays = (now - memory.createdAt) / MS_PER_DAY;
+    const demotionCooldownMs = Math.max(0, effectiveConfig.demotionCooldownDays) * MS_PER_DAY;
+    const inDemotionCooldown =
+      demotionCooldownMs > 0 &&
+      typeof memory.tierDemotedAt === "number" &&
+      Number.isFinite(memory.tierDemotedAt) &&
+      now - memory.tierDemotedAt < demotionCooldownMs;
 
     switch (memory.tier) {
       case "peripheral": {
@@ -110,14 +122,14 @@ export function createTierManager(
         }
         // Standard promotion to Working
         if (
-          memory.accessCount >= config.workingAccessThreshold &&
-          decayScore.composite >= config.workingCompositeThreshold
+          memory.accessCount >= effectiveConfig.workingAccessThreshold &&
+          decayScore.composite >= effectiveConfig.workingCompositeThreshold
         ) {
           return {
             memoryId: memory.id,
             fromTier: "peripheral",
             toTier: "working",
-            reason: `Access count (${memory.accessCount}) >= ${config.workingAccessThreshold} and composite (${decayScore.composite.toFixed(2)}) >= ${config.workingCompositeThreshold}`,
+            reason: `Access count (${memory.accessCount}) >= ${effectiveConfig.workingAccessThreshold} and composite (${decayScore.composite.toFixed(2)}) >= ${effectiveConfig.workingCompositeThreshold}`,
           };
         }
         break;
@@ -126,9 +138,9 @@ export function createTierManager(
       case "working": {
         // Promote to Core?
         if (
-          memory.accessCount >= config.coreAccessThreshold &&
-          decayScore.composite >= config.coreCompositeThreshold &&
-          memory.importance >= config.coreImportanceThreshold
+          memory.accessCount >= effectiveConfig.coreAccessThreshold &&
+          decayScore.composite >= effectiveConfig.coreCompositeThreshold &&
+          memory.importance >= effectiveConfig.coreImportanceThreshold
         ) {
           return {
             memoryId: memory.id,
@@ -140,9 +152,12 @@ export function createTierManager(
 
         // Demote to Peripheral?
         if (
-          decayScore.composite < config.peripheralCompositeThreshold ||
-          (ageDays > config.peripheralAgeDays &&
-            memory.accessCount < config.workingAccessThreshold)
+          !inDemotionCooldown &&
+          (
+            decayScore.composite < effectiveConfig.peripheralCompositeThreshold ||
+            (ageDays > effectiveConfig.peripheralAgeDays &&
+              memory.accessCount < effectiveConfig.workingAccessThreshold)
+          )
         ) {
           return {
             memoryId: memory.id,
@@ -157,8 +172,8 @@ export function createTierManager(
       case "core": {
         // Demote to Working? (Core rarely demotes, but it can)
         if (
-          decayScore.composite < config.peripheralCompositeThreshold &&
-          memory.accessCount < config.workingAccessThreshold
+          decayScore.composite < effectiveConfig.peripheralCompositeThreshold &&
+          memory.accessCount < effectiveConfig.workingAccessThreshold
         ) {
           return {
             memoryId: memory.id,

@@ -7,6 +7,7 @@ const jiti = jitiFactory(import.meta.url, {
 });
 
 const { createRetriever } = jiti("../src/retriever.ts");
+const { createDecayEngine, DEFAULT_DECAY_CONFIG } = jiti("../src/decay-engine.ts");
 
 function buildResult(id = "memory-1", text = "test result") {
   return {
@@ -73,6 +74,73 @@ function createRetrieverHarness(
 }
 
 describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
+  it("uses at least 4x limit as the hybrid candidate pool", async () => {
+    const vectorLimits = [];
+    const bm25Limits = [];
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none", candidatePoolSize: 12 },
+      {
+        async vectorSearch(_vector, limit) {
+          vectorLimits.push(limit);
+          return [];
+        },
+        async bm25Search(_query, limit) {
+          bm25Limits.push(limit);
+          return [];
+        },
+      },
+    );
+
+    await retriever.retrieve({
+      query: "test",
+      limit: 10,
+      source: "manual",
+    });
+
+    assert.deepEqual(vectorLimits, [40]);
+    assert.deepEqual(bm25Limits, [40]);
+  });
+
+  it("queues access retry when lifecycle metadata update fails without an external tracker", async () => {
+    const result = buildResult("retry-access");
+    const store = {
+      hasFtsSupport: true,
+      async vectorSearch() {
+        return [result];
+      },
+      async bm25Search() {
+        return [];
+      },
+      async hasIds(ids) {
+        return new Set(ids);
+      },
+      async getById(id) {
+        return id === result.entry.id ? result.entry : null;
+      },
+      async update() {
+        throw new Error("transient metadata write failure");
+      },
+    };
+    const retriever = createRetriever(
+      store,
+      { async embedQuery() { return [0.1, 0.2, 0.3]; } },
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      { decayEngine: createDecayEngine(DEFAULT_DECAY_CONFIG) },
+    );
+
+    await retriever.retrieve({
+      query: "test",
+      limit: 1,
+      source: "manual",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const fallbackTracker = retriever.fallbackAccessTracker;
+    assert.equal(fallbackTracker?.getPendingUpdates().get(result.entry.id), 1);
+    fallbackTracker.pending.clear();
+    fallbackTracker.destroy();
+  });
+
   it("throws when both vector and BM25 search reject", async () => {
     const { retriever } = createRetrieverHarness(
       {},

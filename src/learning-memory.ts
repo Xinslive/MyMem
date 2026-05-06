@@ -131,11 +131,7 @@ export function applyLearningPolicy(
   const cfg = normalizeLearningMemoryConfig(config);
   if (!cfg.enabled) return results as LearningMemoryResult[];
 
-  const totalTrials = results.reduce((sum, result) => {
-    const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, result.entry);
-    return sum + Math.max(0, Number(meta.utility_trial_count || 0));
-  }, 0);
-  const logTrials = Math.log1p(Math.max(totalTrials, results.length));
+  const logTrials = Math.log1p(results.length);
 
   return results
     .map((result) => {

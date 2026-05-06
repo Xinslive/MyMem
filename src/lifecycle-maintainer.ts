@@ -312,6 +312,9 @@ export async function runLifecycleMaintenance(
     if (!cfg.dryRun) {
       row.meta.tier = transition.toTier;
       row.meta.tier_updated_at = now;
+      if (isDemotion(transition.fromTier, transition.toTier)) {
+        row.meta.tier_demoted_at = now;
+      }
       row.meta.tier_update_reason = transition.reason;
       row.meta.lifecycle_score = row.score.composite;
       await deps.store.update(row.entry.id, { metadata: stringifySmartMetadata(row.meta) });

@@ -169,6 +169,16 @@ describe("batchDedup", () => {
     assert.ok(result.survivingIndices.includes(0));
     assert.ok(result.survivingIndices.includes(2));
   });
+
+  it("rejects unexpectedly large extraction batches", () => {
+    assert.throws(
+      () => batchDedup(
+        Array.from({ length: 51 }, (_, index) => `abstract ${index}`),
+        Array.from({ length: 51 }, (_, index) => makeVector(index + 1)),
+      ),
+      /at most 50 candidates/,
+    );
+  });
 });
 
 // ============================================================================

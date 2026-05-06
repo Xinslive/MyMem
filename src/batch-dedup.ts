@@ -11,6 +11,8 @@
 
 import { cosineSimilarity } from "./utils.js";
 
+export const MAX_BATCH_DEDUP_SIZE = 50;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -66,6 +68,9 @@ export function batchDedup(
   threshold = 0.85,
 ): BatchDedupResult {
   const n = abstracts.length;
+  if (n > MAX_BATCH_DEDUP_SIZE) {
+    throw new RangeError(`batchDedup supports at most ${MAX_BATCH_DEDUP_SIZE} candidates, got ${n}`);
+  }
   if (n <= 1) {
     return {
       survivingIndices: n === 1 ? [0] : [],

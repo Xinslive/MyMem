@@ -88,6 +88,8 @@ export interface DecayableMemory {
   accessCount: number;
   createdAt: number;
   lastAccessedAt: number;
+  /** Timestamp of the most recent tier demotion, if any. */
+  tierDemotedAt?: number;
   /** Temporal classification: "dynamic" memories decay 3x faster. */
   temporalType?: "static" | "dynamic";
   /** Knowledge-vs-experience classification; applies a half-life multiplier when set. */
@@ -160,9 +162,8 @@ export function createDecayEngine(
 
   /**
    * Recency: Weibull stretched-exponential decay with importance-modulated half-life.
-   * effectiveHL = halfLife * exp(mu * importance)
-   * lambda = ln(2) / effectiveHL
-   * recency = exp(-lambda * daysSince^beta)
+   * effectiveHL = halfLife * (1 + mu * importance)
+   * recency = exp(-ln(2) * (daysSince / effectiveHL)^beta)
    */
   function recency(memory: DecayableMemory, now: number): number {
     const lastActive =
@@ -177,10 +178,11 @@ export function createDecayEngine(
           ? experienceHalfLifeMultiplier
           : 1.0;
     const baseHL = temporalHL * typeMultiplier;
-    const effectiveHL = baseHL * Math.exp(mu * memory.importance);
-    const lambda = Math.LN2 / effectiveHL;
+    const importance = Math.min(1, Math.max(0, memory.importance));
+    const effectiveHL = baseHL * (1 + Math.max(0, mu) * importance);
     const beta = getTierBeta(memory.tier);
-    return Math.exp(-lambda * Math.pow(daysSince, beta));
+    if (effectiveHL <= 0) return 0;
+    return Math.exp(-Math.LN2 * Math.pow(daysSince / effectiveHL, beta));
   }
 
   /**

@@ -101,6 +101,27 @@ assert.ok(
   "stale low-value working memory should demote to peripheral",
 );
 
+const justDemotedWorking = {
+  id: "just-demoted-1",
+  tier: "working",
+  importance: 0.1,
+  accessCount: 0,
+  createdAt: now - 120 * 86_400_000,
+  tierDemotedAt: now - 1_000,
+};
+const immediateDemotion = tierManager.evaluate(
+  justDemotedWorking,
+  {
+    memoryId: justDemotedWorking.id,
+    recency: 0,
+    frequency: 0,
+    intrinsic: 0,
+    composite: 0.01,
+  },
+  now,
+);
+assert.equal(immediateDemotion, null, "recent demotion should cool down before another demotion");
+
 const fakeStore = {
   hasFtsSupport: true,
   async vectorSearch() {

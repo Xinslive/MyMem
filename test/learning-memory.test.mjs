@@ -99,6 +99,24 @@ describe("learning policy", () => {
     assert.ok(ranked[1].sources.learning.badRecallPenalty > 0);
   });
 
+  it("does not amplify exploration boost from unrelated historical trials", () => {
+    const lowTrial = result("low-trial", 0.5, {
+      utility_trial_count: 0,
+    });
+    const highTrial = result("high-trial", 0.5, {
+      utility_trial_count: 1_000,
+    });
+
+    const ranked = applyLearningPolicy([lowTrial, highTrial], {
+      enabled: true,
+      exploration: { enabled: true, weight: 0.08 },
+      utilityLearning: { enabled: false },
+    });
+
+    const boost = ranked.find((item) => item.entry.id === "low-trial").sources.learning.explorationBoost;
+    assert.ok(boost <= 0.08 * Math.sqrt(Math.log1p(2)));
+  });
+
   it("builds positive and negative utility patches", () => {
     const meta = parseSmartMetadata("{}", { text: "memory", category: "other", timestamp: 1 });
     const positive = buildUtilityPatch(meta, "positive", undefined, 123);

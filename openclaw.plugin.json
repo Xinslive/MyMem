@@ -327,7 +327,7 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "default": false
+            "default": true
           },
           "preset": {
             "type": "string",
@@ -345,7 +345,7 @@
               "standalone",
               "off"
             ],
-            "default": "standalone"
+            "default": "off"
           },
           "rejectThreshold": {
             "type": "number",
@@ -815,6 +815,13 @@
             "minimum": 0,
             "maximum": 1,
             "default": 0.4
+          },
+          "demotionCooldownDays": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 30,
+            "default": 1,
+            "description": "Minimum days after a demotion before another demotion can occur. Prevents core -> working -> peripheral jitter across maintenance cycles."
           }
         }
       },
@@ -1692,7 +1699,7 @@
     },
     "retrieval.candidatePoolSize": {
       "label": "Candidate Pool Size",
-      "help": "Number of candidates to fetch before fusion and reranking",
+      "help": "Minimum candidates to fetch before fusion and reranking. Hybrid retrieval automatically uses at least 4x the requested result limit.",
       "advanced": true
     },
     "retrieval.lengthNormAnchor": {
@@ -1768,6 +1775,11 @@
     "tier.peripheralAgeDays": {
       "label": "Peripheral Age Days",
       "help": "Age threshold for demoting stale working memories.",
+      "advanced": true
+    },
+    "tier.demotionCooldownDays": {
+      "label": "Tier Demotion Cooldown Days",
+      "help": "Minimum days after a demotion before another demotion can occur.",
       "advanced": true
     },
     "sessionMemory.enabled": {

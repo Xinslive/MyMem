@@ -43,4 +43,25 @@ describe("RRF fusion", () => {
     assert.equal(results[0].entry.id, "bm25-only");
     assert.deepEqual(debugLogs, []);
   });
+
+  it("scores BM25-only results through the same RRF normalization path", async () => {
+    const results = await fuseResults(
+      [{ ...buildSearchResult("hybrid", 0.2), rank: 1 }],
+      [
+        { ...buildSearchResult("hybrid", 0.2), rank: 1 },
+        { ...buildSearchResult("bm25-only", 0.9), rank: 2 },
+      ],
+      { vectorWeight: 0.7, bm25Weight: 0.3 },
+      {},
+      {
+        debug: () => {},
+        warn: () => {},
+      },
+    );
+
+    const bm25Only = results.find((result) => result.entry.id === "bm25-only");
+    assert.ok(bm25Only);
+    assert.ok(bm25Only.sources.fused.score < 0.9);
+    assert.ok(bm25Only.sources.fused.score > 0.5);
+  });
 });

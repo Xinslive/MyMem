@@ -94,6 +94,7 @@ export interface LifecycleMemory {
   accessCount: number;
   createdAt: number;
   lastAccessedAt: number;
+  tierDemotedAt?: number;
   temporalType?: "static" | "dynamic";
   memoryType?: MemoryType;
 }
@@ -626,6 +627,7 @@ export function toLifecycleMemory(
     accessCount: metadata.access_count,
     createdAt,
     lastAccessedAt: metadata.last_accessed_at || createdAt,
+    tierDemotedAt: normalizeOptionalTimestamp(metadata.tier_demoted_at),
     temporalType: metadata.memory_temporal_type === "dynamic" ? "dynamic"
       : metadata.memory_temporal_type === "static" ? "static"
       : undefined,
@@ -657,6 +659,7 @@ export function getDecayableFromEntry(
     accessCount: meta.access_count,
     createdAt,
     lastAccessedAt: meta.last_accessed_at || createdAt,
+    tierDemotedAt: normalizeOptionalTimestamp(meta.tier_demoted_at),
     temporalType: meta.memory_temporal_type === "dynamic" ? "dynamic"
       : meta.memory_temporal_type === "static" ? "static"
       : undefined,
