@@ -84,7 +84,7 @@ function stageLabel(name: string): string {
     case "fallback_scoring":
       return "fallback scoring";
     case "learning_policy":
-      return "learning policy";
+      return "学习策略";
     case "memory_category_filter":
       return "memory category filter";
     default:
@@ -200,7 +200,7 @@ export function buildRetrievalExplanation(params: {
     reasons.push("Reranking removed all candidates.");
     suggestions.push("Check rerank configuration or try retrieval.rerank=none for comparison.");
   } else if (allDropStage?.name === "learning_policy") {
-    reasons.push("Learning policy removed all candidates.");
+    reasons.push("学习策略移除了所有候选。");
     suggestions.push("Inspect utility_score and bad_recall_count with mymem_explain_rank.");
   } else if (searchFoundNoCandidates(trace)) {
     reasons.push("Vector/BM25 search found no initial candidates.");

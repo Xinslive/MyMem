@@ -437,6 +437,8 @@ function dashboardStageLabel(name: string): string {
       return "新近加权";
     case "fallback_scoring":
       return "降级评分";
+    case "learning_policy":
+      return "学习策略";
     default:
       return name;
   }
@@ -2167,7 +2169,8 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         time_decay: "时间衰减",
         decay_boost: "衰减增强",
         recency_composite: "新近加权",
-        fallback_scoring: "降级评分"
+        fallback_scoring: "降级评分",
+        learning_policy: "学习策略"
       })[name] || name;
     }
 

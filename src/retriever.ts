@@ -416,46 +416,76 @@ export class MemoryRetriever {
     if (trace) trace.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterNoiseFilter = denoised.length;
 
-    // 4. Soft min-score pre-filter (before rerank — cheap quality gate)
+    // 4. Lifecycle scoring. DecayEngine replaces ordinary time decay, but it still
+    // needs to run here because the first temporal stage intentionally leaves
+    // decay-aware scoring untouched.
+    let lifecycleRanked: RetrievalResult[];
+    if (this.decayEngine) {
+      if (trace) trace.startStage("decay_boost", denoised.map((r) => r.entry.id));
+      lifecycleRanked = applyDecayBoost(denoised, this.decayEngine);
+      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
+    } else if (skipTimeDecay) {
+      lifecycleRanked = denoised;
+    } else {
+      if (trace) trace.startStage("time_decay", denoised.map((r) => r.entry.id));
+      lifecycleRanked = applyTimeDecay(denoised, this.config);
+      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
+    }
+    if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
+
+    // 5. Learned utility / exploration policy
+    if (trace) trace.startStage("learning_policy", lifecycleRanked.map((r) => r.entry.id));
+    const learningRanked = applyLearningPolicy(lifecycleRanked, this.config.learningMemory);
+    if (trace) trace.endStage(learningRanked.map((r) => r.entry.id), learningRanked.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterLearningPolicy = learningRanked.length;
+
+    // 6. MMR diversity runs before the candidate cap so near-duplicates do not
+    // consume rerank budget.
+    if (trace) trace.startStage("mmr_diversity", learningRanked.map((r) => r.entry.id));
+    learningRanked.sort((a, b) => b.score - a.score);
+    const deduplicated = applyMMRDiversity(learningRanked);
+    if (trace) trace.endStage(deduplicated.map((r) => r.entry.id), deduplicated.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
+
+    // 7. Candidate cap (before rerank -- reduce API token cost)
+    if (trace && candidateCap) trace.startStage("candidate_cap", deduplicated.map((r) => r.entry.id));
+    let capped: RetrievalResult[];
+    if (candidateCap && deduplicated.length > candidateCap) {
+      capped = deduplicated.slice(0, candidateCap);
+    } else {
+      capped = deduplicated;
+    }
+    if (trace && candidateCap) trace.endStage(capped.map((r) => r.entry.id), capped.map((r) => r.score));
+    if (diagnostics) diagnostics.stageCounts.afterCandidateCap = capped.length;
+
+    // 8. Soft min-score pre-filter (before rerank -- cheap quality gate)
     //    Skip when preserveWhenHardFiltered is active: the post-rerank hard filter
     //    has a safety mechanism to keep at least one result in degraded mode;
     //    pre-filtering could empty the candidate pool and defeat that mechanism.
     let softFiltered: RetrievalResult[];
     if (!preserveWhenHardFiltered && this.config.hardMinScore > 0) {
       const softThreshold = this.config.hardMinScore * 0.45;
-      if (trace) trace.startStage("soft_cutoff", denoised.map((r) => r.entry.id));
-      softFiltered = denoised.filter((r) => r.score >= softThreshold);
-      if (softFiltered.length === 0 && denoised.length > 0) {
-        softFiltered = denoised;
+      if (trace) trace.startStage("soft_cutoff", capped.map((r) => r.entry.id));
+      softFiltered = capped.filter((r) => r.score >= softThreshold);
+      if (softFiltered.length === 0 && capped.length > 0) {
+        softFiltered = capped;
       }
       if (trace) trace.endStage(softFiltered.map((r) => r.entry.id), softFiltered.map((r) => r.score));
     } else {
-      softFiltered = denoised;
+      softFiltered = capped;
     }
-    if (diagnostics) diagnostics.stageCounts.afterSoftMinScore = softFiltered.length;
-
-    // 5. Candidate cap (before rerank — reduce API token cost)
-    if (trace && candidateCap) trace.startStage("candidate_cap", softFiltered.map((r) => r.entry.id));
-    let capped: RetrievalResult[];
-    if (candidateCap && softFiltered.length > candidateCap) {
-      softFiltered.sort((a, b) => b.score - a.score);
-      capped = softFiltered.slice(0, candidateCap);
-    } else {
-      capped = softFiltered;
-    }
-    if (trace && candidateCap) trace.endStage(capped.map((r) => r.entry.id), capped.map((r) => r.score));
     if (diagnostics) {
-      diagnostics.stageCounts.afterCandidateCap = capped.length;
-      diagnostics.stageCounts.rerankInput = capped.length;
+      diagnostics.stageCounts.afterSoftMinScore = softFiltered.length;
+      diagnostics.stageCounts.rerankInput = softFiltered.length;
     }
 
-    // 6. Rerank (optional, via callback — runs after cheap filters to save API tokens)
-    if (trace) trace.startStage("rerank", capped.map((r) => r.entry.id));
-    const reranked = rerank ? await rerank(capped) : capped;
+    // 9. Rerank (optional, via callback -- runs after cheap filters to save API tokens)
+    if (trace) trace.startStage("rerank", softFiltered.map((r) => r.entry.id));
+    const reranked = rerank ? await rerank(softFiltered) : softFiltered;
     if (trace) trace.endStage(reranked.map((r) => r.entry.id), reranked.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterRerank = reranked.length;
 
-    // 7. Hard min-score filter
+    // 10. Hard min-score filter
     if (trace) trace.startStage("hard_cutoff", reranked.map((r) => r.entry.id));
     const strictHardFiltered = reranked.filter((r) => r.score >= this.config.hardMinScore);
     const hardFiltered =
@@ -465,37 +495,7 @@ export class MemoryRetriever {
     if (trace) trace.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
-    // 8. Lifecycle scoring. DecayEngine replaces ordinary time decay, but it still
-    // needs to run here because the first temporal stage intentionally leaves
-    // decay-aware scoring untouched.
-    let lifecycleRanked: RetrievalResult[];
-    if (this.decayEngine) {
-      if (trace) trace.startStage("decay_boost", hardFiltered.map((r) => r.entry.id));
-      lifecycleRanked = applyDecayBoost(hardFiltered, this.decayEngine);
-      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
-    } else if (skipTimeDecay) {
-      lifecycleRanked = hardFiltered;
-    } else {
-      if (trace) trace.startStage("time_decay", hardFiltered.map((r) => r.entry.id));
-      lifecycleRanked = applyTimeDecay(hardFiltered, this.config);
-      if (trace) trace.endStage(lifecycleRanked.map((r) => r.entry.id), lifecycleRanked.map((r) => r.score));
-    }
-    if (diagnostics) diagnostics.stageCounts.afterTimeDecay = lifecycleRanked.length;
-
-    // 9. MMR diversity runs before learning policy so learned utility can
-    // adjust the diversified candidate set without changing the diversity pass.
-    if (trace) trace.startStage("mmr_diversity", lifecycleRanked.map((r) => r.entry.id));
-    lifecycleRanked.sort((a, b) => b.score - a.score);
-    const deduplicated = applyMMRDiversity(lifecycleRanked);
-    if (trace) trace.endStage(deduplicated.map((r) => r.entry.id), deduplicated.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
-
-    // 10. Learned utility / exploration policy
-    if (trace) trace.startStage("learning_policy", deduplicated.map((r) => r.entry.id));
-    const learningRanked = applyLearningPolicy(deduplicated, this.config.learningMemory);
-    if (trace) trace.endStage(learningRanked.map((r) => r.entry.id), learningRanked.map((r) => r.score));
-    if (diagnostics) diagnostics.stageCounts.afterLearningPolicy = learningRanked.length;
-    const finalResults = learningRanked.slice(0, limit);
+    const finalResults = hardFiltered.slice(0, limit);
 
     // 11. Confidence scores
     for (const result of finalResults) {
