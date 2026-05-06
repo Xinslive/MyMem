@@ -941,6 +941,62 @@ describe("recall text cleanup", () => {
     assert.ok(injectedLines.length <= 2, "injected lines should respect autoRecallMaxItems");
   });
 
+  it("uses triple per-item budget for full auto-recall memories", async () => {
+    const repeated = "Full auto-recall detail ".repeat(18);
+    const longContent = `Resolved issue: ${repeated}final-marker`;
+    currentMockRetrieve = () => [
+      {
+        entry: {
+          id: "full-budget",
+          text: "short fallback text",
+          category: "fact",
+          scope: "global",
+          importance: 0.8,
+          timestamp: Date.now(),
+          metadata: stringifySmartMetadata(
+            buildSmartMetadata(
+              { text: "short fallback text", category: "fact", importance: 0.8 },
+              {
+                summary: "short summary",
+                content: longContent,
+                memory_category: "cases",
+                state: "confirmed",
+              },
+            ),
+          ),
+        },
+        score: 0.95,
+        sources: { vector: { score: 0.95, rank: 1 } },
+      },
+    ];
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMaxChars: 1500,
+        autoRecallPerItemMaxChars: 200,
+      },
+    });
+
+    myMemPlugin.register(harness.api);
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    const [{ handler: autoRecallHook }] = hooks;
+    const output = await autoRecallHook(
+      { prompt: "Please recall the full budget detail." },
+      { sessionId: "auto-full-budget", sessionKey: "agent:main:session:auto-full-budget", agentId: "main" },
+    );
+
+    assert.ok(output);
+    assert.match(output.prependContext, /final-marker/);
+  });
+
   it("injects compiled reasoning strategies through a separate top-2 channel", async () => {
     const strategyResults = makeReasoningStrategyResults(3);
     let retrieveCount = 0;

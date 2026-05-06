@@ -578,7 +578,7 @@ export function registerAutoRecallHook(params: {
 
       const effectivePerItemMaxChars = (() => {
         if (recallMode === "summary") return Math.min(autoRecallPerItemMaxChars, 80);
-        if (!intent) return autoRecallPerItemMaxChars;
+        if (!intent) return Math.min(autoRecallPerItemMaxChars * 3, 1000);
         switch (intent.depth) {
           case "summary": return Math.min(autoRecallPerItemMaxChars, 80);
           case "full": return Math.min(autoRecallPerItemMaxChars * 3, 1000);
@@ -632,7 +632,7 @@ export function registerAutoRecallHook(params: {
           : recallMode === "summary"
             ? (metaObj.summary || r.entry.text)
             : (metaObj.content || r.entry.text);
-        const summary = sanitizeForContext(contentText).slice(0, effectivePerItemMaxChars);
+        const summary = sanitizeForContext(contentText, effectivePerItemMaxChars);
         const linePrefix = "- " + buildPrefix() + " ";
         const line = linePrefix + summary;
         return {

@@ -144,7 +144,7 @@ export function detectCategory(
 /**
  * Sanitizes text for safe inclusion in context injection.
  */
-export function sanitizeForContext(text: string): string {
+export function sanitizeForContext(text: string, maxChars = 300): string {
   return text
     .replace(/[\r\n]+/g, "\\n")
     .replace(/<\/?[a-zA-Z][^>]*>/g, "")
@@ -152,7 +152,7 @@ export function sanitizeForContext(text: string): string {
     .replace(/>/g, "\uFF1E")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 300);
+    .slice(0, maxChars);
 }
 
 /**

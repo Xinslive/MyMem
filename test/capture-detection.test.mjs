@@ -99,4 +99,10 @@ describe("sanitizeForContext", () => {
     const result = sanitizeForContext(long);
     assert.ok(result.length <= 300);
   });
+
+  it("honors explicit max length", () => {
+    const long = "a".repeat(500);
+    const result = sanitizeForContext(long, 450);
+    assert.equal(result.length, 450);
+  });
 });

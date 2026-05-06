@@ -141,7 +141,7 @@ assertSchemaDefault("sessionStrategy", "memoryReflection");
 assertSchemaDefault("autoRecall", true);
 assertSchemaDefault("autoRecallMinLength", 6);
 assertSchemaDefault("autoRecallMaxItems", 6);
-assertSchemaDefault("autoRecallMaxChars", 800);
+assertSchemaDefault("autoRecallMaxChars", 1500);
 assertSchemaDefault("autoRecallPerItemMaxChars", 200);
 assertSchemaDefault("autoRecallCandidatePoolSize", 12);
 assertSchemaDefault("autoRecallTimeoutMs", 20000);

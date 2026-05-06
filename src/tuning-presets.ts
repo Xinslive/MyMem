@@ -30,7 +30,7 @@ type PresetOverlay = Pick<
 const PRESET_OVERLAYS: Record<TuningPreset, PresetOverlay> = {
   balanced: {
     autoRecallMaxItems: 6,
-    autoRecallMaxChars: 800,
+    autoRecallMaxChars: 1500,
     autoRecallPerItemMaxChars: 200,
     autoRecallCandidatePoolSize: 12,
     extractMinMessages: 8,

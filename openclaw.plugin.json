@@ -181,7 +181,7 @@
         "type": "integer",
         "minimum": 64,
         "maximum": 8000,
-        "default": 800,
+        "default": 1500,
         "description": "Maximum total character budget for auto-injected memory summaries."
       },
       "autoRecallPerItemMaxChars": {
