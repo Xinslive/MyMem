@@ -85,7 +85,7 @@ const myMemPlugin = {
   register(api: OpenClawPluginApi) {
     // Idempotent guard: skip re-init if this exact API instance has already registered.
     if (_registeredApis.has(api)) {
-      api.logger.debug?.("mymem: register() called again — skipping re-init (idempotent)");
+      api.logger.debug?.("mymem：register() 重复调用，已跳过重复初始化");
       return;
     }
     _registeredApis.add(api);
@@ -156,17 +156,17 @@ const myMemPlugin = {
 
     const logReg = isCliMode() ? api.logger.debug : api.logger.info;
     logReg(
-      `mymem@${pluginVersion}: plugin registered (db: ${resolvedDbPath}, model: ${config.embedding.model || "text-embedding-3-small"}, smartExtraction: ${smartExtractor ? 'ON' : 'OFF'})`
+      `mymem@${pluginVersion}：插件已注册（数据库：${resolvedDbPath}，模型：${config.embedding.model || "text-embedding-3-small"}，智能提取：${smartExtractor ? "开启" : "关闭"}）`,
     );
-    logReg(`mymem: diagnostic build tag loaded (${DIAG_BUILD_TAG})`);
+    logReg(`mymem：诊断构建标记已加载（${DIAG_BUILD_TAG}）`);
 
     // Dual-memory model warning: help users understand the two-layer architecture
     // Runs synchronously and logs warnings; does NOT block gateway startup.
     logReg(
-      `[mymem] auto-recall queries the plugin store (LanceDB), not MEMORY.md.\n` +
-      `  - Plugin memory (LanceDB) = primary recall source for semantic search\n` +
-      `  - MEMORY.md / memory/YYYY-MM-DD.md = startup context / journal only\n` +
-      `  - Auto-capture, auto-recall, and automatic governance own memory writes, retrieval, and cleanup; manual memory tools are not registered.\n`
+      `[mymem] 自动召回查询插件数据库（LanceDB），不是 MEMORY.md。\n` +
+      `  - 插件记忆（LanceDB）= 语义搜索的主要召回来源\n` +
+      `  - MEMORY.md / memory/YYYY-MM-DD.md = 启动上下文 / 日志副本\n` +
+      `  - 自动捕获、自动召回和自动治理负责写入、检索和清理记忆；手动记忆工具不会注册。\n`,
     );
 
     // Health status for memory runtime stub (reflects actual plugin health)
@@ -219,7 +219,7 @@ const myMemPlugin = {
       }
       const ingressLength = typeof rawIngressText === "string" ? rawIngressText.trim().length : 0;
       api.logger.debug(
-        `mymem: ingress message_received channel=${ctx.channelId} account=${ctx.accountId || "unknown"} conversation=${ctx.conversationId || "unknown"} from=${event.from} len=${ingressLength} preview=${summarizeTextPreview(rawIngressText || "")}`,
+        `mymem：收到入口消息 channel=${ctx.channelId} account=${ctx.accountId || "unknown"} conversation=${ctx.conversationId || "unknown"} from=${event.from} 长度=${ingressLength} 预览=${summarizeTextPreview(rawIngressText || "")}`,
       );
     });
 
@@ -233,7 +233,7 @@ const myMemPlugin = {
         return;
       }
       api.logger.debug(
-        `mymem: ingress before_message_write agent=${ctx.agentId || event.agentId || "unknown"} sessionKey=${ctx.sessionKey || event.sessionKey || "unknown"} role=${role} ${summarizeMessageContent(message?.content)}`,
+        `mymem：写入用户消息前检查 agent=${ctx.agentId || event.agentId || "unknown"} sessionKey=${ctx.sessionKey || event.sessionKey || "unknown"} role=${role} ${summarizeMessageContent(message?.content)}`,
       );
     });
 
@@ -397,7 +397,7 @@ const myMemPlugin = {
         try {
           await runCommandGovernanceAutomation(event);
         } catch (err) {
-          api.logger.warn(`memory-governance: command hook failed: ${String(err)}`);
+          api.logger.warn(`记忆治理：命令钩子执行失败：${String(err)}`);
         }
       };
 
@@ -410,13 +410,13 @@ const myMemPlugin = {
         description: "Run preference distillation before /reset",
       });
       (isCliMode() ? api.logger.debug : api.logger.info)(
-        "memory-governance: integrated hooks registered (command:new, command:reset)"
+        "记忆治理：已注册集成钩子（command:new, command:reset）",
       );
     }
 
     registerSessionMemoryHook({ api, config, store, embedder, scopeManager, isCliMode });
     if (config.sessionStrategy === "none") {
-      (isCliMode() ? api.logger.debug : api.logger.info)("session-strategy: using none (plugin memory-reflection hooks disabled)");
+      (isCliMode() ? api.logger.debug : api.logger.info)("会话策略：none（插件记忆反思钩子已关闭）");
     }
 
     // ========================================================================
@@ -442,9 +442,9 @@ const myMemPlugin = {
             port: 1314,
           },
         );
-        api.logger.info(`mymem: dashboard started at ${dashboardServer.url}`);
+        api.logger.info(`mymem：控制台已启动：${dashboardServer.url}`);
       } catch (error) {
-        api.logger.warn(`mymem: dashboard auto-start skipped: ${String(error)}`);
+        api.logger.warn(`mymem：控制台自动启动已跳过：${String(error)}`);
       }
     };
 
@@ -455,7 +455,7 @@ const myMemPlugin = {
       try {
         await server.close();
       } catch (error) {
-        api.logger.warn(`mymem: dashboard stop failed: ${String(error)}`);
+        api.logger.warn(`mymem：控制台停止失败：${String(error)}`);
       }
     };
 
@@ -515,7 +515,7 @@ const myMemPlugin = {
               // The plugin works fine once the provider warms up (confirmed by mymem_doctor).
               embedError = String(timeoutErr);
               api.logger.debug?.(
-                `mymem: embedding probe skipped (provider not ready): ${embedError}`,
+                `mymem：嵌入探测已跳过（服务暂未就绪）：${embedError}`,
               );
             }
 
@@ -532,32 +532,32 @@ const myMemPlugin = {
               ftsError: store.lastFtsError ?? undefined,
             };
             const ftsStatus = retrievalTest.hasFtsSupport
-              ? "enabled"
-              : `disabled${retrievalTest.ftsError ? ` (${retrievalTest.ftsError})` : ""}`;
+              ? "已启用"
+              : `已关闭${retrievalTest.ftsError ? `（${retrievalTest.ftsError}）` : ""}`;
 
             if (embedSuccess) {
               api.logger.info(
-                `mymem: initialized successfully ` +
-                `(embedding: OK, ` +
-                `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
-                `mode: ${retrievalTest.mode}, ` +
-                `FTS: ${ftsStatus})`,
+                `mymem：初始化成功` +
+                `（嵌入：正常，` +
+                `检索：${retrievalTest.success ? "正常" : "失败"}，` +
+                `模式：${retrievalTest.mode}，` +
+                `全文索引：${ftsStatus}）`,
               );
             } else {
               // Embedding not ready at startup — log as info, not error.
               // It will work on first actual use once the provider warms up.
               api.logger.info(
-                `mymem: initialized ` +
-                `(embedding: warming up, ` +
-                `retrieval: ${retrievalTest.success ? "OK" : "FAIL"}, ` +
-                `mode: ${retrievalTest.mode}, ` +
-                `FTS: ${ftsStatus})`,
+                `mymem：初始化完成` +
+                `（嵌入：预热中，` +
+                `检索：${retrievalTest.success ? "正常" : "失败"}，` +
+                `模式：${retrievalTest.mode}，` +
+                `全文索引：${ftsStatus}）`,
               );
             }
 
             if (!retrievalTest.success) {
               api.logger.warn(
-                `mymem: retrieval test failed: ${retrievalTest.error}`,
+                `mymem：检索测试失败：${retrievalTest.error}`,
               );
             }
 
@@ -566,7 +566,7 @@ const myMemPlugin = {
             retrievalHealth = !!retrievalTest.success;
           } catch (error) {
             api.logger.warn(
-              `mymem: startup checks failed: ${String(error)}`,
+              `mymem：启动检查失败：${String(error)}`,
             );
           }
         };
@@ -582,8 +582,8 @@ const myMemPlugin = {
             const counts = await upgrader.countLegacy();
             if (counts.legacy > 0) {
               api.logger.info(
-                `mymem: found ${counts.legacy} legacy memories (of ${counts.total} total) that can be upgraded to the new smart memory format. ` +
-                `Run 'openclaw mymem upgrade' to convert them.`
+                `mymem：发现 ${counts.legacy} 条旧格式记忆（总计 ${counts.total} 条）可升级为新的智能记忆格式。` +
+                `运行 'openclaw mymem upgrade' 进行转换。`,
               );
             }
           } catch {
@@ -601,7 +601,7 @@ const myMemPlugin = {
         await stopDashboard();
         autoBackup.stop();
         if (feedbackLoop) feedbackLoop.dispose();
-        api.logger.info("mymem: stopped");
+        api.logger.info("mymem：已停止");
       },
     });
   },

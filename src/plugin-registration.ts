@@ -181,21 +181,21 @@ async function runGatewayMaintenanceOnce(
 
   if (distillResult || lifecycleResult || compactionResult || learningResult) {
     api.logger.info(
-      `memory-maintenance [auto]: ` +
-      `distilled=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
-      `lifecycleScanned=${lifecycleResult?.scanned ?? 0} ` +
-      `compactionScanned=${compactionResult?.scanned ?? 0} ` +
-      `clusters=${compactionResult?.clustersFound ?? 0} ` +
-      `created=${compactionResult?.memoriesCreated ?? 0} ` +
-      `deleted=${(lifecycleResult?.deleted ?? 0) + (compactionResult?.memoriesDeleted ?? 0)} ` +
-      `deleteReasons=${JSON.stringify(lifecycleResult?.deleteReasons ?? {})} ` +
-      `llmRefined=${compactionResult?.llmRefined ?? 0} ` +
-      `fallbackMerged=${compactionResult?.fallbackMerged ?? 0} ` +
-      `failedClusters=${compactionResult?.failedClusters ?? 0} ` +
-      `learningScenes=${learningResult ? `${learningResult.scenesCreated}/${learningResult.scenesUpdated}` : "0/0"} ` +
-      `learningPatterns=${learningResult?.patternsCreated ?? 0} ` +
-      `archived=${lifecycleResult?.archived ?? 0} ` +
-      `promoted=${lifecycleResult?.promoted ?? 0} demoted=${lifecycleResult?.demoted ?? 0}`,
+      `记忆维护[自动]：` +
+      `偏好提炼=${distillResult?.created ?? 0}/${distillResult?.updated ?? 0} ` +
+      `生命周期扫描=${lifecycleResult?.scanned ?? 0} ` +
+      `压缩扫描=${compactionResult?.scanned ?? 0} ` +
+      `聚类=${compactionResult?.clustersFound ?? 0} ` +
+      `新建=${compactionResult?.memoriesCreated ?? 0} ` +
+      `删除=${(lifecycleResult?.deleted ?? 0) + (compactionResult?.memoriesDeleted ?? 0)} ` +
+      `删除原因=${JSON.stringify(lifecycleResult?.deleteReasons ?? {})} ` +
+      `LLM精炼=${compactionResult?.llmRefined ?? 0} ` +
+      `兜底合并=${compactionResult?.fallbackMerged ?? 0} ` +
+      `失败聚类=${compactionResult?.failedClusters ?? 0} ` +
+      `学习场景=${learningResult ? `${learningResult.scenesCreated}/${learningResult.scenesUpdated}` : "0/0"} ` +
+      `学习模式=${learningResult?.patternsCreated ?? 0} ` +
+      `归档=${lifecycleResult?.archived ?? 0} ` +
+      `提升=${lifecycleResult?.promoted ?? 0} 降级=${lifecycleResult?.demoted ?? 0}`,
     );
   }
 }
@@ -219,7 +219,7 @@ export function registerGatewayMaintenance(ctx: PluginRegistrationContext): void
   api.on("gateway_start", () => {
     runGatewayMaintenanceOnce(ctx)
       .catch((err) => {
-        api.logger.warn(`memory-maintenance [auto]: failed: ${String(err)}`);
+        api.logger.warn(`记忆维护[自动]：执行失败：${String(err)}`);
       });
   });
 }

@@ -569,7 +569,7 @@ describe("real before_prompt_build hook", () => {
 
       assert.equal(output, undefined);
       assert.ok(
-        debugLogs.some((line) => line.includes("auto-recall skipped for excluded agent 'cron'")),
+        debugLogs.some((line) => line.includes("自动召回已跳过，agent 'cron' 在排除列表中")),
         "expected built-in blacklist skip debug log for 'cron'",
       );
     } finally {
@@ -632,7 +632,7 @@ describe("real before_prompt_build hook", () => {
 
       assert.equal(output, undefined);
       assert.ok(
-        debugLogs.some((line) => line.includes("auto-recall skipped for agent 'main' not in autoRecallIncludeAgents")),
+        debugLogs.some((line) => line.includes("自动召回已跳过，agent 'main' 不在 autoRecallIncludeAgents 白名单中")),
         "expected whitelist skip debug log for fallback 'main'",
       );
     } finally {
@@ -706,12 +706,12 @@ describe("real before_prompt_build hook", () => {
       );
 
       assert.equal(output, undefined);
-      const timeoutLog = warnLogs.find((line) => line.includes("auto-recall timed out after 25ms"));
+      const timeoutLog = warnLogs.find((line) => line.includes("自动召回超过 25ms"));
       assert.ok(timeoutLog, "expected auto-recall timeout warning");
-      assert.match(timeoutLog, /currentStage=hybrid\.rerank/);
-      assert.match(timeoutLog, /currentStageElapsed=\d+ms/);
-      assert.match(timeoutLog, /completedLatencies=embedQuery=12ms,parallelSearch=34ms/);
-      assert.match(timeoutLog, /counts=vector=4,bm25=3,fused=5,final=0/);
+      assert.match(timeoutLog, /当前阶段=hybrid\.rerank/);
+      assert.match(timeoutLog, /当前阶段耗时=\d+ms/);
+      assert.match(timeoutLog, /已完成耗时=embedQuery=12ms,parallelSearch=34ms/);
+      assert.match(timeoutLog, /数量=向量=4,BM25=3,融合=5,最终=0/);
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;

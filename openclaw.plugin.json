@@ -297,7 +297,7 @@
       "smartExtraction": {
         "type": "boolean",
         "default": true,
-        "description": "Enable LLM-powered memory extraction. Auto-capture requires this path; regex fallback is disabled by default."
+        "description": "启用由 LLM 驱动的记忆提取。自动捕获需要这条路径；正则回退默认关闭。"
       },
       "captureMaxMessages": {
         "type": "integer",
@@ -1455,7 +1455,7 @@
     },
     "smartExtraction": {
       "label": "Smart Extraction",
-      "help": "Enable LLM-powered 6-category memory extraction. Auto-capture sends a recent message window to the LLM and does not use regex fallback by default."
+      "help": "启用由 LLM 驱动的六分类记忆提取。自动捕获会把最近消息窗口发送给 LLM，默认不使用正则回退。"
     },
     "captureMaxMessages": {
       "label": "Capture Window Messages",
@@ -1852,24 +1852,24 @@
       "help": "Deduplicate repeated error signatures per session",
       "advanced": true
     },
-    "feedbackLoop.preventiveLessons.enabled": {
-      "label": "Preventive Lesson Learning",
-      "help": "Automatically store low-confidence preventive reasoning lessons from tool failures, test failures, and user corrections.",
+      "feedbackLoop.preventiveLessons.enabled": {
+      "label": "预防性经验学习",
+      "help": "从工具失败、测试失败和用户纠正中自动保存低置信度的预防性推理经验。",
       "advanced": true
     },
     "feedbackLoop.preventiveLessons.minEvidenceToConfirm": {
-      "label": "Lesson Promotion Evidence",
-      "help": "Matching evidence count required before a pending preventive lesson is promoted to confirmed.",
+      "label": "经验确认阈值",
+      "help": "待确认的预防性经验需要达到多少条匹配证据才会升级为已确认。",
       "advanced": true
     },
     "feedbackLoop.preventiveLessons.pendingConfidence": {
-      "label": "Pending Lesson Confidence",
-      "help": "Initial confidence for automatically inferred preventive lessons.",
+      "label": "待确认经验置信度",
+      "help": "自动推断出的预防性经验的初始置信度。",
       "advanced": true
     },
     "feedbackLoop.preventiveLessons.confirmedConfidence": {
-      "label": "Confirmed Lesson Confidence",
-      "help": "Minimum confidence assigned when a preventive lesson is promoted to confirmed.",
+      "label": "已确认经验置信度",
+      "help": "预防性经验升级为已确认时使用的最低置信度。",
       "advanced": true
     },
     "scopes.default": {
@@ -1995,8 +1995,8 @@
       "advanced": true
     },
     "learningMemory.enabled": {
-      "label": "Learning Memory",
-      "help": "Enable utility-aware ranking, scene memories, and case/pattern distillation.",
+      "label": "学习记忆",
+      "help": "启用基于效用的排序、场景记忆，以及案例/模式提炼。",
       "advanced": true
     },
     "sessionCompression.enabled": {

@@ -163,7 +163,7 @@ export async function storeCandidate(
   });
 
   ctx.log.info(
-    `mymem: smart-extractor: created [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+    `mymem：智能提取新建记忆 [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
   );
 }
 
@@ -197,7 +197,7 @@ export async function handleProfileMerge(
     });
     if (profileAdmission.decision === "reject") {
       ctx.log.warn(
-        `mymem: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`,
+        `mymem：智能提取准入拒绝 profile [${candidate.abstract.slice(0, 60)}]，原因：${profileAdmission.audit.reason}`,
       );
       await ctx.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
       return "rejected";
@@ -264,7 +264,7 @@ export async function handleMerge(
   } catch {
     // Fallback: store as new
     ctx.log.warn(
-      `mymem: smart-extractor: could not read existing memory ${matchId}, storing as new`,
+      `mymem：智能提取无法读取已有记忆 ${matchId}，将作为新记忆存储`,
     );
     const vector = await ctx.embedder.embed(
       `${candidate.abstract} ${candidate.content}`,
@@ -294,7 +294,7 @@ export async function handleMerge(
   }>(prompt, "merge-memory");
 
   if (!merged) {
-    ctx.log.warn("mymem: smart-extractor: merge LLM failed, skipping merge");
+    ctx.log.warn("mymem：智能提取 LLM 合并失败，已跳过合并");
     return;
   }
 
@@ -344,7 +344,7 @@ export async function handleMerge(
   }
 
   ctx.log.info(
-    `mymem: smart-extractor: merged [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} into ${matchId.slice(0, 8)}`,
+    `mymem：智能提取合并记忆 [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} 到 ${matchId.slice(0, 8)}`,
   );
 }
 
@@ -432,7 +432,7 @@ export async function handleSupersede(
   );
 
   ctx.log.info(
-    `mymem: smart-extractor: superseded [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`,
+    `mymem：智能提取替换旧记忆 [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`,
   );
 }
 
@@ -463,7 +463,7 @@ export async function handleSupport(
   );
 
   ctx.log.info(
-    `mymem: smart-extractor: support [${contextLabel || "general"}] on ${matchId.slice(0, 8)} — ${reason}`,
+    `mymem：智能提取记录支持证据 [${contextLabel || "general"}] 到 ${matchId.slice(0, 8)}，原因：${reason}`,
   );
 }
 
@@ -513,7 +513,7 @@ export async function handleContextualize(
   });
 
   ctx.log.info(
-    `mymem: smart-extractor: contextualize [${contextLabel || "general"}] new entry linked to ${matchId.slice(0, 8)}`,
+    `mymem：智能提取新增上下文记忆 [${contextLabel || "general"}]，关联到 ${matchId.slice(0, 8)}`,
   );
 }
 
@@ -578,6 +578,6 @@ export async function handleContradict(
   });
 
   ctx.log.info(
-    `mymem: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`,
+    `mymem：智能提取记录矛盾证据 [${contextLabel || "general"}] 到 ${matchId.slice(0, 8)}，并已新建记忆`,
   );
 }

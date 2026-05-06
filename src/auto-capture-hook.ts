@@ -81,13 +81,13 @@ export function registerAutoCaptureHook(params: {
         const captureAgents = resolveCaptureAgents(config);
         if (!captureAgents.includes(agentId)) {
           clearPendingIngressForSession(params.autoCapturePendingIngressTexts, sessionKey);
-          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (not in captureAgents whitelist)`);
+          api.logger.debug(`mymem：自动捕获已跳过，agent ${agentId} 不在 captureAgents 白名单中`);
           return;
         }
 
         if (extractionRateLimiter.isRateLimited()) {
           api.logger.debug(
-            `mymem: auto-capture skipped (rate limited: ${extractionRateLimiter.getRecentCount()} extractions in last hour)`,
+            `mymem：自动捕获已跳过（限流：最近一小时已有 ${extractionRateLimiter.getRecentCount()} 次提取）`,
           );
           return;
         }
@@ -98,7 +98,7 @@ export function registerAutoCaptureHook(params: {
           : scopeManager.getDefaultScope(agentId);
 
         api.logger.debug(
-          `mymem: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, ${summarizeAgentEndMessages(event.messages)})`,
+          `mymem：自动捕获收到 agent_end 载荷，agent=${agentId}（sessionKey=${sessionKey}，${summarizeAgentEndMessages(event.messages)}）`,
         );
 
         const eligibleItems: Array<{ role: "user" | "assistant"; text: string }> = [];
@@ -175,26 +175,26 @@ export function registerAutoCaptureHook(params: {
         captureItems = captureItems.slice(-captureMaxMessages);
         const texts = textsOf(captureItems);
         if (skippedAutoCaptureTexts > 0) {
-          api.logger.debug(`mymem: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent ${agentId}`);
+          api.logger.debug(`mymem：自动捕获跳过 ${skippedAutoCaptureTexts} 个注入/系统文本块，agent=${agentId}`);
         }
         if (pendingIngressTexts.length > 0) {
-          api.logger.debug(`mymem: auto-capture using ${pendingIngressTexts.length} pending ingress text(s) for agent ${agentId}`);
+          api.logger.debug(`mymem：自动捕获使用 ${pendingIngressTexts.length} 条待处理入口文本，agent=${agentId}`);
         }
         if (texts.length !== eligibleTexts.length) {
-          api.logger.debug(`mymem: auto-capture narrowed ${eligibleTexts.length} eligible history text(s) to ${texts.length} new text(s) for agent ${agentId}`);
+          api.logger.debug(`mymem：自动捕获将 ${eligibleTexts.length} 条可用历史文本缩小为 ${texts.length} 条新文本，agent=${agentId}`);
         }
-        api.logger.debug(`mymem: auto-capture collected ${texts.length} text(s) for agent ${agentId} (captureMaxMessages=${captureMaxMessages}, smartExtraction=${smartExtractor ? "on" : "off"})`);
+        api.logger.debug(`mymem：自动捕获收集到 ${texts.length} 条文本，agent=${agentId}（captureMaxMessages=${captureMaxMessages}，智能提取=${smartExtractor ? "开启" : "关闭"}）`);
         if (texts.length === 0) {
-          api.logger.debug(`mymem: auto-capture found no eligible texts after filtering for agent ${agentId}`);
+          api.logger.debug(`mymem：自动捕获过滤后没有可用文本，agent=${agentId}`);
           return;
         }
 
         if (!smartExtractor) {
-          api.logger.debug(`mymem: auto-capture skipped for agent ${agentId} (smart extraction unavailable; regex fallback disabled)`);
+          api.logger.debug(`mymem：自动捕获已跳过，agent=${agentId}（智能提取不可用，正则回退已关闭）`);
           return;
         }
 
-        api.logger.debug(`mymem: auto-capture running smart extraction for agent ${agentId} (${captureItems.length} message(s))`);
+        api.logger.debug(`mymem：自动捕获正在为 agent=${agentId} 运行智能提取（${captureItems.length} 条消息）`);
         const stats = await smartExtractor.extractAndPersist(
           formatConversationForSmartExtraction(captureItems),
           sessionKey,
@@ -202,10 +202,10 @@ export function registerAutoCaptureHook(params: {
         );
         extractionRateLimiter.recordExtraction();
         if (stats.created > 0 || stats.merged > 0) {
-          api.logger.info(`mymem: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`);
+          api.logger.info(`mymem：智能提取完成，agent=${agentId}，新建=${stats.created}，合并=${stats.merged}，跳过=${stats.skipped}`);
         }
       } catch (err) {
-        api.logger.warn(`mymem: capture failed: ${String(err)}`);
+        api.logger.warn(`mymem：捕获失败：${String(err)}`);
       }
     })();
     agentEndAutoCaptureHook.__lastRun = backgroundRun;

@@ -783,9 +783,9 @@ export async function runLearningMemoryMaintenance(
   }
 
   deps.logger?.info?.(
-    `learning-memory-maintenance: scanned=${result.scanned} scenes=${result.scenesCreated}/${result.scenesUpdated} ` +
-      `patterns=${result.patternsCreated} utilitySmoothed=${result.utilitySmoothed} ` +
-      `llm=${result.llmRefined} fallback=${result.fallbackUsed}`,
+    `学习记忆维护：扫描=${result.scanned} 场景=${result.scenesCreated}/${result.scenesUpdated} ` +
+      `模式=${result.patternsCreated} 效用平滑=${result.utilitySmoothed} ` +
+      `LLM精炼=${result.llmRefined} 兜底=${result.fallbackUsed}`,
   );
   return result;
 }

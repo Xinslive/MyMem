@@ -89,10 +89,10 @@ describe("gateway maintenance", () => {
       { type: "compaction" },
     ]);
     assert.equal(infoLogs.length, 1);
-    assert.match(infoLogs[0], /lifecycleScanned=7\b/);
-    assert.doesNotMatch(infoLogs[0], /lifecycleScanned=14\b/);
-    assert.match(infoLogs[0], /deleted=7\b/);
-    assert.match(infoLogs[0], /promoted=3 demoted=4\b/);
+    assert.match(infoLogs[0], /生命周期扫描=7\b/);
+    assert.doesNotMatch(infoLogs[0], /生命周期扫描=14\b/);
+    assert.match(infoLogs[0], /删除=7\b/);
+    assert.match(infoLogs[0], /提升=3 降级=4\b/);
   });
 
   it("passes the shared learning LLM to learning maintenance", async () => {

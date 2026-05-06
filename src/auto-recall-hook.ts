@@ -299,7 +299,7 @@ export function registerAutoRecallHook(params: {
     const diagnostics = typeof getLastDiagnostics === "function"
       ? getLastDiagnostics.call(retriever)
       : null;
-    if (!diagnostics) return "diagnostics=unavailable";
+    if (!diagnostics) return "诊断=不可用";
 
     const now = Date.now();
     const currentStage = diagnostics.currentStage || diagnostics.failureStage || "unknown";
@@ -310,17 +310,17 @@ export function registerAutoRecallHook(params: {
       .filter((entry): entry is [string, number] => typeof entry[1] === "number")
       .map(([stage, ms]) => stage + "=" + ms + "ms");
     const countParts = [
-      "vector=" + (diagnostics.vectorResultCount ?? 0),
-      "bm25=" + (diagnostics.bm25ResultCount ?? 0),
-      "fused=" + (diagnostics.fusedResultCount ?? 0),
-      "final=" + (diagnostics.finalResultCount ?? 0),
+      "向量=" + (diagnostics.vectorResultCount ?? 0),
+      "BM25=" + (diagnostics.bm25ResultCount ?? 0),
+      "融合=" + (diagnostics.fusedResultCount ?? 0),
+      "最终=" + (diagnostics.finalResultCount ?? 0),
     ];
 
-    return "mode=" + (diagnostics.mode || "unknown") +
-      ", currentStage=" + currentStage +
-      (typeof currentStageElapsedMs === "number" ? ", currentStageElapsed=" + currentStageElapsedMs + "ms" : "") +
-      ", completedLatencies=" + (latencyParts.length > 0 ? latencyParts.join(",") : "none") +
-      ", counts=" + countParts.join(",");
+    return "模式=" + (diagnostics.mode || "unknown") +
+      "，当前阶段=" + currentStage +
+      (typeof currentStageElapsedMs === "number" ? "，当前阶段耗时=" + currentStageElapsedMs + "ms" : "") +
+      "，已完成耗时=" + (latencyParts.length > 0 ? latencyParts.join(",") : "无") +
+      "，数量=" + countParts.join(",");
   }
 
   api.on("message_received", (event: any, ctx: any) => {
@@ -351,7 +351,7 @@ export function registerAutoRecallHook(params: {
     if (Array.isArray(config.autoRecallIncludeAgents) && config.autoRecallIncludeAgents.length > 0) {
       if (!config.autoRecallIncludeAgents.includes(agentId)) {
         api.logger.debug?.(
-          "mymem: auto-recall skipped for agent '" + agentId + "' not in autoRecallIncludeAgents",
+          "mymem：自动召回已跳过，agent '" + agentId + "' 不在 autoRecallIncludeAgents 白名单中",
         );
         return;
       }
@@ -363,7 +363,7 @@ export function registerAutoRecallHook(params: {
       ];
       if (effectiveExcludeAgents.includes(agentId)) {
         api.logger.debug?.(
-          "mymem: auto-recall skipped for excluded agent '" + agentId + "'",
+          "mymem：自动召回已跳过，agent '" + agentId + "' 在排除列表中",
         );
         return;
       }
@@ -403,7 +403,7 @@ export function registerAutoRecallHook(params: {
         const originalLength = recallQuery.length;
         recallQuery = truncateAutoRecallQuery(recallQuery, MAX_RECALL_QUERY_LENGTH);
         api.logger.debug?.(
-          "mymem: auto-recall query truncated from " + originalLength + " to " + recallQuery.length + " chars, preserving latest context"
+          "mymem：自动召回查询过长，已从 " + originalLength + " 字符截断到 " + recallQuery.length + " 字符，并保留最新上下文",
         );
       }
 
@@ -434,7 +434,7 @@ export function registerAutoRecallHook(params: {
       const intent = recallMode === "adaptive" ? analyzeIntent(recallQuery) : undefined;
       if (intent) {
         api.logger.debug?.(
-          "mymem: adaptive recall intent=" + intent.label + " depth=" + intent.depth + " confidence=" + intent.confidence + " categories=[" + intent.categories.join(",") + "]",
+          "mymem：自适应召回意图=" + intent.label + " 深度=" + intent.depth + " 置信度=" + intent.confidence + " 分类=[" + intent.categories.join(",") + "]",
         );
       }
 
@@ -509,7 +509,7 @@ export function registerAutoRecallHook(params: {
           if (diff >= minRepeated) return true;
           dedupFilteredCount++;
           api.logger.debug?.(
-            "mymem: skipping redundant reasoning strategy " + item.id.slice(0, 8) + " (last seen at turn " + lastTurn + ", current turn " + currentTurn + ", min " + minRepeated + ")",
+            "mymem：跳过重复推理策略 " + item.id.slice(0, 8) + "（上次出现轮次=" + lastTurn + "，当前轮次=" + currentTurn + "，最小间隔=" + minRepeated + "）",
           );
           recentStrategyIds.delete(item.id);
           return false;
@@ -521,7 +521,7 @@ export function registerAutoRecallHook(params: {
           const isRedundant = diff < minRepeated;
           if (isRedundant) {
             api.logger.debug?.(
-              "mymem: skipping redundant memory " + r.entry.id.slice(0, 8) + " (last seen at turn " + lastTurn + ", current turn " + currentTurn + ", min " + minRepeated + ")",
+              "mymem：跳过重复记忆 " + r.entry.id.slice(0, 8) + "（上次出现轮次=" + lastTurn + "，当前轮次=" + currentTurn + "，最小间隔=" + minRepeated + "）",
             );
           }
           if (isRedundant) dedupFilteredCount++;
@@ -531,7 +531,7 @@ export function registerAutoRecallHook(params: {
         if (filteredResults.length === 0) {
           if (results.length > 0 && reasoningStrategies.length === 0) {
             api.logger.debug?.(
-              "mymem: all " + results.length + " memories were filtered out due to redundancy policy",
+              "mymem：因重复召回策略过滤掉全部 " + results.length + " 条记忆",
             );
             return;
           }
@@ -546,12 +546,12 @@ export function registerAutoRecallHook(params: {
         const meta = r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
         if (meta.state !== "confirmed") {
           stateFilteredCount++;
-          api.logger.debug("mymem: governance: filtered id=" + r.entry.id + " reason=state(" + meta.state + ") score=" + (r.score ? r.score.toFixed(3) : "?") + " text=" + r.entry.text.slice(0, 50));
+          api.logger.debug("mymem：治理过滤 id=" + r.entry.id + " 原因=状态(" + meta.state + ") 分数=" + (r.score ? r.score.toFixed(3) : "?") + " 文本=" + r.entry.text.slice(0, 50));
           return false;
         }
         if (meta.memory_layer === "archive" || meta.memory_layer === "reflection") {
           stateFilteredCount++;
-          api.logger.debug("mymem: governance: filtered id=" + r.entry.id + " reason=layer(" + meta.memory_layer + ") score=" + (r.score ? r.score.toFixed(3) : "?") + " text=" + r.entry.text.slice(0, 50));
+          api.logger.debug("mymem：治理过滤 id=" + r.entry.id + " 原因=层级(" + meta.memory_layer + ") 分数=" + (r.score ? r.score.toFixed(3) : "?") + " 文本=" + r.entry.text.slice(0, 50));
           return false;
         }
         if (isRecallSuppressedForSession(meta, { sessionKey, currentTurn })) {
@@ -563,7 +563,7 @@ export function registerAutoRecallHook(params: {
 
       if (governanceEligible.length === 0 && reasoningStrategies.length === 0) {
         api.logger.debug?.(
-          "mymem: auto-recall skipped after governance filters (hits=" + results.length + ", strategyHits=0, dedupFiltered=" + dedupFilteredCount + ", stateFiltered=" + stateFilteredCount + ", suppressedFiltered=" + suppressedFilteredCount + ")",
+          "mymem：自动召回经过治理过滤后无可注入内容（命中=" + results.length + "，策略命中=0，重复过滤=" + dedupFilteredCount + "，状态过滤=" + stateFilteredCount + "，抑制过滤=" + suppressedFilteredCount + "）",
         );
         return;
       }
@@ -687,7 +687,7 @@ export function registerAutoRecallHook(params: {
 
       if (selected.length === 0 && reasoningStrategies.length === 0) {
         api.logger.debug?.(
-          "mymem: auto-recall skipped injection after budgeting (hits=" + results.length + ", dedupFiltered=" + dedupFilteredCount + ", maxItems=" + autoRecallMaxItems + ", maxChars=" + autoRecallMaxChars + ")",
+          "mymem：自动召回经过预算限制后无可注入内容（命中=" + results.length + "，重复过滤=" + dedupFilteredCount + "，最大条数=" + autoRecallMaxItems + "，最大字符=" + autoRecallMaxChars + "）",
         );
         return;
       }
@@ -715,7 +715,7 @@ export function registerAutoRecallHook(params: {
       // Run tier maintenance asynchronously after injection
       if (selected.length > 0 || reasoningStrategies.length > 0) {
         void runTierMaintenance([...reasoningStrategies, ...selected], accessibleScopes).catch((err) =>
-          api.logger.warn("mymem: tier maintenance fire-and-forget failed: " + String(err)),
+          api.logger.warn("mymem：后台层级维护失败：" + String(err)),
         );
       }
 
@@ -736,11 +736,11 @@ export function registerAutoRecallHook(params: {
 
       const injectedIds = [...reasoningStrategies, ...selected].map((item) => item.id).join(",") || "(none)";
       api.logger.debug?.(
-        "mymem: auto-recall stats hits=" + results.length + ", strategyItems=" + reasoningStrategies.length + ", dedupFiltered=" + dedupFilteredCount + ", stateFiltered=" + stateFilteredCount + ", suppressedFiltered=" + suppressedFilteredCount + ", preBudgetItems=" + preBudgetItems + ", preBudgetChars=" + preBudgetChars + ", postBudgetItems=" + selected.length + ", postBudgetChars=" + usedChars + ", maxItems=" + autoRecallMaxItems + ", maxChars=" + autoRecallMaxChars + ", perItemMaxChars=" + autoRecallPerItemMaxChars + ", injectedIds=" + injectedIds,
+        "mymem：自动召回统计 命中=" + results.length + "，策略条数=" + reasoningStrategies.length + "，重复过滤=" + dedupFilteredCount + "，状态过滤=" + stateFilteredCount + "，抑制过滤=" + suppressedFilteredCount + "，预算前条数=" + preBudgetItems + "，预算前字符=" + preBudgetChars + "，预算后条数=" + selected.length + "，预算后字符=" + usedChars + "，最大条数=" + autoRecallMaxItems + "，最大字符=" + autoRecallMaxChars + "，单条最大字符=" + autoRecallPerItemMaxChars + "，注入ID=" + injectedIds,
       );
 
       api.logger.debug?.(
-        "mymem: injecting " + (selected.length + reasoningStrategies.length) + " memories into context for agent " + agentId,
+        "mymem：正在向 agent " + agentId + " 的上下文注入 " + (selected.length + reasoningStrategies.length) + " 条记忆",
       );
 
       const strategyBlock = strategyContext
@@ -772,7 +772,7 @@ export function registerAutoRecallHook(params: {
           timeoutId = setTimeout(() => {
             abortController.abort(new Error("auto-recall timeout"));
             api.logger.warn(
-              "mymem: auto-recall timed out after " + AUTO_RECALL_TIMEOUT_MS + "ms; " + formatTimeoutDiagnostics() + "; skipping memory injection to avoid stalling agent startup",
+              "mymem：自动召回超过 " + AUTO_RECALL_TIMEOUT_MS + "ms；" + formatTimeoutDiagnostics() + "；已跳过记忆注入，避免拖慢 agent 启动",
             );
             resolve(undefined);
           }, AUTO_RECALL_TIMEOUT_MS);
@@ -782,9 +782,9 @@ export function registerAutoRecallHook(params: {
     } catch (err) {
       clearTimeout(timeoutId);
       if (abortController.signal.aborted) {
-        api.logger.debug?.("mymem: recall aborted by timeout: " + String(err));
+        api.logger.debug?.("mymem：召回因超时中止：" + String(err));
       } else {
-        api.logger.warn("mymem: recall failed: " + String(err));
+        api.logger.warn("mymem：召回失败：" + String(err));
       }
     }
   }, { priority: 10 });
@@ -844,7 +844,7 @@ export function registerAutoRecallHook(params: {
 
       if (transitions.length > 0) {
         for (const t of transitions) {
-          api.logger.debug?.("mymem: tier transition " + t.fromTier + " \u2192 " + t.toTier + " for " + t.memoryId + ": " + t.reason);
+          api.logger.debug?.("mymem：层级转换 " + t.fromTier + " \u2192 " + t.toTier + "，记忆=" + t.memoryId + "，原因=" + t.reason);
         }
         const applied = await params.store.patchMetadataBatch(
           transitions.map((t) => ({
@@ -860,11 +860,11 @@ export function registerAutoRecallHook(params: {
           scopeFilter,
         );
         if (applied > 0) {
-          api.logger.debug?.("mymem: applied " + applied + " tier transition(s)");
+          api.logger.debug?.("mymem：已应用 " + applied + " 个层级转换");
         }
       }
     } catch (err) {
-      api.logger.warn("mymem: tier maintenance failed: " + String(err));
+      api.logger.warn("mymem：层级维护失败：" + String(err));
     }
   }
 }

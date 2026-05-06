@@ -240,7 +240,7 @@ export class SmartExtractor {
     candidateCount = candidates.length;
 
     if (candidates.length === 0) {
-      this.log("mymem: smart-extractor: no memories extracted");
+      this.log("mymem：智能提取未提取到可存储记忆");
       attachTelemetry();
       if (this.onExtractionComplete) {
         await this.onExtractionComplete({
@@ -253,7 +253,7 @@ export class SmartExtractor {
     }
 
     this.log(
-      `mymem: smart-extractor: extracted ${candidates.length} candidate(s)`,
+      `mymem：智能提取获得 ${candidates.length} 条候选记忆`,
     );
 
     // Step 1b: Apply storage-boundary filters before any embedding work.
@@ -276,7 +276,7 @@ export class SmartExtractor {
         stats.skipped += 1;
         stats.boundarySkipped = (stats.boundarySkipped ?? 0) + 1;
         this.log(
-          `mymem: smart-extractor: skipped USER.md-exclusive [${c.category}] ${c.abstract.slice(0, 60)}`,
+          `mymem：智能提取跳过 USER.md 专属记忆 [${c.category}] ${c.abstract.slice(0, 60)}`,
         );
         continue;
       }
@@ -298,12 +298,12 @@ export class SmartExtractor {
           duplicateSkipped = dedupResult.duplicateIndices.length;
           stats.skipped += dedupResult.duplicateIndices.length;
           this.log(
-            `mymem: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`,
+            `mymem：智能提取批量去重丢弃 ${dedupResult.duplicateIndices.length} 条近重复候选，保留 ${survivingCandidates.length} 条`,
           );
         }
       } catch (err) {
         this.log(
-          `mymem: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`,
+          `mymem：智能提取批量去重失败，将继续处理未去重候选：${String(err)}`,
         );
       } finally {
         batchDedupMs = Date.now() - batchDedupStartedAt;
@@ -336,7 +336,7 @@ export class SmartExtractor {
         }
       } catch (err) {
         this.log(
-          `mymem: smart-extractor: batch pre-embed failed, will embed individually: ${String(err)}`,
+          `mymem：智能提取批量预嵌入失败，将逐条嵌入：${String(err)}`,
         );
       } finally {
         batchEmbedMs = Date.now() - batchEmbedStartedAt;
@@ -359,7 +359,7 @@ export class SmartExtractor {
           );
         } catch (err) {
           this.log(
-            `mymem: smart-extractor: failed to process candidate [${candidate.category}]: ${String(err)}`,
+            `mymem：智能提取处理候选失败 [${candidate.category}]：${String(err)}`,
           );
         }
       }
@@ -397,7 +397,7 @@ export class SmartExtractor {
     attachTelemetry();
     const telemetry = stats.telemetry!;
     this.debugLog(
-      `mymem: smart-extractor telemetry total=${telemetry.totalMs}ms candidates=${candidateCount} processable=${processableCandidateCount} created=${stats.created} merged=${stats.merged} skipped=${stats.skipped} rejected=${stats.rejected ?? 0}`,
+      `mymem：智能提取耗时统计 总耗时=${telemetry.totalMs}ms 候选=${candidateCount} 可处理=${processableCandidateCount} 新建=${stats.created} 合并=${stats.merged} 跳过=${stats.skipped} 拒绝=${stats.rejected ?? 0}`,
     );
     if (this.onExtractionComplete) {
       await this.onExtractionComplete({
@@ -444,19 +444,19 @@ export class SmartExtractor {
 
     if (!result) {
       this.debugLog(
-        "mymem: smart-extractor: extract-candidates returned null",
+        "mymem：智能提取候选阶段返回空结果",
       );
       return [];
     }
     if (!result.memories || !Array.isArray(result.memories)) {
       this.debugLog(
-        `mymem: smart-extractor: extract-candidates returned unexpected shape keys=${Object.keys(result).join(",") || "(none)"}`,
+        `mymem：智能提取候选阶段返回结构异常，键=${Object.keys(result).join(",") || "(none)"}`,
       );
       return [];
     }
 
     this.debugLog(
-      `mymem: smart-extractor: extract-candidates raw memories=${result.memories.length}`,
+      `mymem：智能提取候选阶段原始记忆数=${result.memories.length}`,
     );
 
     // Validate and normalize candidates
@@ -468,7 +468,7 @@ export class SmartExtractor {
       if (!raw || typeof raw !== "object") {
         invalidCategoryCount++;
         this.debugLog(
-          `mymem: smart-extractor: dropping null/invalid candidate entry`,
+          `mymem：智能提取丢弃空候选或无效候选`,
         );
         continue;
       }
@@ -476,7 +476,7 @@ export class SmartExtractor {
       if (!category) {
         invalidCategoryCount++;
         this.debugLog(
-          `mymem: smart-extractor: dropping candidate due to invalid category rawCategory=${JSON.stringify(raw.category ?? "")} abstract=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`,
+          `mymem：智能提取因分类无效丢弃候选 rawCategory=${JSON.stringify(raw.category ?? "")} 摘要=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`,
         );
         continue;
       }
@@ -488,14 +488,14 @@ export class SmartExtractor {
       if (!abstract || abstract.length < 5) {
         shortAbstractCount++;
         this.debugLog(
-          `mymem: smart-extractor: dropping candidate due to short abstract category=${category} abstract=${JSON.stringify(abstract)}`,
+          `mymem：智能提取因摘要过短丢弃候选 分类=${category} 摘要=${JSON.stringify(abstract)}`,
         );
         continue;
       }
       if (isNoise(abstract)) {
         noiseAbstractCount++;
         this.debugLog(
-          `mymem: smart-extractor: dropping candidate due to noise abstract category=${category} abstract=${JSON.stringify(abstract.slice(0, 120))}`,
+          `mymem：智能提取因摘要噪声丢弃候选 分类=${category} 摘要=${JSON.stringify(abstract.slice(0, 120))}`,
         );
         continue;
       }
@@ -504,7 +504,7 @@ export class SmartExtractor {
     }
 
     this.debugLog(
-      `mymem: smart-extractor: validation summary accepted=${candidates.length}, invalidCategory=${invalidCategoryCount}, shortAbstract=${shortAbstractCount}, noiseAbstract=${noiseAbstractCount}`,
+      `mymem：智能提取校验汇总 接受=${candidates.length} 分类无效=${invalidCategoryCount} 摘要过短=${shortAbstractCount} 摘要噪声=${noiseAbstractCount}`,
     );
 
     // Filter out candidates the LLM judged not worth storing
@@ -512,7 +512,7 @@ export class SmartExtractor {
     const notWorthCount = candidates.length - worthStoring.length;
     if (notWorthCount > 0) {
       this.debugLog(
-        `mymem: smart-extractor: LLM filtered ${notWorthCount} candidate(s) as not worth storing`,
+        `mymem：智能提取 LLM 判定 ${notWorthCount} 条候选不值得存储，已过滤`,
       );
     }
 
@@ -577,7 +577,7 @@ export class SmartExtractor {
     // otherwise fall back to per-candidate embed call.
     const vector = precomputedVector ?? await this.embedder.embed(`${candidate.abstract} ${candidate.content}`);
     if (!vector || vector.length === 0) {
-      this.log("mymem: smart-extractor: embedding failed, storing as-is");
+      this.log("mymem：智能提取嵌入失败，将按原文存储");
       await storeCandidate(handlerCtx, candidate, vector || [], sessionKey, targetScope);
       stats.created++;
       return;
@@ -597,7 +597,7 @@ export class SmartExtractor {
     if (admission?.decision === "reject") {
       stats.rejected = (stats.rejected ?? 0) + 1;
       this.log(
-        `mymem: smart-extractor: admission rejected [${candidate.category}] ${candidate.abstract.slice(0, 60)} — ${admission.audit.reason}`,
+        `mymem：智能提取准入拒绝 [${candidate.category}] ${candidate.abstract.slice(0, 60)}，原因：${admission.audit.reason}`,
       );
       await this.recordRejectedAdmission(
         candidate,
@@ -653,7 +653,7 @@ export class SmartExtractor {
 
       case "skip":
         this.log(
-          `mymem: smart-extractor: skipped [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+          `mymem：智能提取跳过 [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
         );
         stats.skipped++;
         break;
@@ -762,7 +762,7 @@ export class SmartExtractor {
       });
     } catch (err) {
       this.log(
-        `mymem: smart-extractor: rejected admission audit write failed: ${String(err)}`,
+        `mymem：智能提取准入拒绝审计写入失败：${String(err)}`,
       );
     }
   }

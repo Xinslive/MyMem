@@ -111,8 +111,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     validateStoragePath(resolvedReflectionDbPath);
   } catch (err) {
     api.logger.warn(
-      `mymem: reflection storage path issue — ${String(err)}\n` +
-      `  Reflection writes may fail, but main memory writes are unaffected.`,
+      `mymem：反思记忆存储路径异常：${String(err)}\n` +
+      `  反思写入可能失败，但主记忆写入不受影响。`,
     );
   }
 
@@ -120,8 +120,8 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     validateStoragePath(resolvedDbPath);
   } catch (err) {
     api.logger.warn(
-      `mymem: storage path issue — ${String(err)}\n` +
-      `  The plugin will still attempt to start, but writes may fail.`,
+      `mymem：存储路径异常：${String(err)}\n` +
+      `  插件仍会尝试启动，但写入可能失败。`,
     );
   }
 
@@ -179,7 +179,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
   if (clawteamScopes.length > 0) {
     applyClawteamScopes(scopeManager, clawteamScopes);
-    api.logger.info(`mymem: CLAWTEAM_MEMORY_SCOPE added scopes: ${clawteamScopes.join(", ")}`);
+    api.logger.info(`mymem：CLAWTEAM_MEMORY_SCOPE 已添加作用域：${clawteamScopes.join(", ")}`);
   }
 
   const migrator = createMigrator(store);
@@ -252,11 +252,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
       });
 
       (isCliMode() ? api.logger.debug : api.logger.info)(
-        "mymem: smart extraction enabled (LLM model: "
+        "mymem：智能提取已启用（LLM模型："
         + llmModel
-        + ", timeoutMs: "
+        + "，超时："
         + llmTimeoutMs
-        + ")",
+        + "ms）",
       );
 
       if (feedbackLoopConfig.enabled) {
@@ -273,7 +273,7 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
         });
       }
     } catch (err) {
-      api.logger.warn(`mymem: smart extraction init failed, falling back to regex: ${String(err)}`);
+      api.logger.warn(`mymem：智能提取初始化失败，已回退到正则模式：${String(err)}`);
       if (feedbackLoopConfig.enabled) {
         feedbackLoop = new FeedbackLoop({
           admissionController: null,
@@ -337,10 +337,10 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
   const logReg = isCliMode() ? api.logger.debug : api.logger.info;
   logReg(
-    `mymem@${pluginVersion}: plugin registered [singleton init] `
-    + `(db: ${resolvedDbPath}, reflectionDb: ${resolvedReflectionDbPath}, model: ${config.embedding.model || "text-embedding-3-small"})`,
+    `mymem@${pluginVersion}：插件已注册[单例初始化] `
+    + `（数据库：${resolvedDbPath}，反思库：${resolvedReflectionDbPath}，模型：${config.embedding.model || "text-embedding-3-small"}）`,
   );
-  logReg(`mymem: diagnostic build tag loaded (${DIAG_BUILD_TAG})`);
+  logReg(`mymem：诊断构建标记已加载（${DIAG_BUILD_TAG}）`);
 
   return {
     config,

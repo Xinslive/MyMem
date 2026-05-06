@@ -139,7 +139,7 @@ export async function llmDedupDecision(
 
     if (!data) {
       ctx.log.warn(
-        "mymem: smart-extractor: dedup LLM returned unparseable response, defaulting to CREATE",
+        "mymem：智能提取去重 LLM 返回不可解析结果，默认按新建处理",
       );
       return { decision: "create", reason: "LLM response unparseable" };
     }
@@ -165,7 +165,7 @@ export async function llmDedupDecision(
     const destructiveDecisions = new Set(["supersede", "contradict"]);
     if (destructiveDecisions.has(decision) && !hasValidIndex) {
       ctx.log.warn(
-        `mymem: smart-extractor: ${decision} decision has missing/invalid match_index (${idx}), degrading to create`,
+        `mymem：智能提取去重决策 ${decision} 缺少有效 match_index（${idx}），已降级为新建`,
       );
       return {
         decision: "create",
@@ -181,7 +181,7 @@ export async function llmDedupDecision(
     };
   } catch (err) {
     ctx.log.warn(
-      `mymem: smart-extractor: dedup LLM failed: ${String(err)}`,
+      `mymem：智能提取去重 LLM 失败：${String(err)}`,
     );
     return { decision: "create", reason: `LLM failed: ${String(err)}` };
   }

@@ -111,11 +111,11 @@ test("smart extraction initializes with string[] apiKey (no llm.apiKey fallback)
     const infoLogs = logs.filter(([level]) => level === "info").map(([, msg]) => msg);
 
     assert.ok(
-      !warnLogs.some((msg) => msg.includes("smart extraction init failed")),
+      !warnLogs.some((msg) => msg.includes("智能提取初始化失败")),
       `should not fail with array apiKey, got: ${JSON.stringify(warnLogs)}`,
     );
     assert.ok(
-      infoLogs.some((msg) => msg.includes("smart extraction enabled")),
+      infoLogs.some((msg) => msg.includes("智能提取已启用")),
       `smart extraction should be enabled, got: ${JSON.stringify(infoLogs)}`,
     );
   });
@@ -125,7 +125,7 @@ test("smart extraction initializes with single-element array apiKey", async () =
   await withTestEnv(["only-key"], (logs) => {
     const warnLogs = logs.filter(([level]) => level === "warn").map(([, msg]) => msg);
     assert.ok(
-      !warnLogs.some((msg) => msg.includes("smart extraction init failed")),
+      !warnLogs.some((msg) => msg.includes("智能提取初始化失败")),
       `single-element array should work, got: ${JSON.stringify(warnLogs)}`,
     );
   });
@@ -137,7 +137,7 @@ test("smart extraction initializes with env var in array apiKey", async () => {
     await withTestEnv(["${__TEST_MEMORY_KEY}"], (logs) => {
       const warnLogs = logs.filter(([level]) => level === "warn").map(([, msg]) => msg);
       assert.ok(
-        !warnLogs.some((msg) => msg.includes("smart extraction init failed")),
+        !warnLogs.some((msg) => msg.includes("智能提取初始化失败")),
         `env var in array should resolve, got: ${JSON.stringify(warnLogs)}`,
       );
     });

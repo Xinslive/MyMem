@@ -306,7 +306,7 @@ assert.equal(mergeResult.entries[0].text, "饮品偏好：乌龙茶、茉莉花�
 assert.ok(mergeResult.entries[0].metadata.includes("喜欢茉莉花茶"));
 assert.equal(mergeResult.llmCalls, 3);
 assert.ok(
-  mergeResult.logs.some((entry) => entry[1].includes("smart-extracted 0 created, 1 merged, 0 skipped")),
+  mergeResult.logs.some((entry) => entry[1].includes("智能提取完成") && entry[1].includes("新建=0") && entry[1].includes("合并=1") && entry[1].includes("跳过=0")),
 );
 
 __resetSingletonForTesting__();
@@ -315,7 +315,7 @@ assert.equal(skipResult.entries.length, 1);
 assert.equal(skipResult.entries[0].text, "饮品偏好：乌龙茶");
 assert.equal(skipResult.llmCalls, 2);
 assert.ok(
-  skipResult.logs.some((entry) => entry[1].includes("smart-extractor: skipped [preferences]")),
+  skipResult.logs.some((entry) => entry[1].includes("智能提取跳过 [preferences]")),
 );
 
 async function runMultiRoundScenario() {
@@ -488,13 +488,13 @@ assert.equal(multiRoundResult.extractionCall, 4);
 assert.equal(multiRoundResult.dedupCall, 3);
 assert.equal(multiRoundResult.mergeCall, 1);
 assert.ok(
-  multiRoundResult.logs.some((entry) => entry[1].includes("created [preferences]")),
+  multiRoundResult.logs.some((entry) => entry[1].includes("智能提取新建记忆 [preferences]")),
 );
 assert.ok(
-  multiRoundResult.logs.some((entry) => entry[1].includes("merged [preferences]")),
+  multiRoundResult.logs.some((entry) => entry[1].includes("智能提取合并记忆 [preferences]")),
 );
 assert.ok(
-  multiRoundResult.logs.filter((entry) => entry[1].includes("skipped [preferences]")).length >= 2,
+  multiRoundResult.logs.filter((entry) => entry[1].includes("智能提取跳过 [preferences]")).length >= 2,
 );
 
 async function runInjectedRecallScenario() {
@@ -579,16 +579,16 @@ async function runInjectedRecallScenario() {
 const injectedRecallResult = await runInjectedRecallScenario();
 assert.equal(injectedRecallResult.llmCalls, 0);
 assert.ok(
-  injectedRecallResult.logs.some((entry) => entry[1].includes("auto-capture skipped 1 injected/system text block(s)")),
+  injectedRecallResult.logs.some((entry) => entry[1].includes("自动捕获跳过 1 个注入/系统文本块")),
 );
 assert.ok(
-  injectedRecallResult.logs.some((entry) => entry[1].includes("auto-capture found no eligible texts after filtering")),
+  injectedRecallResult.logs.some((entry) => entry[1].includes("自动捕获过滤后没有可用文本")),
 );
 assert.ok(
-  injectedRecallResult.logs.every((entry) => !entry[1].includes("auto-capture running smart extraction")),
+  injectedRecallResult.logs.every((entry) => !entry[1].includes("自动捕获正在")),
 );
 assert.ok(
-  injectedRecallResult.logs.every((entry) => !entry[1].includes("auto-capture running regex fallback")),
+  injectedRecallResult.logs.every((entry) => !entry[1].includes("正则回退")),
 );
 
 async function runPrependedRecallWithUserTextScenario() {
@@ -674,10 +674,10 @@ __resetSingletonForTesting__();
 const prependedRecallResult = await runPrependedRecallWithUserTextScenario();
 assert.ok(prependedRecallResult.llmCalls >= 1);
 assert.ok(
-  prependedRecallResult.logs.some((entry) => entry[1].includes("auto-capture collected 1 text(s)")),
+  prependedRecallResult.logs.some((entry) => entry[1].includes("自动捕获收集到 1 条文本")),
 );
 assert.ok(
-  prependedRecallResult.logs.some((entry) => entry[1].includes("auto-capture running smart extraction")),
+  prependedRecallResult.logs.some((entry) => entry[1].includes("自动捕获正在") && entry[1].includes("智能提取")),
 );
 
 async function runInboundMetadataWrappedScenario() {
@@ -762,7 +762,7 @@ __resetSingletonForTesting__();
 const inboundMetadataWrappedResult = await runInboundMetadataWrappedScenario();
 assert.ok(inboundMetadataWrappedResult.llmCalls >= 1);
 assert.ok(
-  inboundMetadataWrappedResult.logs.some((entry) => entry[1].includes("auto-capture running smart extraction")),
+  inboundMetadataWrappedResult.logs.some((entry) => entry[1].includes("自动捕获正在") && entry[1].includes("智能提取")),
 );
 
 async function runSessionDeltaScenario() {
@@ -826,7 +826,7 @@ async function runSessionDeltaScenario() {
 
 const sessionDeltaLogs = await runSessionDeltaScenario();
 assert.ok(
-  sessionDeltaLogs.filter((entry) => entry[1].includes("auto-capture collected 1 text(s)")).length >= 1,
+  sessionDeltaLogs.filter((entry) => entry[1].includes("自动捕获收集到 1 条文本")).length >= 1,
 );
 
 async function runPendingIngressScenario() {
@@ -876,11 +876,11 @@ async function runPendingIngressScenario() {
 const pendingIngressLogs = await runPendingIngressScenario();
 assert.ok(
   pendingIngressLogs.some((entry) =>
-    entry[1].includes("auto-capture using 1 pending ingress text(s)")
+    entry[1].includes("自动捕获使用 1 条待处理入口文本")
   ),
 );
 assert.ok(
-  pendingIngressLogs.some((entry) => entry[1].includes("auto-capture collected 1 text(s)")),
+  pendingIngressLogs.some((entry) => entry[1].includes("自动捕获收集到 1 条文本")),
 );
 
 async function runRememberCommandContextScenario() {
@@ -942,12 +942,12 @@ async function runRememberCommandContextScenario() {
 const rememberCommandContextLogs = await runRememberCommandContextScenario();
 assert.ok(
   rememberCommandContextLogs.some((entry) =>
-    entry[1].includes("auto-capture using 1 pending ingress text(s)")
+    entry[1].includes("自动捕获使用 1 条待处理入口文本")
   ),
 );
 assert.ok(
   rememberCommandContextLogs.some((entry) =>
-    entry[1].includes("auto-capture collected 1 text(s)")
+    entry[1].includes("自动捕获收集到 1 条文本")
   ),
 );
 
@@ -1045,7 +1045,7 @@ const userMdExclusiveProfileResult = await runUserMdExclusiveProfileScenario();
 assert.equal(userMdExclusiveProfileResult.entries.length, 0);
 assert.ok(
   userMdExclusiveProfileResult.logs.some((entry) =>
-    entry[1].includes("skipped USER.md-exclusive [profile]")
+    entry[1].includes("智能提取跳过 USER.md 专属记忆 [profile]")
   ),
 );
 
@@ -1143,7 +1143,7 @@ __resetSingletonForTesting__();
 const boundarySkipFallbackResult = await runBoundarySkipKeepsRegexFallbackScenario();
 assert.equal(boundarySkipFallbackResult.entries.length, 0);
 assert.ok(
-  boundarySkipFallbackResult.logs.every((entry) => !entry[1].includes("regex fallback")),
+  boundarySkipFallbackResult.logs.every((entry) => !entry[1].includes("正则回退")),
 );
 
 async function runInboundMetadataCleanupScenario() {
