@@ -414,9 +414,11 @@ function sceneMemberEntries() {
 }
 
 function makeRecallContext(results = makeResults()) {
+  const retrieveCalls = [];
   return {
     retriever: {
       async retrieve(params = {}) {
+        retrieveCalls.push(params);
         const rawLimit = typeof params.limit === "number" ? params.limit : results.length;
         const safeLimit = Math.max(1, Math.floor(rawLimit));
         return results.slice(0, safeLimit);
@@ -425,6 +427,7 @@ function makeRecallContext(results = makeResults()) {
         return { mode: "hybrid" };
       },
     },
+    retrieveCalls,
     store: {
       patchMetadata: async () => null,
       patchMetadataBatch: async () => 0,
@@ -483,9 +486,11 @@ describe("recall text cleanup", () => {
   });
 
   it("removes retrieval metadata from memory_recall content text but preserves details fields", async () => {
-    const tool = createTool(registerMemoryRecallTool, makeRecallContext());
+    const context = makeRecallContext();
+    const tool = createTool(registerMemoryRecallTool, context);
     const res = await tool.execute(null, { query: "test" });
 
+    assert.equal(context.retrieveCalls[0].source, "manual");
     assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
       "1. [m1] [cases:global] remember this",
       "2. [m2] [preferences:global] prefer concise diffs",

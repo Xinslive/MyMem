@@ -904,7 +904,7 @@ async function buildExplainReport(context: MemoryDashboardContext, url: URL) {
     limit,
     scopeFilter: filter.scopeFilter,
     category: filter.category,
-    source: "cli",
+    source: "auto-recall",
     hasFtsSupport: context.store.hasFtsSupport,
   });
   report.details.results = report.details.results.map((result) => {

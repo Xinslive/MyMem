@@ -156,6 +156,20 @@ describe("retriever BM25 query expansion gating", () => {
     assert.deepEqual(unspecifiedHarness.bm25Queries, ["服务挂了"]);
   });
 
+  it("propagates source through retrieveWithTrace", async () => {
+    const { retriever, bm25Queries } = createRetrieverHarness();
+
+    await retriever.retrieveWithTrace({
+      query: "服务挂了",
+      limit: 1,
+      source: "manual",
+    });
+
+    assert.equal(bm25Queries.length, 1);
+    assert.notEqual(bm25Queries[0], "服务挂了");
+    assert.match(bm25Queries[0], /crash/);
+  });
+
   it("honors retrieval.queryExpansion = false", async () => {
     const { retriever, bm25Queries } = createRetrieverHarness({
       queryExpansion: false,
@@ -341,8 +355,8 @@ describe("retriever BM25 query expansion gating", () => {
   });
 });
 
-describe("cli search source tagging", () => {
-  it("marks search requests as cli so query expansion stays scoped to interactive CLI recall", async () => {
+describe("console search source tagging", () => {
+  it("marks search requests as auto-recall so diagnostics match injected recall", async () => {
     const searchCalls = [];
     const logs = [];
 
@@ -378,11 +392,11 @@ describe("cli search source tagging", () => {
         },
         getLastDiagnostics() {
           return {
-            source: "cli",
+            source: "auto-recall",
             mode: "hybrid",
             originalQuery: "服务挂了",
-            bm25Query: "服务挂了 崩溃 crash error 报错 宕机",
-            queryExpanded: true,
+            bm25Query: "服务挂了",
+            queryExpanded: false,
             limit: 10,
             scopeFilter: undefined,
             category: undefined,
@@ -440,10 +454,11 @@ describe("cli search source tagging", () => {
     }
 
     assert.equal(searchCalls.length, 1);
-    assert.equal(searchCalls[0].source, "cli");
+    assert.equal(searchCalls[0].source, "auto-recall");
     assert.match(logs.join("\n"), /Retrieval diagnostics:/);
+    assert.match(logs.join("\n"), /Source: auto-recall/);
     assert.match(logs.join("\n"), /Original query: 服务挂了/);
-    assert.match(logs.join("\n"), /BM25 query: 服务挂了 崩溃 crash error 报错 宕机/);
+    assert.match(logs.join("\n"), /BM25 query: 服务挂了/);
     assert.match(logs.join("\n"), /Stages: min=3, rerankIn=3, rerank=3, hard=3, noise=3, diversity=3/);
     assert.match(logs.join("\n"), /Drops: limit -2 \(3->1\)/);
     assert.match(logs.join("\n"), /CLI search hit/);
@@ -478,11 +493,11 @@ describe("cli search source tagging", () => {
         },
         getLastDiagnostics() {
           return {
-            source: "cli",
+            source: "auto-recall",
             mode: "hybrid",
             originalQuery: "服务挂了",
-            bm25Query: "服务挂了 崩溃 crash error 报错 宕机",
-            queryExpanded: true,
+            bm25Query: "服务挂了",
+            queryExpanded: false,
             limit: 10,
             scopeFilter: undefined,
             category: undefined,
@@ -583,11 +598,11 @@ describe("cli search source tagging", () => {
         },
         getLastDiagnostics() {
           return {
-            source: "cli",
+            source: "auto-recall",
             mode: "hybrid",
             originalQuery: "服务挂了",
-            bm25Query: "服务挂了 崩溃 crash error 报错 宕机",
-            queryExpanded: true,
+            bm25Query: "服务挂了",
+            queryExpanded: false,
             limit: 10,
             scopeFilter: undefined,
             category: undefined,
@@ -662,11 +677,11 @@ describe("cli search source tagging", () => {
         message: "simulated json search failure",
       },
       diagnostics: {
-        source: "cli",
+        source: "auto-recall",
         mode: "hybrid",
         originalQuery: "服务挂了",
-        bm25Query: "服务挂了 崩溃 crash error 报错 宕机",
-        queryExpanded: true,
+        bm25Query: "服务挂了",
+        queryExpanded: false,
         limit: 10,
         vectorResultCount: 0,
         bm25ResultCount: 0,
@@ -790,11 +805,11 @@ describe("cli search source tagging", () => {
         message: "both vector and BM25 search failed: simulated embedded search failure, bm25 search failed after embed failure",
       },
       diagnostics: {
-        source: "cli",
+        source: "auto-recall",
         mode: "hybrid",
         originalQuery: "服务挂了",
-        bm25Query: "服务挂了 崩溃 crash error 报错 宕机",
-        queryExpanded: true,
+        bm25Query: "服务挂了",
+        queryExpanded: false,
         limit: 10,
         vectorResultCount: 0,
         bm25ResultCount: 0,

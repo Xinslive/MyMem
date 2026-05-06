@@ -10,7 +10,7 @@ import { getSmartDisplayCategoryTag } from "./reflection-metadata.js";
 import { redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 
-type ExplainSource = Extract<RetrievalContext["source"], "manual" | "cli">;
+type ExplainSource = RetrievalContext["source"];
 
 export interface RetrievalExplanation {
   status: "matched" | "empty" | "degraded";

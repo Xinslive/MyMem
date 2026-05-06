@@ -446,6 +446,7 @@ function formatJson(obj: any): string {
 }
 
 function formatRetrievalDiagnosticsLines(diagnostics: {
+  source?: string;
   originalQuery: string;
   bm25Query: string | null;
   queryExpanded: boolean;
@@ -477,6 +478,7 @@ function formatRetrievalDiagnosticsLines(diagnostics: {
 
   const lines = [
     "Retrieval diagnostics:",
+    `  • Source: ${diagnostics.source ?? "unknown"}`,
     `  • Original query: ${diagnostics.originalQuery}`,
     `  • BM25 query: ${diagnostics.bm25Query ?? "(disabled)"}`,
     `  • Query expanded: ${diagnostics.queryExpanded ? "Yes" : "No"}`,
@@ -812,7 +814,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         query,
         limit: category ? limit * 4 : limit,
         scopeFilter,
-        source: "cli",
+        source: "auto-recall",
       });
       results = filterResultsByMemoryCategory(results, category).slice(0, limit);
       captureSearchDiagnostics(retriever);
@@ -829,7 +831,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           query,
           limit: category ? limit * 4 : limit,
           scopeFilter,
-          source: "cli",
+          source: "auto-recall",
         });
         results = filterResultsByMemoryCategory(results, category).slice(0, limit);
         captureSearchDiagnostics(retryRetriever);
@@ -865,7 +867,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         limit,
         scopeFilter,
         category,
-        source: "cli",
+        source: "auto-recall",
         hasFtsSupport: context.store.hasFtsSupport,
       });
     } catch (error) {
@@ -1171,7 +1173,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
   // Search memories
   memory
     .command("search <query>")
-    .description("Search memories using hybrid retrieval")
+    .description("Search memories using the same retrieval source as auto-recall")
     .option("--scope <scope>", "Search within specific scope")
     .option("--category <category>", "Filter by category")
     .option("--limit <n>", "Maximum number of results", "10")

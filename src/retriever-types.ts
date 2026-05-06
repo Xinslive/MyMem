@@ -103,7 +103,7 @@ export interface RetrievalContext {
   limit: number;
   scopeFilter?: string[];
   category?: string;
-  /** Retrieval source: "manual" for user-triggered, "auto-recall" for system-initiated, "cli" for CLI commands. */
+  /** Retrieval source: "manual" for explicit recall, "auto-recall" for system-initiated or auto-recall-equivalent diagnostics, "cli" for legacy CLI callers. */
   source?: "manual" | "auto-recall" | "cli";
   /** Optional AbortSignal. When aborted, in-flight embedding calls cancel and
    *  the method rejects due to abort (often with AbortError or the signal's

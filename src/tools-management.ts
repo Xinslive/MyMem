@@ -223,7 +223,7 @@ export function registerMemoryDebugTool(
         name: "mymem_debug",
         label: "Memory Debug",
         description:
-          "Debug a specific bad or empty recall by running the full retrieval pipeline with trace details: stage drops, score ranges, selected sources, and timing.",
+          "Debug a specific bad or empty auto-recall by running the same retrieval source with trace details: stage drops, score ranges, selected sources, and timing.",
         parameters: Type.Object({
           query: Type.String({ description: "Problem query that returned poor, surprising, or zero memory results." }),
           limit: Type.Optional(
@@ -253,7 +253,7 @@ export function registerMemoryDebugTool(
             }
 
             const { results, trace } = await runtimeContext.retriever.retrieveWithTrace({
-              query, limit: safeLimit, scopeFilter, source: "manual",
+              query, limit: safeLimit, scopeFilter, source: "auto-recall",
             });
 
             const traceLines: string[] = [
@@ -387,7 +387,7 @@ export function registerMemoryExplainTool(
               limit: safeLimit,
               scopeFilter,
               category,
-              source: "manual",
+              source: "auto-recall",
               hasFtsSupport: runtimeContext.store.hasFtsSupport,
             });
 
@@ -910,7 +910,7 @@ export function registerMemoryExplainRankTool(
             query,
             limit: safeLimit,
             scopeFilter,
-            source: "manual",
+            source: "auto-recall",
           }, () => runtimeContext.store.count());
           if (results.length === 0) {
             return {

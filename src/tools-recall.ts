@@ -36,7 +36,7 @@ export function registerMemoryRecallTool(
       name: "mymem_recall",
       label: "Memory Recall",
       description:
-        "Explicitly search long-term memory when auto-recall did not provide enough context, before answering questions like \"what do you remember about...\", or when prior user preferences, project decisions, entities, lessons, or past outcomes could change the answer. Do not use for facts already present in the current prompt. Pass type=\"knowledge\" for stable/reference facts (profile, preferences, entities, patterns) or type=\"experience\" for past interactions and outcomes (events, cases).",
+        "Fallback manual memory recall. Use only when the current prompt and auto-recalled memories do not contain the memory needed to answer. Do not use for facts already present in the current prompt or injected auto-recall context. Useful before answering questions like \"what do you remember about...\" or when missing prior user preferences, project decisions, entities, lessons, or past outcomes could change the answer. Pass type=\"knowledge\" for stable/reference facts (profile, preferences, entities, patterns) or type=\"experience\" for past interactions and outcomes (events, cases).",
       parameters: Type.Object({
         query: Type.String({
           description: "Concrete memory search query; include user/project/entity names and the decision, preference, or past outcome you need.",
