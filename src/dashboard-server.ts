@@ -419,6 +419,10 @@ function dashboardStageLabel(name: string): string {
       return "硬阈值过滤";
     case "noise_filter":
       return "噪声过滤";
+    case "soft_cutoff":
+      return "软阈值过滤";
+    case "candidate_cap":
+      return "候选上限";
     case "rerank":
       return "重排";
     case "mmr_diversity":
@@ -2156,6 +2160,8 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
         hard_cutoff: "硬阈值过滤",
         rerank: "重排处理",
         noise_filter: "噪声过滤",
+        soft_cutoff: "软阈值过滤",
+        candidate_cap: "候选上限",
         mmr_diversity: "多样性处理",
         length_normalization: "长度归一",
         time_decay: "时间衰减",

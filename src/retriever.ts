@@ -435,6 +435,7 @@ export class MemoryRetriever {
     if (diagnostics) diagnostics.stageCounts.afterSoftMinScore = softFiltered.length;
 
     // 5. Candidate cap (before rerank — reduce API token cost)
+    if (trace && candidateCap) trace.startStage("candidate_cap", softFiltered.map((r) => r.entry.id));
     let capped: RetrievalResult[];
     if (candidateCap && softFiltered.length > candidateCap) {
       softFiltered.sort((a, b) => b.score - a.score);
@@ -442,7 +443,11 @@ export class MemoryRetriever {
     } else {
       capped = softFiltered;
     }
-    if (diagnostics) diagnostics.stageCounts.afterCandidateCap = capped.length;
+    if (trace && candidateCap) trace.endStage(capped.map((r) => r.entry.id), capped.map((r) => r.score));
+    if (diagnostics) {
+      diagnostics.stageCounts.afterCandidateCap = capped.length;
+      diagnostics.stageCounts.rerankInput = capped.length;
+    }
 
     // 6. Rerank (optional, via callback — runs after cheap filters to save API tokens)
     if (trace) trace.startStage("rerank", capped.map((r) => r.entry.id));

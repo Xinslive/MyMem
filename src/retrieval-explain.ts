@@ -67,6 +67,10 @@ function stageLabel(name: string): string {
       return "hardMinScore filter";
     case "noise_filter":
       return "noise filter";
+    case "soft_cutoff":
+      return "soft cutoff";
+    case "candidate_cap":
+      return "candidate cap";
     case "mmr_diversity":
       return "MMR diversity";
     case "length_normalization":

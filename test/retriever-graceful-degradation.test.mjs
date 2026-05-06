@@ -101,6 +101,32 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
     assert.deepEqual(bm25Limits, [40]);
   });
 
+  it("records candidate-cap truncation before rerank in traces", async () => {
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none", candidatePoolSize: 12 },
+      {
+        async bm25Search() {
+          return Array.from({ length: 5 }, (_, index) =>
+            buildResult(`candidate-${index + 1}`, `candidate ${index + 1}`),
+          );
+        },
+      },
+    );
+
+    const { trace } = await retriever.retrieveWithTrace({
+      query: "test",
+      limit: 2,
+      source: "manual",
+    });
+
+    const candidateCapStage = trace.stages.find((stage) => stage.name === "candidate_cap");
+    const rerankStage = trace.stages.find((stage) => stage.name === "rerank");
+    assert.ok(candidateCapStage);
+    assert.equal(candidateCapStage.inputCount, 5);
+    assert.equal(candidateCapStage.outputCount, 4);
+    assert.equal(rerankStage?.inputCount, candidateCapStage.outputCount);
+  });
+
   it("queues access retry when lifecycle metadata update fails without an external tracker", async () => {
     const result = buildResult("retry-access");
     const store = {
