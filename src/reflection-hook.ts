@@ -15,7 +15,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { MdMirrorWriter } from "./workspace-utils.js";
 import type { FeedbackLoop } from "./feedback-loop.js";
 
-import { DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_SESSION_TTL_MS, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS } from "./plugin-constants.js";
+import { DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_SESSION_TTL_MS, DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS, DEFAULT_REFLECTION_AGENT_ID, DEFAULT_REFLECTION_FALLBACK_AGENT_ID } from "./plugin-constants.js";
 import { join } from "node:path";
 import { mkdir, writeFile, appendFile } from "node:fs/promises";
 import { containsErrorSignal, summarizeErrorText, sha256Hex, normalizeErrorSignature, extractTextFromToolResult } from "./session-utils.js";
@@ -181,7 +181,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
   const reflectionMaxInputChars = config.memoryReflection?.maxInputChars ?? DEFAULT_REFLECTION_MAX_INPUT_CHARS;
   const reflectionTimeoutMs = config.memoryReflection?.timeoutMs ?? DEFAULT_REFLECTION_TIMEOUT_MS;
   const reflectionThinkLevel = config.memoryReflection?.thinkLevel ?? DEFAULT_REFLECTION_THINK_LEVEL;
-  const reflectionAgentId = asNonEmptyString(config.memoryReflection?.agentId);
+  const reflectionAgentId = asNonEmptyString(config.memoryReflection?.agentId) ?? DEFAULT_REFLECTION_AGENT_ID;
   const reflectionErrorReminderMaxEntries = parsePositiveInt(config.memoryReflection?.errorReminderMaxEntries) ?? DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES;
   const reflectionDedupeErrorSignals = config.memoryReflection?.dedupeErrorSignals !== false;
   const reflectionInjectMode = config.memoryReflection?.injectMode ?? "inheritance+derived";
@@ -189,14 +189,14 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
   const reflectionWriteLegacyCombined = config.memoryReflection?.writeLegacyCombined !== false;
   const warnedInvalidReflectionAgentIds = new Set<string>();
 
-  const resolveReflectionRunAgentId = (cfg: unknown, sourceAgentId: string): string => {
-    if (!reflectionAgentId) return sourceAgentId;
+  const resolveReflectionRunAgentId = (cfg: unknown): string => {
     if (isAgentDeclaredInConfig(cfg, reflectionAgentId)) return reflectionAgentId;
+    if (reflectionAgentId === DEFAULT_REFLECTION_FALLBACK_AGENT_ID) return DEFAULT_REFLECTION_FALLBACK_AGENT_ID;
     if (!warnedInvalidReflectionAgentIds.has(reflectionAgentId)) {
-      api.logger.warn(`memory-reflection: memoryReflection.agentId "${reflectionAgentId}" not found in cfg.agents.list; fallback to runtime agent "${sourceAgentId}".`);
+      api.logger.warn(`memory-reflection: memoryReflection.agentId "${reflectionAgentId}" not found in cfg.agents.list; fallback to agent "${DEFAULT_REFLECTION_FALLBACK_AGENT_ID}".`);
       warnedInvalidReflectionAgentIds.add(reflectionAgentId);
     }
-    return sourceAgentId;
+    return DEFAULT_REFLECTION_FALLBACK_AGENT_ID;
   };
 
   // ── Hook: after_tool_call (error signal collection) ──
@@ -389,7 +389,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       const timeIso = now.toISOString().split("T")[1].replace("Z", "");
       const timeHms = timeIso.split(".")[0];
       const timeCompact = timeIso.replace(/[:.]/g, "");
-      const reflectionRunAgentId = resolveReflectionRunAgentId(cfg, sourceAgentId);
+      const reflectionRunAgentId = resolveReflectionRunAgentId(cfg);
       const targetScope = isSystemBypassId(sourceAgentId) ? config.scopes?.default ?? "global" : scopeManager.getDefaultScope(sourceAgentId);
       const toolErrorSignals = sessionKey ? (reflectionErrorStateBySession.get(sessionKey)?.entries ?? []).slice(-reflectionErrorReminderMaxEntries) : [];
 

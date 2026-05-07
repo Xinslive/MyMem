@@ -14,6 +14,7 @@ import { buildReflectionPrompt, buildReflectionFallbackText } from "./session-re
 import { resolveAgentPrimaryModelRef, splitProviderModel } from "./agent-config-utils.js";
 import { withTimeout } from "./cli-utils.js";
 import { runWithReflectionTransientRetryOnce } from "./reflection-retry.js";
+import { INTERNAL_REFLECTION_ENV_FLAG } from "./plugin-constants.js";
 import type { EmbeddedPiRunner, ReflectionThinkLevel, ReflectionErrorSignal } from "./plugin-types.js";
 
 /**
@@ -50,7 +51,7 @@ export async function runReflectionViaCli(params: {
   return await new Promise<string>((resolve, reject) => {
     const child = spawn(cliBin, args, {
       cwd: params.workspaceDir,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: { ...process.env, NO_COLOR: "1", [INTERNAL_REFLECTION_ENV_FLAG]: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -81,7 +81,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.llm?.model, undefined);
     assert.equal(parsed.llm?.baseURL, undefined);
     assert.equal(parsed.llm?.timeoutMs, 90000);
-    assert.equal(parsed.memoryReflection?.agentId, "main");
+    assert.equal(parsed.memoryReflection?.agentId, "cron");
     assert.equal(parsed.memoryReflection?.timeoutMs, 90000);
     assert.equal(parsed.memoryReflection?.dbPath, undefined);
     assert.equal(parsed.memoryCompaction?.enabled, true);

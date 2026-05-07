@@ -16,7 +16,7 @@ const jiti = jitiFactory(import.meta.url, {
   },
 });
 
-const { readSessionConversationWithResetFallback } = jiti("../src/session-recovery-utils.ts");
+const { readSessionConversationWithResetFallback, buildReflectionPrompt } = jiti("../src/session-recovery-utils.ts");
 const { generateReflectionText } = jiti("../src/reflection-cli.ts");
 const { resolveRuntimeEmbeddedPiRunner } = jiti("../src/openclaw-extension-utils.ts");
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
@@ -115,14 +115,17 @@ function createEmbeddingServer() {
   });
 }
 
-function createPluginApiHarness({ pluginConfig, resolveRoot, reflectionText }) {
+function createPluginApiHarness({ pluginConfig, resolveRoot, reflectionText, onRunEmbedded }) {
   const eventHandlers = new Map();
 
   const api = {
     pluginConfig,
     runtime: {
       agent: {
-        runEmbeddedPiAgent: async () => ({ payloads: [{ text: reflectionText }] }),
+        runEmbeddedPiAgent: async (params) => {
+          onRunEmbedded?.(params);
+          return { payloads: [{ text: reflectionText }] };
+        },
       },
     },
     resolvePath(target) {
@@ -245,6 +248,7 @@ describe("memory reflection", () => {
         assert.equal(result.usedFallback, false);
         assert.match(result.text, /Keep responses concise/);
         assert.equal(seenParams.agentId, "reflection");
+        assert.equal(seenParams.sessionKey, "temp:memory-reflection");
         assert.equal(seenParams.workspaceDir, workDir);
         assert.equal(seenParams.disableTools, true);
         assert.equal(seenParams.disableMessageTool, true);
@@ -253,6 +257,14 @@ describe("memory reflection", () => {
       } finally {
         rmSync(workDir, { recursive: true, force: true });
       }
+    });
+
+    it("allows reflection prompts to extract nothing when there is no durable value", () => {
+      const prompt = buildReflectionPrompt("user: thanks\nassistant: you are welcome", 1000);
+
+      assert.match(prompt, /acceptable to extract nothing/i);
+      assert.match(prompt, /do not invent or force memories/i);
+      assert.match(prompt, /no valuable content to preserve/i);
     });
 
     it("does not keep deprecated extension API import probes", () => {
@@ -503,6 +515,7 @@ describe("memory reflection", () => {
       const dbPath = path.join(pluginWorkDir, "main-db");
       const reflectionDbPath = path.join(pluginWorkDir, "reflection-db");
       const sessionFile = path.join(pluginWorkDir, "session.jsonl");
+      let runParams;
       writeFileSync(
         sessionFile,
         [
@@ -521,6 +534,9 @@ describe("memory reflection", () => {
       const { api, eventHandlers } = createPluginApiHarness({
         resolveRoot: pluginWorkDir,
         reflectionText,
+        onRunEmbedded(params) {
+          runParams = params;
+        },
         pluginConfig: {
           dbPath,
           autoCapture: false,
@@ -577,6 +593,7 @@ describe("memory reflection", () => {
       assert.equal(mainRows.length, 0);
       assert.ok(reflectionRows.length > 0);
       assert.ok(reflectionRows.some((entry) => /keep status updates concise/i.test(entry.text)));
+      assert.equal(runParams?.agentId, "main", "missing default cron agent should fall back to main for reflection generation");
 
       const promptHooks = [...(eventHandlers.get("before_prompt_build") || [])]
         .sort((a, b) => (a.meta?.priority ?? 99) - (b.meta?.priority ?? 99));
@@ -593,6 +610,80 @@ describe("memory reflection", () => {
       assert.match(injected.join("\n"), /keep status updates concise/i);
       assert.match(injected.join("\n"), /<derived-focus>/);
       assert.match(injected.join("\n"), /Next run verify reflection isolation/);
+    });
+
+    it("uses the default cron agent for reflection generation when cron is declared", async () => {
+      const dbPath = path.join(pluginWorkDir, "main-db-cron-default");
+      const reflectionDbPath = path.join(pluginWorkDir, "reflection-db-cron-default");
+      const sessionFile = path.join(pluginWorkDir, "session-cron-default.jsonl");
+      let runParams;
+
+      writeFileSync(
+        sessionFile,
+        [
+          messageLine("user", "Please reflect with the dedicated cron agent.", 1),
+          messageLine("assistant", "Acknowledged.", 2),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const { api, eventHandlers } = createPluginApiHarness({
+        resolveRoot: pluginWorkDir,
+        reflectionText: "## Invariants\n- Always keep reflection generation isolated.",
+        onRunEmbedded(params) {
+          runParams = params;
+        },
+        pluginConfig: {
+          dbPath,
+          autoCapture: false,
+          autoRecall: false,
+          sessionStrategy: "memoryReflection",
+          memoryReflection: {
+            dbPath: reflectionDbPath,
+            storeToLanceDB: false,
+          },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: embeddingBaseURL,
+            dimensions: EMBEDDING_DIMENSIONS,
+          },
+        },
+      });
+
+      myMemPlugin.register(api);
+
+      const commandHooks = eventHandlers.get("command:new") || [];
+      const reflectionHook = commandHooks.find((hook) => hook.meta?.name === "mymem.memory-reflection.command-new");
+      assert.ok(reflectionHook);
+      await reflectionHook.handler(
+        {
+          action: "new",
+          sessionKey: "agent:main:session:reflection-cron-default",
+          timestamp: Date.now(),
+          context: {
+            cfg: {
+              agents: {
+                list: [
+                  { id: "main", model: { primary: "openai/gpt-main" } },
+                  { id: "cron", model: { primary: "openai/gpt-cron" } },
+                ],
+              },
+            },
+            workspaceDir: pluginWorkDir,
+            sessionEntry: {
+              sessionId: "reflection-cron-default",
+              sessionFile,
+            },
+          },
+        },
+        {},
+      );
+
+      assert.equal(runParams?.agentId, "cron");
+      assert.equal(runParams?.provider, "openai");
+      assert.equal(runParams?.model, "gpt-cron");
     });
 
     it("injects pending tool error signals into the next reflection prompt context", async () => {

@@ -19,7 +19,7 @@ import type {
   SessionPrimerConfig,
   SelfCorrectionLoopConfig,
 } from "./plugin-types.js";
-import { DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS } from "./plugin-constants.js";
+import { DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, DEFAULT_REFLECTION_AGENT_ID } from "./plugin-constants.js";
 
 /**
  * Parses and validates the plugin configuration.
@@ -310,7 +310,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         dbPath: asNonEmptyString(memoryReflectionRaw.dbPath),
         writeLegacyCombined: memoryReflectionRaw.writeLegacyCombined !== false,
         injectMode: reflectionInjectMode,
-        agentId: asNonEmptyString(memoryReflectionRaw.agentId) ?? "main",
+        agentId: asNonEmptyString(memoryReflectionRaw.agentId) ?? DEFAULT_REFLECTION_AGENT_ID,
         messageCount: reflectionMessageCount,
         maxInputChars: parsePositiveInt(memoryReflectionRaw.maxInputChars) ?? DEFAULT_REFLECTION_MAX_INPUT_CHARS,
         timeoutMs: parsePositiveInt(memoryReflectionRaw.timeoutMs) ?? DEFAULT_REFLECTION_TIMEOUT_MS,
@@ -328,7 +328,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         dbPath: undefined,
         writeLegacyCombined: true,
         injectMode: "inheritance+derived",
-        agentId: "main",
+        agentId: DEFAULT_REFLECTION_AGENT_ID,
         messageCount: reflectionMessageCount,
         maxInputChars: DEFAULT_REFLECTION_MAX_INPUT_CHARS,
         timeoutMs: DEFAULT_REFLECTION_TIMEOUT_MS,

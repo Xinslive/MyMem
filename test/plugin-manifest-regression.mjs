@@ -153,7 +153,7 @@ assertSchemaDefault("reasoningStrategyRecall.maxItems", 2);
 assertSchemaDefault("reasoningStrategyRecall.maxChars", 600);
 assertSchemaDefault("reasoningStrategyRecall.candidatePoolSize", 8);
 assertSchemaDefault("reasoningStrategyRecall.minScore", 0.62);
-assertSchemaDefault("memoryReflection.agentId", "main");
+assertSchemaDefault("memoryReflection.agentId", "cron");
 schemaAt("memoryReflection.dbPath");
 assertSchemaDefault("feedbackLoop.preventiveLessons.enabled", true);
 assertSchemaDefault("feedbackLoop.preventiveLessons.fromErrors", true);

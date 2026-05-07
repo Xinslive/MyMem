@@ -847,8 +847,8 @@
           },
           "agentId": {
             "type": "string",
-            "description": "Agent id used to run reflection generation. Defaults to main.",
-            "default": "main"
+            "description": "Agent id used to run reflection generation. Defaults to cron and falls back to main when cron is not declared.",
+            "default": "cron"
           },
           "messageCount": {
             "type": "integer",
@@ -1796,7 +1796,7 @@
     },
     "memoryReflection.agentId": {
       "label": "Reflection Agent Id",
-      "help": "Optional dedicated agent id used for reflection generation (e.g. memory-distiller)",
+      "help": "Optional dedicated agent id used for reflection generation. Defaults to cron; falls back to main when the configured agent is not declared.",
       "advanced": true
     },
     "memoryReflection.messageCount": {

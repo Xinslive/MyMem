@@ -577,6 +577,70 @@ describe("real before_prompt_build hook", () => {
     }
   });
 
+  it("skips auto-recall for internal reflection sessions before resolving agent rules", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "per-agent-auto-recall-reflection-"));
+    const debugLogs = [];
+    let retrieveCalls = 0;
+
+    const retriever = {
+      async retrieve() {
+        retrieveCalls += 1;
+        throw new Error("retrieve should not run for internal reflection sessions");
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      debugLogs,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallIncludeAgents: ["main"],
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {},
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: autoRecallHook }] = hooks;
+      const output = await autoRecallHook(
+        { prompt: "Reflect on this conversation.", sessionKey: "agent:main:explicit:memory-reflection-cli-1778139993841-2qye5w" },
+        { sessionId: "memory-reflection-cli-1778139993841-2qye5w", sessionKey: "agent:main:explicit:memory-reflection-cli-1778139993841-2qye5w", agentId: "main" },
+      );
+
+      assert.equal(output, undefined);
+      assert.equal(retrieveCalls, 0);
+      assert.deepEqual(debugLogs, []);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("skips auto-recall for fallback 'main' when whitelist excludes it", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "per-agent-auto-recall-"));
     const debugLogs = [];

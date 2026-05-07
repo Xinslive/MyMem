@@ -12,7 +12,9 @@ import { parseSmartMetadata, toLifecycleMemory, type SmartMemoryMetadata } from 
 import {
   buildAutoCaptureConversationKeyFromIngress,
   buildAutoCaptureConversationKeyFromSessionKey,
+  isInternalReflectionSessionKey,
 } from "./auto-capture-utils.js";
+import { INTERNAL_REFLECTION_ENV_FLAG } from "./plugin-constants.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { analyzeIntent, applyCategoryBoost, applyMemoryTypeBoost } from "./intent-analyzer.js";
 import { sanitizeForContext } from "./capture-detection.js";
@@ -288,6 +290,13 @@ export function registerAutoRecallHook(params: {
   }
 
   api.on("message_received", (event: any, ctx: any) => {
+    const sessionKey = typeof ctx?.sessionKey === "string"
+      ? ctx.sessionKey
+      : typeof event?.sessionKey === "string"
+        ? event.sessionKey
+        : "";
+    if (process.env[INTERNAL_REFLECTION_ENV_FLAG] === "1" || isInternalReflectionSessionKey(sessionKey)) return;
+
     const raw = extractTextContent(event.content)?.trim() || "";
     const text = raw.replace(/^(?:@\S+\s*|<@!?\d+>\s*)+/, "").trim();
     if (!text) return;
@@ -302,6 +311,8 @@ export function registerAutoRecallHook(params: {
   });
 
   api.on("before_prompt_build", async (event: any, ctx: any) => {
+    if (process.env[INTERNAL_REFLECTION_ENV_FLAG] === "1") return;
+
     // Skip auto-recall for sub-agent sessions
     const sessionKey = typeof ctx?.sessionKey === "string"
       ? ctx.sessionKey
@@ -309,6 +320,7 @@ export function registerAutoRecallHook(params: {
         ? event.sessionKey
         : "";
     if (sessionKey.includes(":subagent:")) return;
+    if (isInternalReflectionSessionKey(sessionKey)) return;
 
     // Per-agent inclusion/exclusion: autoRecallIncludeAgents takes precedence
     const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);

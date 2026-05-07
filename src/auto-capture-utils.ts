@@ -38,5 +38,9 @@ export function buildAutoCaptureConversationKeyFromSessionKey(sessionKey: string
  * Checks if a session key represents an internal reflection session.
  */
 export function isInternalReflectionSessionKey(sessionKey: unknown): boolean {
-  return typeof sessionKey === "string" && sessionKey.trim().startsWith("temp:memory-reflection");
+  if (typeof sessionKey !== "string") return false;
+  const trimmed = sessionKey.trim();
+  return trimmed.startsWith("temp:memory-reflection") ||
+    trimmed.includes(":temp:memory-reflection") ||
+    trimmed.includes(":memory-reflection-cli-");
 }

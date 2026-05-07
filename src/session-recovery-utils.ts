@@ -91,7 +91,7 @@ export function buildReflectionPrompt(
       .map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary} (sig:${e.signatureHash.slice(0, 8)})`)
       .join("\n")
     : "- (none)";
-  return `You are a helpful assistant with memory-reflection capabilities. Your task is to analyze the following conversation and extract key learnings, decisions, and patterns that should be captured for future reference.
+  return `You are a helpful assistant with memory-reflection capabilities. Your task is to analyze the following conversation and extract key learnings, decisions, and patterns that should be captured for future reference. If the conversation does not contain durable, future-useful information, it is acceptable to extract nothing; do not invent or force memories.
 
 ## Conversation
 ${clipped}
@@ -112,7 +112,9 @@ ${clipped}
 3. If there were tool errors, also consider what could be improved:
 ${errorHints}
 
-4. Format your output as a structured reflection with clear sections for:
+4. If there is no valuable content to preserve, say so briefly and leave the extraction sections empty or marked as none.
+
+5. Format your output as a structured reflection with clear sections for:
    - Decisions and their rationale
    - Key facts and context
    - User preferences
