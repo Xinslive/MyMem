@@ -20,6 +20,26 @@ describe("extraction prompts", () => {
     assert.match(prompt, /Python 代码风格/);
   });
 
+  it("does not attribute assistant suggestions as user preferences", () => {
+    const prompt = buildExtractionPrompt(
+      [
+        "user: 我有点困惑，笔记太乱了。",
+        "assistant: 建议你按项目标签整理笔记。",
+      ].join("\n"),
+      "User",
+    );
+
+    assert.match(prompt, /Assistant\/agent suggestions, recommendations, proposed plans, or advice/);
+    assert.match(prompt, /NOT user preferences, intentions, or decisions/);
+    assert.match(prompt, /unless the user explicitly accepts, confirms, or restates them as their own/);
+    assert.match(prompt, /不能写成“用户想要\/偏好\/决定”/);
+    assert.match(prompt, /只有用户明确说“对\/就按这个\/我想这样\/记住我偏好这样”/);
+    assert.match(prompt, /If the user asks for help or expresses confusion/);
+    assert.match(prompt, /Do NOT convert the assistant's advice into "the user wants\/prefers\/plans X"/);
+    assert.match(prompt, /Assistant suggests X/);
+    assert.match(prompt, /助手建议用户按项目标签整理笔记，这不是用户偏好/);
+  });
+
   it("keeps technical identifiers unchanged in extraction and merge prompts", () => {
     const extractionPrompt = buildExtractionPrompt("User: Use LanceDB with Number(...).", "User");
     assert.match(extractionPrompt, /code identifiers, API names, file paths, commands, URLs, config keys, model names/);

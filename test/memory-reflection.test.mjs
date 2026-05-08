@@ -267,6 +267,18 @@ describe("memory reflection", () => {
       assert.match(prompt, /no valuable content to preserve/i);
     });
 
+    it("does not summarize assistant suggestions as user preferences", () => {
+      const prompt = buildReflectionPrompt(
+        "user: 我有点困惑，笔记太乱了。\nassistant: 建议你按项目标签整理笔记。",
+        1000,
+      );
+
+      assert.match(prompt, /Only attribute preferences, intentions, or decisions to the user/i);
+      assert.match(prompt, /when the user explicitly said, confirmed, or restated them/i);
+      assert.match(prompt, /do not summarize that suggestion as the user's preference or plan/i);
+      assert.match(prompt, /不要把助手建议总结成“用户想要\/偏好\/决定”/);
+    });
+
     it("does not keep deprecated extension API import probes", () => {
       const source = readFileSync(
         path.resolve(testDir, "..", "src", "openclaw-extension-utils.ts"),

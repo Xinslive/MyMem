@@ -104,6 +104,9 @@ ${clipped}
    - Any errors or issues that were encountered and how they were resolved
    - Best practices or approaches discovered
 
+Only attribute preferences, intentions, or decisions to the user when the user explicitly said, confirmed, or restated them. If the assistant suggested an approach in response to the user's confusion, do not summarize that suggestion as the user's preference or plan unless the user accepted it.
+如果用户只是提出困惑，而助手给出建议，不要把助手建议总结成“用户想要/偏好/决定”；只有用户明确确认或复述为自己的意图时才可这样归因。
+
 2. For each finding:
    - Provide a clear, specific summary
    - Explain why this information is important to remember

@@ -37,6 +37,8 @@ ${conversationText}
 - Tool output, error logs, or boilerplate — including raw error messages, stack traces, API responses, JSON payloads, or log lines that appear in the conversation
 - Runtime scaffolding or orchestration wrappers such as "[Subagent Context]", "[Subagent Task]", bootstrap wrappers, task envelopes, or agent instructions — these are execution metadata, NEVER store them as memories
 - Recall queries / meta-questions: "Do you remember X?", "你还记得X吗?", "你知道我喜欢什么吗" — these are retrieval requests, NOT new information to store
+- Assistant/agent suggestions, recommendations, proposed plans, or advice — these are NOT user preferences, intentions, or decisions unless the user explicitly accepts, confirms, or restates them as their own
+- 助手/agent 提出的建议、方案、计划或劝告不能写成“用户想要/偏好/决定”；只有用户明确说“对/就按这个/我想这样/记住我偏好这样”时，才可归因给用户
 - Degraded or incomplete references: If the user mentions something vaguely ("that thing I said"), do NOT invent details or create a hollow memory
 - Code snippets or file content that happened to appear in the conversation (e.g. from a failed Read tool call) — these are NOT memories, they are transient tool artifacts
 - Error-failure pairs where the "solution" is generic advice (e.g. "retry the step", "check the error") rather than a specific, reusable fix
@@ -45,6 +47,9 @@ ${conversationText}
 # Memory Classification
 
 ## Core Decision Logic
+
+Attribute memories only to the speaker who actually asserted them.
+If the user asks for help or expresses confusion, and the assistant replies with advice, extract at most the user's problem context. Do NOT convert the assistant's advice into "the user wants/prefers/plans X" unless the user confirms it.
 
 | Question | Answer | Category |
 |----------|--------|----------|
@@ -70,6 +75,7 @@ ${conversationText}
 - "User prefers X" -> preferences (not profile)
 - "Encountered problem A, used solution B" -> cases (not events)
 - "General process for handling certain problems" -> patterns (not cases)
+- "Assistant suggests X" -> usually do NOT store; it is not a user preference/intent/decision unless the user explicitly accepts X
 
 # Two-Level Structure
 
@@ -112,6 +118,16 @@ Each memory contains two fields:
   "worth_storing": true,
   "abstract": "LanceDB 返回 BigInt 时，算术运算前要先用 Number(...) 转换。",
   "content": "当 LanceDB 返回 BigInt 数值时，做算术运算前要先用 Number(...) 包裹转换。"
+}
+\`\`\`
+
+## assistant advice is not user preference
+\`\`\`json
+{
+  "category": "preferences",
+  "worth_storing": false,
+  "abstract": "不要记录：助手建议用户按项目标签整理笔记，这不是用户偏好。",
+  "content": "用户只是表达整理笔记的困惑；按项目标签整理是助手建议，不能归因成用户想要或偏好这样做。"
 }
 \`\`\`
 
