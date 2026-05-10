@@ -43,6 +43,24 @@ describe("autoRecallTimeoutMs", () => {
   });
 });
 
+describe("autoRecallMinRepeated", () => {
+  it("preserves zero so same-session recall deduplication can be disabled", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      autoRecallMinRepeated: 0,
+    });
+    assert.equal(parsed.autoRecallMinRepeated, 0);
+  });
+
+  it("preserves string zero after config env resolution", () => {
+    const parsed = parsePluginConfig({
+      ...baseConfig(),
+      autoRecallMinRepeated: "0",
+    });
+    assert.equal(parsed.autoRecallMinRepeated, 0);
+  });
+});
+
 describe("autoRecallMaxQueryLength", () => {
   it("defaults to 2000 when not specified", () => {
     const parsed = parsePluginConfig(baseConfig());

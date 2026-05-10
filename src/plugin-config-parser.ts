@@ -21,6 +21,20 @@ import type {
 } from "./plugin-types.js";
 import { DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_TIMEOUT_MS, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS, DEFAULT_REFLECTION_AGENT_ID } from "./plugin-constants.js";
 
+function parseNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (!s) return undefined;
+    const resolved = resolveEnvVars(s);
+    const n = Number(resolved);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  return undefined;
+}
+
 /**
  * Parses and validates the plugin configuration.
  */
@@ -213,7 +227,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoCapture: cfg.autoCapture !== false,
     autoRecall: cfg.autoRecall !== false,
     autoRecallMinLength: parsePositiveInt(cfg.autoRecallMinLength) ?? 6,
-    autoRecallMinRepeated: parsePositiveInt(cfg.autoRecallMinRepeated) ?? 3,
+    autoRecallMinRepeated: parseNonNegativeInt(cfg.autoRecallMinRepeated) ?? 3,
     autoRecallMaxItems: parsePositiveInt(cfg.autoRecallMaxItems) ?? 5,
     autoRecallMaxChars: parsePositiveInt(cfg.autoRecallMaxChars) ?? 1000,
     autoRecallPerItemMaxChars: parsePositiveInt(cfg.autoRecallPerItemMaxChars) ?? 180,

@@ -239,8 +239,10 @@ export function createDecayEngine(
     applySearchBoost(results, now = Date.now()) {
       for (const r of results) {
         const ds = scoreOne(r.memory, now);
-        const tierFloor = Math.max(getTierFloor(r.memory.tier), ds.composite);
-        const multiplier = boostMin + ((1 - boostMin) * tierFloor);
+        const tierFloor = getTierFloor(r.memory.tier);
+        if (ds.composite >= tierFloor) continue;
+        const normalizedLifecycle = tierFloor > 0 ? ds.composite / tierFloor : 0;
+        const multiplier = boostMin + ((1 - boostMin) * Math.min(1, Math.max(0, normalizedLifecycle)));
         r.score *= Math.min(1, Math.max(boostMin, multiplier));
       }
     },
