@@ -366,7 +366,6 @@ export class MemoryRetriever {
       skipTimeDecay?: boolean;
       trace?: TraceCollector;
       diagnostics?: RetrievalDiagnostics;
-      preserveWhenHardFiltered?: boolean;
       rerank?: (results: RetrievalResult[]) => Promise<RetrievalResult[]>;
       /** Cap candidates before expensive rerank. Applied after noise filter. */
       candidateCap?: number;
@@ -376,7 +375,6 @@ export class MemoryRetriever {
       skipTimeDecay = false,
       trace,
       diagnostics,
-      preserveWhenHardFiltered = false,
       rerank,
       candidateCap,
     } = options;
@@ -458,12 +456,9 @@ export class MemoryRetriever {
     if (trace && candidateCap) trace.endStage(capped.map((r) => r.entry.id), capped.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterCandidateCap = capped.length;
 
-    // 8. Soft min-score pre-filter (before rerank -- cheap quality gate)
-    //    Skip when preserveWhenHardFiltered is active: the post-rerank hard filter
-    //    has a safety mechanism to keep at least one result in degraded mode;
-    //    pre-filtering could empty the candidate pool and defeat that mechanism.
+    // 8. Soft min-score pre-filter (before rerank -- cheap quality gate).
     let softFiltered: RetrievalResult[];
-    if (!preserveWhenHardFiltered && this.config.hardMinScore > 0) {
+    if (this.config.hardMinScore > 0) {
       const softThreshold = this.config.hardMinScore * 0.45;
       if (trace) trace.startStage("soft_cutoff", capped.map((r) => r.entry.id));
       softFiltered = capped.filter((r) => r.score >= softThreshold);
@@ -487,11 +482,7 @@ export class MemoryRetriever {
 
     // 10. Hard min-score filter
     if (trace) trace.startStage("hard_cutoff", reranked.map((r) => r.entry.id));
-    const strictHardFiltered = reranked.filter((r) => r.score >= this.config.hardMinScore);
-    const hardFiltered =
-      preserveWhenHardFiltered && strictHardFiltered.length === 0 && reranked.length > 0
-        ? reranked
-        : strictHardFiltered;
+    const hardFiltered = reranked.filter((r) => r.score >= this.config.hardMinScore);
     if (trace) trace.endStage(hardFiltered.map((r) => r.entry.id), hardFiltered.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterHardMinScore = hardFiltered.length;
 
@@ -843,11 +834,6 @@ export class MemoryRetriever {
       // Empty result sets are valid; only throw when both promises reject
       const bothFailed =
         vectorResult_?.status === "rejected" && bm25Result_?.status === "rejected";
-      const degraded =
-        diagnostics?.degraded === true ||
-        vectorResult_?.status === "rejected" ||
-        bm25Result_?.status === "rejected";
-
       if (bothFailed) {
         const vectorError = vectorResult_?.reason?.message || "unknown";
         const bm25Error = bm25Result_?.reason?.message || "unknown";
@@ -969,7 +955,6 @@ export class MemoryRetriever {
         skipTimeDecay,
         trace,
         diagnostics,
-        preserveWhenHardFiltered: degraded,
         rerank: rerankCallback,
         candidateCap: limit * 2,
       });

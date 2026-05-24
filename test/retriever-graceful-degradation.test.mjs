@@ -545,6 +545,49 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
     }
   });
 
+  it("auto-recall degradation still applies the final hardMinScore gate", async () => {
+    let releaseVector;
+    const vectorGate = new Promise((resolve) => {
+      releaseVector = resolve;
+    });
+    const lowScoreResult = {
+      ...buildResult("bm25-low-score", "loosely related lexical hit"),
+      score: 0.2,
+    };
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0.9, filterNoise: false, rerank: "none" },
+      {
+        async vectorSearch() {
+          await vectorGate;
+          return [buildResult("vector-late")];
+        },
+        async bm25Search() {
+          return [lowScoreResult];
+        },
+      },
+    );
+
+    try {
+      const started = Date.now();
+      const results = await retriever.retrieve({
+        query: "头痛",
+        limit: 1,
+        source: "auto-recall",
+        degradeAfterMs: 20,
+      });
+      const elapsed = Date.now() - started;
+
+      assert.ok(elapsed < 500, `degraded retrieval should return quickly, got ${elapsed}ms`);
+      assert.deepEqual(results, []);
+      const diagnostics = retriever.getLastDiagnostics();
+      assert.equal(diagnostics?.degraded, true);
+      assert.equal(diagnostics?.degradedReason, "partial_backend_result");
+      assert.equal(diagnostics?.stageCounts.afterHardMinScore, 0);
+    } finally {
+      releaseVector();
+    }
+  });
+
   it("manual retrieval does not use auto-recall degrade threshold", async () => {
     let releaseVector;
     const vectorGate = new Promise((resolve) => {
