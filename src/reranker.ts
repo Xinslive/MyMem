@@ -352,21 +352,23 @@ export async function rerankResults(
   }
 
   // Fallback: lightweight cosine similarity rerank.
-  // Uses BM25 base score (not the fused score) to avoid double-counting vector
-  // similarity — the fused score already incorporates vector search results.
+  // Treat the lightweight signal as a tie-breaker over the current cumulative
+  // score. Earlier stages may already have applied lifecycle, length, and
+  // learning penalties, so this must not rebuild a new base from raw BM25/cosine.
   try {
     const reranked = results.map((result) => {
       const cosineScore = cosineSimilarity(queryVector, result.entry.vector);
-      // BM25 confirms keyword relevance; cosine confirms semantic relevance.
-      // Neither alone is sufficient — blend them independently.
       const bm25Base = result.sources.bm25?.score ?? 0;
-      const combinedScore = bm25Base > 0
+      const rerankSignal = bm25Base > 0
         ? bm25Base * 0.3 + cosineScore * 0.7
         : cosineScore;
+      const normalizedSignal = clamp01(rerankSignal, 0);
+      const currentScore = clamp01(result.score, 0);
+      const lightweightMultiplier = 0.95 + normalizedSignal * 0.15;
 
       return {
         ...result,
-        score: clamp01(combinedScore, result.score),
+        score: clamp01(currentScore * lightweightMultiplier, currentScore),
         sources: {
           ...result.sources,
           reranked: { score: cosineScore },

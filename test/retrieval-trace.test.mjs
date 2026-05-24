@@ -6,6 +6,7 @@ const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 
 const { TraceCollector } = jiti("../src/retrieval-trace.ts");
 const { RetrievalStatsCollector } = jiti("../src/retrieval-stats.ts");
+const { buildDropSummary } = jiti("../src/retriever-utils.ts");
 
 // ============================================================================
 // TraceCollector tests
@@ -150,6 +151,93 @@ describe("TraceCollector zero-overhead", () => {
     trace?.endStage(["a"]);
     // Should complete without error
     assert.ok(true);
+  });
+});
+
+// ============================================================================
+// Diagnostics summary tests
+// ============================================================================
+
+describe("retrieval diagnostics drop summary", () => {
+  function diagnosticsWithCounts(stageCounts) {
+    return {
+      mode: "hybrid",
+      originalQuery: "test",
+      bm25Query: "test",
+      queryExpanded: false,
+      limit: 5,
+      vectorResultCount: 5,
+      bm25ResultCount: 5,
+      fusedResultCount: 10,
+      finalResultCount: stageCounts.afterHardMinScore ?? 1,
+      stageCounts: {
+        afterMinScore: 10,
+        afterCandidateCap: 10,
+        afterSoftMinScore: 10,
+        rerankInput: 10,
+        afterRerank: 10,
+        afterRecency: 10,
+        afterImportance: 10,
+        afterLengthNorm: 10,
+        afterTimeDecay: 10,
+        afterLearningPolicy: 10,
+        afterHardMinScore: 10,
+        afterNoiseFilter: 10,
+        afterDiversity: 10,
+        ...stageCounts,
+      },
+      dropSummary: [],
+    };
+  }
+
+  it("reports hard cutoff drops after rerank, using the current stage score", () => {
+    const drops = buildDropSummary(diagnosticsWithCounts({
+      afterSoftMinScore: 1,
+      rerankInput: 1,
+      afterRerank: 1,
+      afterHardMinScore: 0,
+    }));
+
+    const hardDrop = drops.find((drop) => drop.stage === "hardMinScore");
+    assert.deepEqual(hardDrop, {
+      stage: "hardMinScore",
+      before: 1,
+      after: 0,
+      dropped: 1,
+    });
+  });
+
+  it("orders equal drops by the real post-processing pipeline", () => {
+    const drops = buildDropSummary(diagnosticsWithCounts({
+      afterMinScore: 9,
+      afterRecency: 8,
+      afterImportance: 7,
+      afterLengthNorm: 6,
+      afterNoiseFilter: 5,
+      afterTimeDecay: 4,
+      afterLearningPolicy: 3,
+      afterDiversity: 2,
+      afterCandidateCap: 1,
+      afterSoftMinScore: 0,
+      afterRerank: 0,
+      afterHardMinScore: 0,
+    }));
+
+    assert.deepEqual(
+      drops.map((drop) => drop.stage),
+      [
+        "minScore",
+        "recencyBoost",
+        "importanceWeight",
+        "lengthNorm",
+        "noiseFilter",
+        "timeDecay",
+        "learningPolicy",
+        "diversity",
+        "candidateCap",
+        "softMinScore",
+      ],
+    );
   });
 });
 

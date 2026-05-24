@@ -232,7 +232,7 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   rerankProvider: "jina",
   rerankTimeoutMs: 5000,
   lengthNormAnchor: 500,
-  hardMinScore: 0.55,
+  hardMinScore: 0.7,
   timeDecayHalfLifeDays: 60,
   reinforcementFactor: 0.5,
   maxHalfLifeMultiplier: 3,

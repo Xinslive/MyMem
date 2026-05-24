@@ -205,7 +205,7 @@ assertSchemaEnumIncludes("admissionControl.preset", "high-recall");
 assertSchemaDefault("admissionControl.enabled", true);
 assertSchemaDefault("admissionControl.utilityMode", "off");
 assertSchemaDefault("retrieval.rerank", "cross-encoder");
-assertSchemaDefault("retrieval.hardMinScore", 0.55);
+assertSchemaDefault("retrieval.hardMinScore", 0.7);
 assertSchemaDefault("retrieval.candidatePoolSize", 12);
 assertSchemaDefault("retrieval.tagPrefixes", ["proj", "env", "team", "scope"]);
 assertAnyOfTypes("hookEnhancements.sessionPrimer", ["boolean", "object"]);

@@ -201,7 +201,7 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
 
   it("uses vector-only results when BM25 fails", async () => {
     const { retriever, bm25Queries } = createRetrieverHarness(
-      {},
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
       {
         async vectorSearch() {
           return [buildResult()];
@@ -237,7 +237,7 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
 
   it("uses bm25-only results when vector fails", async () => {
     const { retriever, bm25Queries } = createRetrieverHarness(
-      {},
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
       {
         async vectorSearch() {
           throw new Error("vector failed");

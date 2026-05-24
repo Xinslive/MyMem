@@ -189,7 +189,7 @@ function createContext() {
         recencyHalfLifeDays: 14,
         recencyWeight: 0.15,
         filterNoise: true,
-        hardMinScore: 0.55,
+        hardMinScore: 0.7,
         timeDecayHalfLifeDays: 60,
         tagPrefixes: ["proj", "env"],
       }),

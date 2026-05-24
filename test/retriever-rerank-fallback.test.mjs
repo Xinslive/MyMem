@@ -13,6 +13,7 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createRetriever } = jiti("../src/retriever.ts");
+const { rerankResults } = jiti("../src/reranker.ts");
 
 function buildResult(id = "memory-1", text = "test result") {
   return {
@@ -179,6 +180,55 @@ describe("Retriever Rerank Fallback", () => {
 
     assert.ok(results.length > 0, "Should return results");
     assert.ok(!fetchWasCalled, "Fetch should not be called when no API key");
+  });
+
+  it("preserves the current cumulative score as the lightweight fallback base", async () => {
+    const ranked = await rerankResults(
+      "exact keyword",
+      [1, 0],
+      [
+        {
+          entry: {
+            id: "score-chain",
+            text: "exact keyword",
+            vector: [1, 0],
+            category: "fact",
+            scope: "global",
+            importance: 1,
+            timestamp: Date.now(),
+            metadata: "{}",
+          },
+          score: 0.2,
+          sources: {
+            bm25: { score: 0.95, rank: 1 },
+            fused: { score: 0.95 },
+            learning: {
+              originalScore: 0.95,
+              utility: 0,
+              utilityBoost: 0,
+              explorationBoost: 0,
+              badRecallPenalty: 0.75,
+              finalScore: 0.2,
+            },
+          },
+        },
+      ],
+      {
+        rerank: "cross-encoder",
+        vectorWeight: 0.7,
+        bm25Weight: 0.3,
+      },
+      async () => new Set(["score-chain"]),
+      { debug() {}, warn() {} },
+    );
+
+    assert.equal(ranked.length, 1);
+    assert.ok(
+      ranked[0].score < 0.23,
+      `fallback rerank must not rebuild from raw BM25/cosine scores, got ${ranked[0].score}`,
+    );
+    assert.equal(ranked[0].sources.learning.finalScore, 0.2);
+    assert.equal(ranked[0].sources.reranked.score, 1);
   });
 
   it("aborts rerank when external signal is already aborted (falls back to cosine)", async () => {
