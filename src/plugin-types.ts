@@ -216,6 +216,10 @@ export interface PluginConfig {
   };
   recallPrefix?: {
     categoryField?: string;
+    verbose?: boolean;
+    includeScope?: boolean;
+    includeSource?: boolean;
+    includeTier?: boolean;
   };
   telemetry?: {
     persist: boolean;

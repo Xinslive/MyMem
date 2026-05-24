@@ -1313,12 +1313,13 @@ describe("recall text cleanup", () => {
 
     assert.ok(output, "expected recall output");
     // metadata.folder replaces the built-in category in the prefix
-    assert.match(output.prependContext, /\[Goals:/);
-    assert.doesNotMatch(output.prependContext, /\[other:/);
+    assert.match(output.prependContext, /\[Goals\] \[2024-05-30\]/);
+    assert.doesNotMatch(output.prependContext, /\[other\]/);
+    assert.doesNotMatch(output.prependContext, /\[Goals:/);
     // Date is appended from timestamp
     assert.match(output.prependContext, /2024-05-30/);
-    // Source suffix is present
-    assert.match(output.prependContext, /\(manual\)/);
+    // Source suffix is hidden in the default compact prefix
+    assert.doesNotMatch(output.prependContext, /\(manual\)/);
   });
 
   it("falls back to built-in category when categoryField is configured but absent from metadata", async () => {
@@ -1345,7 +1346,8 @@ describe("recall text cleanup", () => {
     assert.ok(output, "expected recall output");
     assert.match(output.prependContext, /prefer short commit messages/);
     // Falls back to built-in category (parseSmartMetadata maps "preference" → "preferences")
-    assert.match(output.prependContext, /\[preferences:global\]/);
+    assert.match(output.prependContext, /\[preferences\] \[\d{4}-\d{2}-\d{2}\]/);
+    assert.doesNotMatch(output.prependContext, /\[preferences:global\]/);
     assert.doesNotMatch(output.prependContext, /\[Goals:/);
   });
 
@@ -1374,11 +1376,12 @@ describe("recall text cleanup", () => {
     assert.ok(output, "expected recall output");
     assert.match(output.prependContext, /prefer short commit messages/);
     // No categoryField configured — folder is ignored, built-in category used
-    assert.match(output.prependContext, /\[preferences:global\]/);
+    assert.match(output.prependContext, /\[preferences\] \[\d{4}-\d{2}-\d{2}\]/);
+    assert.doesNotMatch(output.prependContext, /\[preferences:global\]/);
     assert.doesNotMatch(output.prependContext, /\[Preferences:/);
   });
 
-  it("includes tier prefix in recall line when tier metadata is present", async () => {
+  it("uses compact recall prefixes by default even when tier metadata is present", async () => {
     const hook = makeAutoRecallHarness(workspaceDir, [
       {
         entry: {
@@ -1414,11 +1417,66 @@ describe("recall text cleanup", () => {
     );
 
     assert.ok(output, "expected recall output");
-    // Both entries should have a tier prefix (first char of tier, uppercased, in brackets)
     const lines = output.prependContext.split("\n").filter((l) => l.startsWith("- ["));
     assert.ok(lines.length >= 2, "expected at least 2 recall lines");
     for (const line of lines) {
-      assert.match(line, /^- \[[A-Z]\]\[/, "recall line should start with tier prefix [X][");
+      assert.match(line, /^- \[[a-z]+\] \[\d{4}-\d{2}-\d{2}\] /, "recall line should use compact [category] [date] prefix");
+      assert.doesNotMatch(line, /^- \[[A-Z]\]\[/, "compact prefix should hide tier by default");
+      assert.doesNotMatch(line, /:global\]/, "compact prefix should hide global scope by default");
     }
+  });
+
+  it("can restore verbose recall prefixes for diagnostics", async () => {
+    const ts = new Date("2024-05-30T00:00:00.000Z").getTime();
+    const hook = makeAutoRecallHarness(workspaceDir, [
+      {
+        entry: {
+          id: "verbose-1",
+          text: "prefer exact recall diagnostics",
+          category: "preference",
+          scope: "agent:main",
+          importance: 0.9,
+          timestamp: ts,
+          metadata: JSON.stringify({ tier: "working", source: "auto-capture" }),
+        },
+        score: 0.9,
+        sources: { vector: { score: 0.9, rank: 1 } },
+      },
+    ], { recallPrefix: { verbose: true } });
+
+    const output = await hook(
+      { prompt: "What are my recall diagnostics preferences?" },
+      { sessionId: "verbose-prefix-test", sessionKey: "agent:main:session:verbose-prefix-test", agentId: "main" },
+    );
+
+    assert.ok(output, "expected recall output");
+    assert.match(output.prependContext, /\[W\]\[preferences:agent:main\] 2024-05-30 \(auto-capture\)/);
+  });
+
+  it("can include selected metadata in compact recall prefixes", async () => {
+    const ts = new Date("2024-05-30T00:00:00.000Z").getTime();
+    const hook = makeAutoRecallHarness(workspaceDir, [
+      {
+        entry: {
+          id: "compact-metadata-1",
+          text: "project-specific memory prefix details",
+          category: "other",
+          scope: "project:mymem",
+          importance: 0.9,
+          timestamp: ts,
+          metadata: JSON.stringify({ tier: "working", source: "manual" }),
+        },
+        score: 0.9,
+        sources: { vector: { score: 0.9, rank: 1 } },
+      },
+    ], { recallPrefix: { includeScope: true, includeSource: true, includeTier: true } });
+
+    const output = await hook(
+      { prompt: "What are my project prefix details?" },
+      { sessionId: "compact-metadata-prefix-test", sessionKey: "agent:main:session:compact-metadata-prefix-test", agentId: "main" },
+    );
+
+    assert.ok(output, "expected recall output");
+    assert.match(output.prependContext, /\[patterns\] \[project:mymem\] \[2024-05-30\] \[manual\] \[working\]/);
   });
 });

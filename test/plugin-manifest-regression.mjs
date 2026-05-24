@@ -127,6 +127,7 @@ for (const key of [
   "autoRecallMaxItems",
   "autoRecallMaxChars",
   "autoRecallPerItemMaxChars",
+  "recallPrefix",
 ]) {
   schemaAt(key);
 }
@@ -148,6 +149,10 @@ assertSchemaDefault("autoRecallTimeoutMs", 20000);
 assertSchemaDefault("autoRecallMaxQueryLength", 2000);
 assertSchemaDefault("maxRecallPerTurn", 10);
 assertSchemaDefault("recallMode", "full");
+assertSchemaDefault("recallPrefix.verbose", false);
+assertSchemaDefault("recallPrefix.includeScope", false);
+assertSchemaDefault("recallPrefix.includeSource", false);
+assertSchemaDefault("recallPrefix.includeTier", false);
 assertSchemaDefault("reasoningStrategyRecall.enabled", true);
 assertSchemaDefault("reasoningStrategyRecall.maxItems", 2);
 assertSchemaDefault("reasoningStrategyRecall.maxChars", 600);

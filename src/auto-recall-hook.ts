@@ -96,6 +96,70 @@ function isCompiledReasoningPattern(result: RecallResult): boolean {
   return meta.memory_category === "patterns" && meta.reasoning_strategy === true;
 }
 
+function normalizeRecallPrefixScope(scope: string): string | null {
+  if (!scope || scope === "global") return null;
+  if (scope === "agent:main") return null;
+  if (scope.startsWith("agent:")) {
+    const agent = scope.slice("agent:".length);
+    return agent && agent !== "main" ? `agent:${agent}` : null;
+  }
+  return scope;
+}
+
+function parseRecallPrefixMetadata(metadata?: string): Record<string, unknown> {
+  if (!metadata) return {};
+  try {
+    const parsed = JSON.parse(metadata) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function buildRecallLinePrefix(params: {
+  category: MemoryCategory | string;
+  scope: string;
+  timestamp: number;
+  source?: string;
+  tier?: string;
+  metadata?: string;
+  config: PluginConfig["recallPrefix"];
+}): string {
+  const rawMeta = parseRecallPrefixMetadata(params.metadata);
+  const categoryFieldName = params.config?.categoryField;
+  const categoryOverride = categoryFieldName && typeof rawMeta[categoryFieldName] === "string"
+    ? rawMeta[categoryFieldName].trim()
+    : "";
+  const effectiveCategory = categoryOverride || params.category;
+  const datePart = params.timestamp
+    ? new Date(params.timestamp).toISOString().slice(0, 10)
+    : "";
+
+  if (params.config?.verbose === true) {
+    const tierPrefix = params.tier ? `[${params.tier.charAt(0).toUpperCase()}]` : "";
+    const parts = [`${tierPrefix}[${effectiveCategory}:${params.scope}]`];
+    if (datePart) parts.push(datePart);
+    if (params.source) parts.push(`(${params.source})`);
+    return parts.join(" ");
+  }
+
+  const parts = [`[${effectiveCategory}]`];
+  const normalizedScope = normalizeRecallPrefixScope(params.scope);
+  if (params.config?.includeScope === true && normalizedScope) {
+    parts.push(`[${normalizedScope}]`);
+  }
+  if (datePart) parts.push(`[${datePart}]`);
+  if (params.config?.includeSource === true && params.source) {
+    parts.push(`[${params.source}]`);
+  }
+  if (params.config?.includeTier === true && params.tier) {
+    parts.push(`[${params.tier}]`);
+  }
+  return parts.join(" ");
+}
+
 function formatReasoningStrategyLine(result: RecallResult, maxChars: number): RecallSelection {
   const meta = result.entry._parsedMeta ?? parseSmartMetadata(result.entry.metadata, toSmartMetadataEntry(result.entry));
   const strategyKind = typeof meta.strategy_kind === "string" ? meta.strategy_kind : "strategy";
@@ -554,36 +618,19 @@ export function registerAutoRecallHook(params: {
       const preBudgetCandidates = governanceEligible.map((r: RecallResult) => {
         const metaObj = r.entry._parsedMeta ?? parseSmartMetadata(r.entry.metadata, toSmartMetadataEntry(r.entry));
         const displayCategory = metaObj.memory_category || r.entry.category;
-        const displayTier = metaObj.tier || "";
-        const tierPrefix = displayTier ? "[" + displayTier.charAt(0).toUpperCase() + "]" : "";
-        const buildPrefix = () => {
-          const categoryFieldName = config.recallPrefix?.categoryField;
-          let effectiveCategory: MemoryCategory | string = displayCategory;
-          if (categoryFieldName) {
-            try {
-              const rawMeta: Record<string, unknown> = r.entry.metadata
-                ? (JSON.parse(r.entry.metadata) as Record<string, unknown>)
-                : {};
-              const fieldValue = rawMeta[categoryFieldName];
-              if (typeof fieldValue === "string" && fieldValue) {
-                effectiveCategory = fieldValue;
-              }
-            } catch {
-              // malformed metadata
-            }
-          }
-          const base = tierPrefix + "[" + effectiveCategory + ":" + r.entry.scope + "]";
-          const parts: string[] = [base];
-          if (r.entry.timestamp)
-            parts.push(new Date(r.entry.timestamp).toISOString().slice(0, 10));
-          if (metaObj.source) parts.push("(" + metaObj.source + ")");
-          return parts.join(" ");
-        };
         const contentText = recallMode === "summary"
           ? (metaObj.summary || r.entry.text)
           : (metaObj.content || r.entry.text);
         const summary = sanitizeForContext(contentText, effectivePerItemMaxChars);
-        const linePrefix = "- " + buildPrefix() + " ";
+        const linePrefix = "- " + buildRecallLinePrefix({
+          category: displayCategory,
+          scope: r.entry.scope,
+          timestamp: r.entry.timestamp,
+          source: typeof metaObj.source === "string" ? metaObj.source : undefined,
+          tier: metaObj.tier,
+          metadata: r.entry.metadata,
+          config: config.recallPrefix,
+        }) + " ";
         const line = linePrefix + summary;
         return {
           id: r.entry.id,

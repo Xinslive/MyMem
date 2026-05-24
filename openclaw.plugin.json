@@ -1600,6 +1600,31 @@
       "help": "Candidate pool cap used only for auto-recall. Default: 12 for balanced retrieval.",
       "advanced": true
     },
+    "recallPrefix.categoryField": {
+      "label": "Recall Prefix Category Field",
+      "help": "Optional metadata field to display as the memory category in auto-recall prefixes.",
+      "advanced": true
+    },
+    "recallPrefix.verbose": {
+      "label": "Verbose Recall Prefix",
+      "help": "Restore legacy auto-recall prefixes with tier, category:scope, date, and source.",
+      "advanced": true
+    },
+    "recallPrefix.includeScope": {
+      "label": "Show Recall Scope",
+      "help": "Include non-default scope in compact auto-recall prefixes.",
+      "advanced": true
+    },
+    "recallPrefix.includeSource": {
+      "label": "Show Recall Source",
+      "help": "Include memory source in compact auto-recall prefixes.",
+      "advanced": true
+    },
+    "recallPrefix.includeTier": {
+      "label": "Show Recall Tier",
+      "help": "Include memory tier in compact auto-recall prefixes.",
+      "advanced": true
+    },
     "recallMode": {
       "label": "Recall Mode",
       "help": "Auto-recall depth: full (default), summary, adaptive (intent-based category routing), off.",
