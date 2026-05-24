@@ -74,6 +74,7 @@ function makePluginConfig(workDir) {
     dbPath: path.join(workDir, "db"),
     memoryReflection: {
       dbPath: reflectionDbPath,
+      injectMode: "inheritance+derived",
     },
     embedding: {
       apiKey: "test-api-key",

@@ -121,7 +121,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   const reflectionInjectMode: ReflectionInjectMode =
     injectModeRaw === "inheritance-only" || injectModeRaw === "inheritance+derived"
       ? injectModeRaw
-      : "inheritance+derived";
+      : "inheritance-only";
   const reflectionStoreToLanceDB =
     sessionStrategy === "memoryReflection" &&
     (memoryReflectionRaw?.storeToLanceDB !== false);
@@ -341,7 +341,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         storeToLanceDB: reflectionStoreToLanceDB,
         dbPath: undefined,
         writeLegacyCombined: true,
-        injectMode: "inheritance+derived",
+        injectMode: "inheritance-only",
         agentId: DEFAULT_REFLECTION_AGENT_ID,
         messageCount: reflectionMessageCount,
         maxInputChars: DEFAULT_REFLECTION_MAX_INPUT_CHARS,
@@ -523,6 +523,10 @@ export function parsePluginConfig(value: unknown): PluginConfig {
               typeof (cfg.recallPrefix as Record<string, unknown>).categoryField === "string"
                 ? ((cfg.recallPrefix as Record<string, unknown>).categoryField as string)
                 : undefined,
+            verbose: (cfg.recallPrefix as Record<string, unknown>).verbose === true,
+            includeScope: (cfg.recallPrefix as Record<string, unknown>).includeScope === true,
+            includeSource: (cfg.recallPrefix as Record<string, unknown>).includeSource === true,
+            includeTier: (cfg.recallPrefix as Record<string, unknown>).includeTier === true,
           }
         : undefined,
     telemetry: normalizeTelemetryConfig(cfg.telemetry),

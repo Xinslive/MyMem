@@ -184,7 +184,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
   const reflectionAgentId = asNonEmptyString(config.memoryReflection?.agentId) ?? DEFAULT_REFLECTION_AGENT_ID;
   const reflectionErrorReminderMaxEntries = parsePositiveInt(config.memoryReflection?.errorReminderMaxEntries) ?? DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES;
   const reflectionDedupeErrorSignals = config.memoryReflection?.dedupeErrorSignals !== false;
-  const reflectionInjectMode = config.memoryReflection?.injectMode ?? "inheritance+derived";
+  const reflectionInjectMode = config.memoryReflection?.injectMode ?? "inheritance-only";
   const reflectionStoreToLanceDB = config.memoryReflection?.storeToLanceDB !== false;
   const reflectionWriteLegacyCombined = config.memoryReflection?.writeLegacyCombined !== false;
   const warnedInvalidReflectionAgentIds = new Set<string>();

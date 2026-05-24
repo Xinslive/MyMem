@@ -205,6 +205,37 @@
         "default": 12,
         "description": "Candidate pool cap used for auto-recall. Lower values reduce startup latency while retrieval.candidatePoolSize can remain larger for internal retrieval paths."
       },
+      "recallPrefix": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Controls metadata shown before each auto-recalled memory. Default is compact: [category] [YYYY-MM-DD].",
+        "properties": {
+          "categoryField": {
+            "type": "string",
+            "description": "Optional metadata field to use instead of the built-in memory category."
+          },
+          "verbose": {
+            "type": "boolean",
+            "default": false,
+            "description": "Restore the legacy verbose prefix with tier, category:scope, date, and source."
+          },
+          "includeScope": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include non-default scope in compact prefixes. global and agent:main remain hidden."
+          },
+          "includeSource": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include memory source in compact prefixes."
+          },
+          "includeTier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include memory tier in compact prefixes."
+          }
+        }
+      },
       "maxRecallPerTurn": {
         "type": "integer",
         "minimum": 1,
@@ -843,7 +874,7 @@
               "inheritance-only",
               "inheritance+derived"
             ],
-            "default": "inheritance+derived"
+            "default": "inheritance-only"
           },
           "agentId": {
             "type": "string",
@@ -1791,7 +1822,7 @@
     },
     "memoryReflection.injectMode": {
       "label": "Reflection Inject Mode",
-      "help": "inheritance-only or inheritance+derived",
+      "help": "inheritance-only or inheritance+derived; defaults to inheritance-only",
       "advanced": true
     },
     "memoryReflection.agentId": {

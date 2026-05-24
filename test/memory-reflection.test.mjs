@@ -558,6 +558,7 @@ describe("memory reflection", () => {
             dbPath: reflectionDbPath,
             storeToLanceDB: true,
             writeLegacyCombined: false,
+            injectMode: "inheritance+derived",
           },
           embedding: {
             provider: "openai-compatible",
@@ -1709,6 +1710,15 @@ describe("memory reflection", () => {
         memoryReflection: {},
       });
       assert.equal(parsed.memoryReflection.writeLegacyCombined, true);
+    });
+
+    it("defaults injectMode=inheritance-only for memoryReflection config", () => {
+      const parsed = parsePluginConfig({
+        ...baseConfig(),
+        sessionStrategy: "memoryReflection",
+        memoryReflection: {},
+      });
+      assert.equal(parsed.memoryReflection.injectMode, "inheritance-only");
     });
 
     it("allows disabling legacy combined reflection writes", () => {
