@@ -141,9 +141,9 @@ function createStore({ searchResults = [], byId = {}, reflectionEntries = [] } =
 }
 
 describe("hookEnhancements config", () => {
-  it("defaults every enhancement to enabled with structured primer and self-correction config", () => {
+  it("defaults bad recall feedback off while keeping other enhancements enabled", () => {
     const config = baseConfig();
-    assert.equal(config.hookEnhancements.badRecallFeedback, true);
+    assert.equal(config.hookEnhancements.badRecallFeedback, false);
     assert.equal(config.hookEnhancements.correctionDiff, true);
     assert.equal(config.hookEnhancements.toolErrorPlaybook, true);
     assert.equal(config.hookEnhancements.dangerousToolHints, true);
@@ -428,7 +428,7 @@ describe("hook enhancement registration", () => {
     const state = createHookEnhancementState();
     registerHookEnhancements({
       api,
-      config: baseConfig(),
+      config: baseConfig({ hookEnhancements: { badRecallFeedback: true } }),
       store,
       embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
       scopeManager: createScopeManager(),
@@ -466,7 +466,7 @@ describe("hook enhancement registration", () => {
     const state = createHookEnhancementState();
     registerHookEnhancements({
       api,
-      config: baseConfig(),
+      config: baseConfig({ hookEnhancements: { badRecallFeedback: true } }),
       store,
       embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
       scopeManager: createScopeManager(),

@@ -528,7 +528,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     telemetry: normalizeTelemetryConfig(cfg.telemetry),
     hookEnhancements: hookEnhancementsRaw
       ? {
-          badRecallFeedback: hookEnhancementsRaw.badRecallFeedback !== false,
+          badRecallFeedback: hookEnhancementsRaw.badRecallFeedback === true,
           correctionDiff: hookEnhancementsRaw.correctionDiff !== false,
           toolErrorPlaybook: hookEnhancementsRaw.toolErrorPlaybook !== false,
           dangerousToolHints: hookEnhancementsRaw.dangerousToolHints !== false,

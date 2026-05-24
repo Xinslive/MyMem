@@ -1326,9 +1326,9 @@
       "hookEnhancements": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Default-on hook-level memory enhancements for recall quality, correction handling, tool safety hints, privacy guardrails, and context budgeting.",
+        "description": "Hook-level memory enhancements for recall quality, correction handling, tool safety hints, privacy guardrails, and context budgeting.",
         "properties": {
-          "badRecallFeedback": { "type": "boolean", "default": true },
+          "badRecallFeedback": { "type": "boolean", "default": false },
           "correctionDiff": { "type": "boolean", "default": true },
           "toolErrorPlaybook": { "type": "boolean", "default": true },
           "dangerousToolHints": { "type": "boolean", "default": true },
@@ -1998,7 +1998,7 @@
     },
     "hookEnhancements.badRecallFeedback": {
       "label": "Bad Recall Feedback",
-      "help": "Adjust memory metadata when recalled memories are later corrected or rejected.",
+      "help": "Adjust memory metadata when recalled memories are later corrected or rejected. Disabled by default because auto-recall context may be hidden from the user.",
       "advanced": true
     },
     "hookEnhancements.correctionDiff": {

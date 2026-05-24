@@ -899,7 +899,7 @@ export function recordInjectedMemoriesForEnhancements(params: {
 
 export function createDefaultHookEnhancementsConfig() {
   return {
-    badRecallFeedback: true,
+    badRecallFeedback: false,
     correctionDiff: true,
     toolErrorPlaybook: true,
     dangerousToolHints: true,
