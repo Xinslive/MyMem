@@ -592,6 +592,9 @@ export function registerHookEnhancements(params: {
   const batchStore = store as StoreWithBatchMetadata;
   const reflectionStore = params.reflectionStore ?? store;
   const state = params.state ?? createHookEnhancementState();
+  const recordToolFailures =
+    enhancementEnabled(config, "toolErrorPlaybook") ||
+    Boolean(feedbackLoop && config.feedbackLoop?.preventiveLessons?.fromErrors === true);
 
   api.on("after_tool_call", (event: any, ctx: any) => {
     const sessionKey = getSessionKey(event, ctx);
@@ -600,7 +603,7 @@ export function registerHookEnhancements(params: {
     const text = extractToolText(event);
     session.lastTouchedFiles = extractTouchedFiles(text).reduce((acc, file) => uniquePush(acc, file), session.lastTouchedFiles);
     const failed = event?.success === false || event?.error || /\b(error|failed|exception|traceback)\b/i.test(text);
-    if (failed) {
+    if (failed && recordToolFailures) {
       const toolName = extractToolName(event);
       session.lastToolError = clip(`${toolName}: ${text}`, 1_000);
       feedbackLoop?.onPreventiveLessonEvidence({
@@ -901,7 +904,7 @@ export function createDefaultHookEnhancementsConfig() {
   return {
     badRecallFeedback: false,
     correctionDiff: true,
-    toolErrorPlaybook: true,
+    toolErrorPlaybook: false,
     dangerousToolHints: true,
     contextBudget: true,
     privacyGuard: true,

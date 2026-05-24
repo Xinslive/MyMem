@@ -699,7 +699,60 @@ describe("memory reflection", () => {
       assert.equal(runParams?.model, "gpt-cron");
     });
 
-    it("injects pending tool error signals into the next reflection prompt context", async () => {
+    it("does not inject tool error signals by default", async () => {
+      const dbPath = path.join(pluginWorkDir, "main-db");
+      const reflectionDbPath = path.join(pluginWorkDir, "reflection-db");
+      const { api, eventHandlers } = createPluginApiHarness({
+        resolveRoot: pluginWorkDir,
+        reflectionText: "## Invariants\n- Keep reflection focused on durable lessons.",
+        pluginConfig: {
+          dbPath,
+          autoCapture: false,
+          autoRecall: false,
+          sessionStrategy: "memoryReflection",
+          memoryReflection: {
+            dbPath: reflectionDbPath,
+            storeToLanceDB: false,
+          },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: embeddingBaseURL,
+            dimensions: EMBEDDING_DIMENSIONS,
+          },
+        },
+      });
+
+      myMemPlugin.register(api);
+
+      const afterToolHooks = eventHandlers.get("after_tool_call") || [];
+      for (const hook of afterToolHooks) {
+        hook.handler(
+          { toolName: "shell", error: "Error: fixture generation failed with ENOENT" },
+          { sessionKey: "agent:main:session:error-reminder-default-off", agentId: "main" },
+        );
+      }
+
+      const promptHooks = [...(eventHandlers.get("before_prompt_build") || [])]
+        .sort((a, b) => (a.meta?.priority ?? 99) - (b.meta?.priority ?? 99));
+      const injected = [];
+      for (const hook of promptHooks) {
+        const result = await hook.handler({}, {
+          agentId: "main",
+          sessionKey: "agent:main:session:error-reminder-default-off",
+        });
+        if (result?.prependContext) injected.push(result.prependContext);
+      }
+
+      assert.equal(
+        injected.some((block) => block.includes("<error-detected>")),
+        false,
+        "default reflection should not inject tool error signals",
+      );
+    });
+
+    it("injects pending tool error signals only when error reminders are explicitly enabled", async () => {
       const dbPath = path.join(pluginWorkDir, "main-db");
       const reflectionDbPath = path.join(pluginWorkDir, "reflection-db");
       const { api, eventHandlers } = createPluginApiHarness({

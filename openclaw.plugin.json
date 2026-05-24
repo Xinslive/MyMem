@@ -912,9 +912,9 @@
           },
           "errorReminderMaxEntries": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 20,
-            "default": 3
+            "default": 0
           },
           "dedupeErrorSignals": {
             "type": "boolean",
@@ -1305,7 +1305,7 @@
           "preventiveLessons": {
             "type": "object",
             "additionalProperties": false,
-            "description": "Automatically store low-confidence preventive reasoning lessons from tool errors, test failures, and user corrections; repeated evidence promotes them to confirmed strategies.",
+            "description": "Automatically store low-confidence preventive reasoning lessons from user corrections by default; error-derived lessons can be enabled explicitly.",
             "properties": {
               "enabled": {
                 "type": "boolean",
@@ -1314,8 +1314,8 @@
               },
               "fromErrors": {
                 "type": "boolean",
-                "default": true,
-                "description": "Learn preventive lessons from tool errors, tool error output, and test failures."
+                "default": false,
+                "description": "Learn preventive lessons from tool errors, tool error output, and test failures. Disabled by default."
               },
               "fromCorrections": {
                 "type": "boolean",
@@ -1361,7 +1361,7 @@
         "properties": {
           "badRecallFeedback": { "type": "boolean", "default": false },
           "correctionDiff": { "type": "boolean", "default": true },
-          "toolErrorPlaybook": { "type": "boolean", "default": true },
+          "toolErrorPlaybook": { "type": "boolean", "default": false },
           "dangerousToolHints": { "type": "boolean", "default": true },
           "contextBudget": { "type": "boolean", "default": true },
           "privacyGuard": { "type": "boolean", "default": true },
@@ -1877,7 +1877,7 @@
     },
     "memoryReflection.errorReminderMaxEntries": {
       "label": "Error Reminder Max Entries",
-      "help": "Max recent error hints injected into prompt",
+      "help": "Max recent tool error hints injected into prompt. Default 0 disables tool error reminders.",
       "advanced": true
     },
     "memoryReflection.dedupeErrorSignals": {
@@ -1885,9 +1885,9 @@
       "help": "Deduplicate repeated error signatures per session",
       "advanced": true
     },
-      "feedbackLoop.preventiveLessons.enabled": {
+    "feedbackLoop.preventiveLessons.enabled": {
       "label": "预防性经验学习",
-      "help": "从工具失败、测试失败和用户纠正中自动保存低置信度的预防性推理经验。",
+      "help": "默认从用户纠正中自动保存低置信度的预防性推理经验；工具/测试失败需要单独开启 fromErrors。",
       "advanced": true
     },
     "feedbackLoop.preventiveLessons.minEvidenceToConfirm": {
@@ -2064,7 +2064,7 @@
     },
     "hookEnhancements.toolErrorPlaybook": {
       "label": "Tool Error Playbook",
-      "help": "Recall similar historical errors after tool failures and inject a short recovery playbook.",
+      "help": "Recall similar historical errors after tool failures and inject a short recovery playbook. Disabled by default.",
       "advanced": true
     },
     "hookEnhancements.dangerousToolHints": {

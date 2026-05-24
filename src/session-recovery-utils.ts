@@ -86,11 +86,13 @@ export function buildReflectionPrompt(
   toolErrorSignals: ReflectionErrorSignal[] = [],
 ): string {
   const clipped = conversation.slice(-maxInputChars);
-  const errorHints = toolErrorSignals.length > 0
+  const toolErrorInstruction = toolErrorSignals.length > 0
     ? toolErrorSignals
       .map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary} (sig:${e.signatureHash.slice(0, 8)})`)
       .join("\n")
-    : "- (none)";
+    : "";
+  const noValueInstructionNumber = toolErrorInstruction ? 4 : 3;
+  const formatInstructionNumber = toolErrorInstruction ? 5 : 4;
   return `You are a helpful assistant with memory-reflection capabilities. Your task is to analyze the following conversation and extract key learnings, decisions, and patterns that should be captured for future reference. If the conversation does not contain durable, future-useful information, it is acceptable to extract nothing; do not invent or force memories.
 
 ## Conversation
@@ -112,12 +114,9 @@ Only attribute preferences, intentions, or decisions to the user when the user e
    - Explain why this information is important to remember
    - Note any action items or follow-ups
 
-3. If there were tool errors, also consider what could be improved:
-${errorHints}
+${toolErrorInstruction ? `3. Explicit tool error signals were provided. Consider what could be improved:\n${toolErrorInstruction}\n\n` : ""}${noValueInstructionNumber}. If there is no valuable content to preserve, say so briefly and leave the extraction sections empty or marked as none.
 
-4. If there is no valuable content to preserve, say so briefly and leave the extraction sections empty or marked as none.
-
-5. Format your output as a structured reflection with clear sections for:
+${formatInstructionNumber}. Format your output as a structured reflection with clear sections for:
    - Decisions and their rationale
    - Key facts and context
    - User preferences

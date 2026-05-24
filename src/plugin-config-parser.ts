@@ -534,7 +534,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       ? {
           badRecallFeedback: hookEnhancementsRaw.badRecallFeedback === true,
           correctionDiff: hookEnhancementsRaw.correctionDiff !== false,
-          toolErrorPlaybook: hookEnhancementsRaw.toolErrorPlaybook !== false,
+          toolErrorPlaybook: typeof hookEnhancementsRaw.toolErrorPlaybook === "boolean"
+            ? hookEnhancementsRaw.toolErrorPlaybook
+            : defaultHookEnhancements.toolErrorPlaybook,
           dangerousToolHints: hookEnhancementsRaw.dangerousToolHints !== false,
           contextBudget: hookEnhancementsRaw.contextBudget !== false,
           privacyGuard: hookEnhancementsRaw.privacyGuard !== false,

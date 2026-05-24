@@ -184,6 +184,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
   const reflectionAgentId = asNonEmptyString(config.memoryReflection?.agentId) ?? DEFAULT_REFLECTION_AGENT_ID;
   const reflectionErrorReminderMaxEntries = parsePositiveInt(config.memoryReflection?.errorReminderMaxEntries) ?? DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES;
   const reflectionDedupeErrorSignals = config.memoryReflection?.dedupeErrorSignals !== false;
+  const reflectionErrorSignalsEnabled = reflectionErrorReminderMaxEntries > 0;
   const reflectionInjectMode = config.memoryReflection?.injectMode ?? "inheritance-only";
   const reflectionStoreToLanceDB = config.memoryReflection?.storeToLanceDB !== false;
   const reflectionWriteLegacyCombined = config.memoryReflection?.writeLegacyCombined !== false;
@@ -199,56 +200,58 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
     return DEFAULT_REFLECTION_FALLBACK_AGENT_ID;
   };
 
-  // ── Hook: after_tool_call (error signal collection) ──
-  api.on("after_tool_call", (event: any, ctx: any) => {
-    const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-    if (isInternalReflectionSessionKey(sessionKey)) return;
-    if (!sessionKey) return;
-    helpers.pruneReflectionSessionState();
+  if (reflectionErrorSignalsEnabled) {
+    // ── Hook: after_tool_call (optional error signal collection) ──
+    api.on("after_tool_call", (event: any, ctx: any) => {
+      const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
+      if (isInternalReflectionSessionKey(sessionKey)) return;
+      if (!sessionKey) return;
+      helpers.pruneReflectionSessionState();
 
-    if (typeof event.error === "string" && event.error.trim().length > 0) {
-      const signature = normalizeErrorSignature(event.error);
-      const summary = summarizeErrorText(event.error);
-      const signatureHash = sha256Hex(signature).slice(0, 16);
-      helpers.addReflectionErrorSignal(sessionKey, {
-        at: Date.now(), toolName: event.toolName || "unknown",
-        summary, source: "tool_error",
-        signature, signatureHash,
-      }, reflectionDedupeErrorSignals);
-      singletonState.feedbackLoop?.onPreventiveLessonEvidence({
-        summary,
-        details: event.error,
-        source: "tool_error",
-        sessionKey,
-        scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
-        toolName: event.toolName || "unknown",
-        signatureHash,
-      });
-      return;
-    }
+      if (typeof event.error === "string" && event.error.trim().length > 0) {
+        const signature = normalizeErrorSignature(event.error);
+        const summary = summarizeErrorText(event.error);
+        const signatureHash = sha256Hex(signature).slice(0, 16);
+        helpers.addReflectionErrorSignal(sessionKey, {
+          at: Date.now(), toolName: event.toolName || "unknown",
+          summary, source: "tool_error",
+          signature, signatureHash,
+        }, reflectionDedupeErrorSignals);
+        singletonState.feedbackLoop?.onPreventiveLessonEvidence({
+          summary,
+          details: event.error,
+          source: "tool_error",
+          sessionKey,
+          scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
+          toolName: event.toolName || "unknown",
+          signatureHash,
+        });
+        return;
+      }
 
-    const resultTextRaw = extractTextFromToolResult(event.result);
-    const resultText = resultTextRaw.length > DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS ? resultTextRaw.slice(0, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS) : resultTextRaw;
-    if (resultText && containsErrorSignal(resultText)) {
-      const signature = normalizeErrorSignature(resultText);
-      const summary = summarizeErrorText(resultText);
-      const signatureHash = sha256Hex(signature).slice(0, 16);
-      helpers.addReflectionErrorSignal(sessionKey, {
-        at: Date.now(), toolName: event.toolName || "unknown",
-        summary, source: "tool_output",
-        signature, signatureHash,
-      }, reflectionDedupeErrorSignals);
-      singletonState.feedbackLoop?.onPreventiveLessonEvidence({
-        summary,
-        details: resultText,
-        source: "tool_output",
-        sessionKey,
-        scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
-        toolName: event.toolName || "unknown",
-        signatureHash,
-      });
-    }
-  }, { priority: 15 });
+      const resultTextRaw = extractTextFromToolResult(event.result);
+      const resultText = resultTextRaw.length > DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS ? resultTextRaw.slice(0, DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS) : resultTextRaw;
+      if (resultText && containsErrorSignal(resultText)) {
+        const signature = normalizeErrorSignature(resultText);
+        const summary = summarizeErrorText(resultText);
+        const signatureHash = sha256Hex(signature).slice(0, 16);
+        helpers.addReflectionErrorSignal(sessionKey, {
+          at: Date.now(), toolName: event.toolName || "unknown",
+          summary, source: "tool_output",
+          signature, signatureHash,
+        }, reflectionDedupeErrorSignals);
+        singletonState.feedbackLoop?.onPreventiveLessonEvidence({
+          summary,
+          details: resultText,
+          source: "tool_output",
+          sessionKey,
+          scopeFilter: resolveScopeFilter(scopeManager, resolveHookAgentId(typeof ctx.agentId === "string" ? ctx.agentId : undefined, sessionKey)),
+          toolName: event.toolName || "unknown",
+          signatureHash,
+        });
+      }
+    }, { priority: 15 });
+  }
 
   // ── Hook: before_prompt_build (inheritance injection) ──
   api.on("before_prompt_build", async (_event: any, ctx: any) => {
@@ -291,7 +294,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       }
     }
 
-    if (sessionKey) {
+    if (sessionKey && reflectionErrorSignalsEnabled) {
       const pending = helpers.getPendingReflectionErrorSignalsForPrompt(sessionKey, reflectionErrorReminderMaxEntries);
       if (pending.length > 0) {
         blocks.push(["<error-detected>", "A tool error was detected. Consider preserving the lesson in MyMem if it is non-trivial or likely to recur.", "Recent error signals:", ...pending.map((e, i) => `${i + 1}. [${e.toolName}] ${e.summary}`), "</error-detected>"].join("\n"));
@@ -391,7 +394,9 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       const timeCompact = timeIso.replace(/[:.]/g, "");
       const reflectionRunAgentId = resolveReflectionRunAgentId(cfg);
       const targetScope = isSystemBypassId(sourceAgentId) ? config.scopes?.default ?? "global" : scopeManager.getDefaultScope(sourceAgentId);
-      const toolErrorSignals = sessionKey ? (reflectionErrorStateBySession.get(sessionKey)?.entries ?? []).slice(-reflectionErrorReminderMaxEntries) : [];
+      const toolErrorSignals = sessionKey && reflectionErrorSignalsEnabled
+        ? (reflectionErrorStateBySession.get(sessionKey)?.entries ?? []).slice(-reflectionErrorReminderMaxEntries)
+        : [];
 
       api.logger.info(`memory-reflection: command:${action} reflection generation start for session ${currentSessionId}; timeoutMs=${reflectionTimeoutMs}`);
       const reflectionGenerated = await generateReflectionText({

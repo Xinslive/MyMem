@@ -279,7 +279,7 @@ it("FeedbackLoop: getStatus exposes runtime context, lessons, and admitted count
   assert.equal(status.enabled, true);
   assert.equal(status.disposed, false);
   assert.equal("noiseLearning" in status, false);
-  assert.equal(status.preventiveLessons.bufferedEvidence, 2);
+  assert.equal(status.preventiveLessons.bufferedEvidence, 1);
   assert.equal(status.priorAdaptation.enabled, true);
   assert.equal(status.priorAdaptation.observedAdmitted, 1);
   assert.deepStrictEqual(status.runtime, {
@@ -323,7 +323,7 @@ it("FeedbackLoop: prior adaptation timer calls forceAdaptationCycle when enabled
   assert.ok(adaptationCount >= 1, `expected periodic prior adaptation, got ${adaptationCount}`);
 });
 
-it("FeedbackLoop: preventive lesson evidence without an existing lesson creates via default (no LLM)", async () => {
+it("FeedbackLoop: error-derived preventive lesson evidence creates a lesson when explicitly enabled", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     admissionController: null,
@@ -331,7 +331,7 @@ it("FeedbackLoop: preventive lesson evidence without an existing lesson creates 
     config: {
       enabled: true,
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
+      preventiveLessons: { ...DEFAULT_PREVENTIVE_LESSON_CONFIG, fromErrors: true },
     },
   });
 
@@ -380,6 +380,7 @@ it("FeedbackLoop: repeated preventive evidence promotes lesson to confirmed", as
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
       preventiveLessons: {
         ...DEFAULT_PREVENTIVE_LESSON_CONFIG,
+        fromErrors: true,
         minEvidenceToConfirm: 2,
         pendingConfidence: 0.4,
         confirmedConfidence: 0.75,
@@ -619,7 +620,7 @@ it("FeedbackLoop: runtime error evidence updates existing preventive lessons wit
     config: {
       enabled: true,
       priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
-      preventiveLessons: DEFAULT_PREVENTIVE_LESSON_CONFIG,
+      preventiveLessons: { ...DEFAULT_PREVENTIVE_LESSON_CONFIG, fromErrors: true },
     },
   });
 
@@ -665,7 +666,10 @@ it("FeedbackLoop: repeated runtime evidence updates the same canonical lesson", 
   const loop = new FeedbackLoop({
     admissionController: null,
     store: lessonStore,
-    config: DEFAULT_FEEDBACK_LOOP_CONFIG,
+    config: {
+      ...DEFAULT_FEEDBACK_LOOP_CONFIG,
+      preventiveLessons: { ...DEFAULT_PREVENTIVE_LESSON_CONFIG, fromErrors: true },
+    },
   });
 
   loop.onPreventiveLessonEvidence({
@@ -690,7 +694,7 @@ it("FeedbackLoop: repeated runtime evidence updates the same canonical lesson", 
   loop.dispose();
 });
 
-it("FeedbackLoop: processes runtime error evidence regardless of area", async () => {
+it("FeedbackLoop: skips runtime error evidence by default", async () => {
   const lessonStore = makeLessonStore();
   const loop = new FeedbackLoop({
     admissionController: null,
@@ -707,6 +711,30 @@ it("FeedbackLoop: processes runtime error evidence regardless of area", async ()
 
   assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
   assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
-  assert.ok(lessonStore.entries.size > 0, "lesson should be created for any runtime area");
+  assert.equal(lessonStore.entries.size, 0);
+  loop.dispose();
+});
+
+it("FeedbackLoop: processes runtime error evidence regardless of area when explicitly enabled", async () => {
+  const lessonStore = makeLessonStore();
+  const loop = new FeedbackLoop({
+    admissionController: null,
+    store: lessonStore,
+    config: {
+      ...DEFAULT_FEEDBACK_LOOP_CONFIG,
+      preventiveLessons: { ...DEFAULT_PREVENTIVE_LESSON_CONFIG, fromErrors: true },
+    },
+  });
+
+  loop.onPreventiveLessonEvidence({
+    source: "tool_error",
+    area: "ui-bug",
+    summary: "UI related error",
+  });
+  await loop.drainPreventiveLessonBuffer();
+
+  assert.equal(loop.getStatus().preventiveLessons.bufferedEvidence, 0);
+  assert.equal(loop.getStatus().preventiveLessons.skipped, 0);
+  assert.ok(lessonStore.entries.size > 0, "lesson should be created for any runtime area when enabled");
   loop.dispose();
 });

@@ -113,7 +113,7 @@ export const DEFAULT_PRIOR_ADAPTATION_CONFIG: PriorAdaptationConfig = {
 
 export const DEFAULT_PREVENTIVE_LESSON_CONFIG: PreventiveLessonLearningConfig = {
   enabled: true,
-  fromErrors: true,
+  fromErrors: false,
   fromCorrections: true,
   minEvidenceToConfirm: 2,
   pendingConfidence: 0.45,
@@ -307,7 +307,11 @@ export class FeedbackLoop {
     if (this.disposed || !this.config.enabled) return;
     if (this.drainTimer || this.adaptationTimer) return;
 
-    if (this.config.preventiveLessons.enabled && this.config.preventiveLessons.fromErrors && this.lessonStore) {
+    if (
+      this.config.preventiveLessons.enabled &&
+      (this.config.preventiveLessons.fromErrors || this.config.preventiveLessons.fromCorrections) &&
+      this.lessonStore
+    ) {
       this.drainTimer = setInterval(
         () => void this.runFeedbackDrainCycle().catch(() => {}),
         FEEDBACK_DRAIN_INTERVAL_MS,
@@ -734,7 +738,7 @@ export function normalizeFeedbackLoopConfig(raw: unknown): FeedbackLoopConfig {
     },
     preventiveLessons: {
       enabled: pl.enabled !== false,
-      fromErrors: pl.fromErrors !== false,
+      fromErrors: typeof pl.fromErrors === "boolean" ? pl.fromErrors : DEFAULT_PREVENTIVE_LESSON_CONFIG.fromErrors,
       fromCorrections: pl.fromCorrections !== false,
       minEvidenceToConfirm: typeof pl.minEvidenceToConfirm === "number" && pl.minEvidenceToConfirm >= 1 && pl.minEvidenceToConfirm <= 10
         ? Math.floor(pl.minEvidenceToConfirm) : DEFAULT_PREVENTIVE_LESSON_CONFIG.minEvidenceToConfirm,

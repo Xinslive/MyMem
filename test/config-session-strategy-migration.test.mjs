@@ -110,8 +110,9 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.reasoningStrategyRecall?.maxChars, 600);
     assert.equal(parsed.reasoningStrategyRecall?.candidatePoolSize, 8);
     assert.equal(parsed.reasoningStrategyRecall?.minScore, 0.62);
+    assert.equal(parsed.memoryReflection?.errorReminderMaxEntries, 0);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.enabled, true);
-    assert.equal(parsed.feedbackLoop?.preventiveLessons?.fromErrors, true);
+    assert.equal(parsed.feedbackLoop?.preventiveLessons?.fromErrors, false);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.fromCorrections, true);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.minEvidenceToConfirm, 2);
     assert.equal(parsed.feedbackLoop?.preventiveLessons?.pendingConfidence, 0.45);
@@ -123,6 +124,7 @@ describe("sessionStrategy legacy compatibility mapping", () => {
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.enabled, true);
     assert.equal(parsed.hookEnhancements?.sessionPrimer?.preferDistilled, true);
     assert.equal(parsed.hookEnhancements?.selfCorrectionLoop?.enabled, true);
+    assert.equal(parsed.hookEnhancements?.toolErrorPlaybook, false);
   });
 
   it("preserves explicit capture agent settings", () => {
