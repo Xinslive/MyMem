@@ -461,8 +461,12 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
             signatureHash: signal.signatureHash,
           });
         }
-        singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch(() => {});
-        singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch(() => {});
+        singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch((err) => {
+          api.logger.debug?.(`mymem: drainPreventiveLessonBuffer failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch((err) => {
+          api.logger.debug?.(`mymem: forceAdaptationCycle failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
 
       const reflectionEventId = createReflectionEventId({ runAt: nowTs, sessionKey, sessionId: currentSessionId || "unknown", agentId: sourceAgentId, command: String(event.action || "unknown") });
@@ -509,7 +513,10 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
       await appendFile(dailyPath, `- [${timeHms} UTC] Reflection generated: \`${relPath}\`\n`, "utf-8");
       api.logger.info(`memory-reflection: wrote ${relPath} for session ${currentSessionId}`);
     } catch (err) {
-      api.logger.warn(`memory-reflection: hook failed: ${String(err)}`);
+      api.logger.warn(`memory-reflection: hook failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof Error && err.stack) {
+        api.logger.debug?.(`memory-reflection: stack: ${err.stack}`);
+      }
     } finally {
       if (sessionKey) {
         reflectionErrorStateBySession.delete(sessionKey);

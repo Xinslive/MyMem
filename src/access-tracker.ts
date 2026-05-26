@@ -320,7 +320,9 @@ export class AccessTracker {
         new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
       ]);
       void flushWithTimeout
-        .catch(() => {})
+        .catch((err) => {
+          this.logger.warn(`access-tracker: final flush failed during destroy: ${err instanceof Error ? err.message : String(err)}`);
+        })
         .finally(() => {
           this.pending.clear();
           this._retryCount.clear();

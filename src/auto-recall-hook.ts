@@ -303,9 +303,18 @@ export function registerAutoRecallHook(params: {
   async function retrieveWithRetry(retrieveParams: Pick<RetrievalContext, "query" | "limit" | "scopeFilter" | "category" | "source" | "signal" | "candidatePoolSize" | "overFetchMultiplier" | "degradeAfterMs" | "deadlineAt">): Promise<RetrievalResult[]> {
     try {
       return await retriever.retrieve(retrieveParams);
-    } catch (error) {
-      if (retrieveParams.signal?.aborted) throw error;
-      return await retriever.retrieve(retrieveParams);
+    } catch (firstError) {
+      if (retrieveParams.signal?.aborted) throw firstError;
+      api.logger.debug?.(`mymem: retrieve retry after initial failure: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      try {
+        return await retriever.retrieve(retrieveParams);
+      } catch (retryError) {
+        if (retryError instanceof Error && firstError instanceof Error) {
+          retryError.cause = firstError;
+        }
+        throw retryError;
+      }
     }
   }
 

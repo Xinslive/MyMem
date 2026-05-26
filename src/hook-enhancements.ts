@@ -862,7 +862,10 @@ export function registerHookEnhancements(params: {
 
         await feedbackLoop?.drainPreventiveLessonBuffer();
       } catch (err) {
-        api.logger.warn?.(`mymem: hook enhancement agent_end failed: ${String(err)}`);
+        api.logger.warn?.(`mymem: hook enhancement agent_end failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (err instanceof Error && err.stack) {
+          api.logger.debug?.(`mymem: hook enhancement agent_end stack: ${err.stack}`);
+        }
       }
     })();
   }, { priority: 18 });

@@ -230,6 +230,7 @@ export class MemoryStore {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           `Failed to flush-batch store ${entries.length} memories: ${code} ${message}`,
+          { cause: err },
         );
       }
       return entries;
@@ -586,6 +587,7 @@ export class MemoryStore {
       throw new Error(
         `Failed to open LanceDB at "${this.config.dbPath}": ${code} ${message}\n` +
         `  Fix: Verify the path exists and is writable. Check parent directory permissions.`,
+        { cause: err },
       );
     }
 
@@ -809,6 +811,7 @@ export class MemoryStore {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           `Failed to store memory in "${this.config.dbPath}": ${code} ${message}`,
+          { cause: err },
         );
       }
       return fullEntry;

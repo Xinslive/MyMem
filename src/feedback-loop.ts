@@ -313,13 +313,17 @@ export class FeedbackLoop {
       this.lessonStore
     ) {
       this.drainTimer = setInterval(
-        () => void this.runFeedbackDrainCycle().catch(() => {}),
+        () => void this.runFeedbackDrainCycle().catch((err) => {
+          this.debugLog(`feedback-loop: drain cycle failed: ${err instanceof Error ? err.message : String(err)}`);
+        }),
         FEEDBACK_DRAIN_INTERVAL_MS,
       );
     }
     if (this.config.priorAdaptation.enabled && this.admissionController) {
       this.adaptationTimer = setInterval(
-        () => void this.runPriorAdaptationCycle().catch(() => {}),
+        () => void this.runPriorAdaptationCycle().catch((err) => {
+          this.debugLog(`feedback-loop: adaptation cycle failed: ${err instanceof Error ? err.message : String(err)}`);
+        }),
         this.config.priorAdaptation.adaptationIntervalMs,
       );
     }
