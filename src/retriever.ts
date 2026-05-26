@@ -1041,7 +1041,8 @@ export class MemoryRetriever {
 
     for (const r of toUpdate) {
       const { memory, meta: rawMeta } = getDecayableFromEntry(r.entry);
-      const meta = JSON.parse(JSON.stringify(rawMeta)) as typeof rawMeta;
+      // Shallow copy + field replacement instead of deep clone (JSON.parse/stringify)
+      const meta = { ...rawMeta };
 
       // Update access stats in-memory first
       const nextAccess = memory.accessCount + 1;

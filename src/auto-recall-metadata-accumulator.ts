@@ -152,7 +152,9 @@ export class AutoRecallMetadataAccumulator {
     if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.flushNow();
+      void this.flushNow().catch((err) => {
+        this.logger.warn("mymem: scheduled metadata flush failed: " + String(err));
+      });
     }, this.debounceMs);
     this.timer.unref?.();
   }

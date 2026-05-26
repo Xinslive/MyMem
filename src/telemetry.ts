@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
 import type { ExtractionStats } from "./memory-categories.js";
 import type { RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector, type AggregateStats } from "./retrieval-stats.js";
@@ -128,33 +130,48 @@ export async function appendJsonlRecord(
 
 export async function trimJsonlFile(filePath: string, maxRecords: number): Promise<void> {
   if (!Number.isFinite(maxRecords) || maxRecords <= 0) return;
-  const raw = await readFile(filePath, "utf8").catch(() => "");
-  if (!raw) return;
-  const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length <= maxRecords) return;
-  const trimmed = `${lines.slice(lines.length - maxRecords).join("\n")}\n`;
-  await writeFile(filePath, trimmed, "utf8");
+  try {
+    const fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat) return;
+
+    const lines: string[] = [];
+    const stream = createReadStream(filePath, { encoding: "utf8" });
+    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (line.trim().length > 0) {
+        lines.push(line);
+      }
+    }
+
+    if (lines.length <= maxRecords) return;
+    const trimmed = `${lines.slice(lines.length - maxRecords).join("\n")}\n`;
+    await writeFile(filePath, trimmed, "utf8");
+  } catch {
+    // File may not exist or be inaccessible; silently skip.
+  }
 }
 
 export async function readJsonlRecords<T>(
   filePath: string,
   limit?: number,
 ): Promise<T[]> {
-  const raw = await readFile(filePath, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error?.code === "ENOENT") return "";
-    throw error;
-  });
-  if (!raw) return [];
-
   const entries: T[] = [];
-  for (const rawLine of raw.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    try {
-      entries.push(JSON.parse(line) as T);
-    } catch {
-      // Skip truncated or corrupt lines.
+  try {
+    const stream = createReadStream(filePath, { encoding: "utf8" });
+    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        entries.push(JSON.parse(trimmed) as T);
+      } catch {
+        // Skip truncated or corrupt lines.
+      }
     }
+  } catch (error: unknown) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === "ENOENT") return [];
+    throw error;
   }
   if (!limit || entries.length <= limit) return entries;
   return entries.slice(entries.length - limit);

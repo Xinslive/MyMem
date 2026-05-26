@@ -1,6 +1,7 @@
 {
   "src": ["src/", "index.ts", "cli.ts"],
   "exclude": ["test/", "scripts/", "benchmark/", "node_modules/"],
-  "lines": 60,
-  "branches": 50
+  "lines": 75,
+  "branches": 65,
+  "functions": 70
 }

@@ -4,3 +4,24 @@ AGENTS.md
 .claude/
 ~/
 *.tgz
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Database files
+*.db
+*.sqlite
+
+# Build & coverage
+dist/
+coverage/
+.c8rc.json
+
+# Output
+output/

@@ -41,6 +41,12 @@ export interface ScopeManager {
   getScopeDefinition(scope: string): ScopeDefinition | undefined;
 }
 
+type LoggerFn = (msg: string) => void;
+
+export interface ScopeManagerLogger {
+  warn?: LoggerFn;
+}
+
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -126,8 +132,10 @@ function normalizeAgentAccessMap(
 
 export class MemoryScopeManager implements ScopeManager {
   private config: ScopeConfig;
+  private logger: ScopeManagerLogger;
 
-  constructor(config: Partial<ScopeConfig> = {}) {
+  constructor(config: Partial<ScopeConfig> = {}, logger?: ScopeManagerLogger) {
+    this.logger = logger ?? {};
     this.config = {
       default: config.default || DEFAULT_SCOPE_CONFIG.default,
       definitions: {
@@ -172,7 +180,8 @@ export class MemoryScopeManager implements ScopeManager {
           if (warnings) {
             warnings.push(msg);
           } else {
-            console.warn(msg);
+            const warn = this.logger.warn ?? console.warn;
+            warn(msg);
           }
         }
       }
@@ -396,7 +405,8 @@ export class MemoryScopeManager implements ScopeManager {
     try {
       this.validateConfiguration(warnings);
       // Emit warnings only after successful validation
-      for (const w of warnings) console.warn(w);
+      const warn = this.logger.warn ?? console.warn;
+      for (const w of warnings) warn(w);
     } catch (err) {
       this.config = previous;
       throw err;
@@ -500,6 +510,7 @@ export function resolveScopeFilter(
     getScopeFilter?: (agentId?: string) => string[] | undefined;
   },
   agentId?: string,
+  logger?: ScopeManagerLogger,
 ): string[] | undefined {
   if (typeof scopeManager.getScopeFilter === "function") {
     return scopeManager.getScopeFilter(agentId);
@@ -508,8 +519,9 @@ export function resolveScopeFilter(
   // For reserved bypass IDs, any array return is treated as a legacy bypass encoding and
   // normalized to undefined so callers see a consistent explicit-bypass contract.
   const fallbackScopes = scopeManager.getAccessibleScopes(agentId);
+  const warn = logger?.warn ?? console.warn;
   if (!isSystemBypassId(agentId) && Array.isArray(fallbackScopes) && fallbackScopes.length === 0) {
-    console.warn(
+    warn(
       "resolveScopeFilter: non-bypass agent resolved to an empty scope list; downstream store reads will deny all access.",
     );
     return [];
@@ -519,7 +531,7 @@ export function resolveScopeFilter(
     if (!warnedLegacyFallbackBypassIds.has(key)) {
       warnedLegacyFallbackBypassIds.add(key);
       const shape = fallbackScopes.length === 0 ? "[]" : `[${fallbackScopes.join(", ")}]`;
-      console.warn(
+      warn(
         `resolveScopeFilter: legacy ScopeManager returned ${shape} for reserved bypass id '${key}'. ` +
         "Implement getScopeFilter() to make store-level bypass semantics explicit. " +
         "Normalizing legacy array return to undefined for bypass consistency.",

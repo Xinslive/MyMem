@@ -874,16 +874,20 @@ export class MemoryStore {
     const uniqueIds = [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))];
     if (uniqueIds.length === 0) return new Set();
 
-    const idConditions = uniqueIds
-      .map((id) => `id = '${escapeSqlLiteral(id)}'`)
-      .join(" OR ");
-    const rows = await this.table!.query()
-      .select(["id"])
-      .where(`(${idConditions})`)
-      .limit(uniqueIds.length)
-      .toArray();
-
-    return new Set(rows.map((row) => row.id as string));
+    const found = new Set<string>();
+    for (let i = 0; i < uniqueIds.length; i += METADATA_BATCH_CHUNK_SIZE) {
+      const chunk = uniqueIds.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
+      const idList = chunk.map((id) => `'${escapeSqlLiteral(id)}'`).join(",");
+      const rows = await this.table!.query()
+        .select(["id"])
+        .where(`id IN (${idList})`)
+        .limit(chunk.length)
+        .toArray();
+      for (const row of rows) {
+        found.add(row.id as string);
+      }
+    }
+    return found;
   }
 
   /** Lightweight total row count via LanceDB countRows(). */

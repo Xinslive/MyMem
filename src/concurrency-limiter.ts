@@ -5,6 +5,8 @@ export const MAX_EMBED_DEPTH = 3;
 export const EMBED_TIMEOUT_MS = 3_000;
 /** Global cap for concurrent provider-bound embedding requests across all Embedder instances. */
 export const GLOBAL_EMBED_CONCURRENCY_LIMIT = 10;
+/** Global cap for concurrent LLM requests (smart extraction, dedup, etc.). */
+export const GLOBAL_LLM_CONCURRENCY_LIMIT = 2;
 
 /**
  * Strictly decreasing character limit for forced truncation.
@@ -86,3 +88,4 @@ export class ConcurrencyLimiter {
 }
 
 export const globalEmbedRequestLimiter = new ConcurrencyLimiter(GLOBAL_EMBED_CONCURRENCY_LIMIT);
+export const globalLlmRequestLimiter = new ConcurrencyLimiter(GLOBAL_LLM_CONCURRENCY_LIMIT);

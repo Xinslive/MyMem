@@ -43,6 +43,26 @@ const SESSION_PRIMER_QUERY = [
   "constraints dislikes do-not-do preferences",
 ].join("; ");
 
+// Similarity/overlap thresholds for memory deduplication
+const TOKEN_OVERLAP_LOW_THRESHOLD = 0.08;
+const TOKEN_OVERLAP_HIGH_THRESHOLD = 0.22;
+const TOKEN_OVERLAP_LOW_MAX_COUNT = 4;
+const TOKEN_OVERLAP_HIGH_MIN_COUNT = 3;
+
+// Search score thresholds
+const DEFAULT_SEARCH_MIN_SCORE = 0.12;
+const AGGRESSIVE_SEARCH_MIN_SCORE = 0.08;
+const CONFLICT_SCORE_THRESHOLD = 0.18;
+
+// Importance thresholds
+const HIGH_IMPORTANCE_THRESHOLD = 0.9;
+const MEDIUM_IMPORTANCE_THRESHOLD = 0.85;
+const CORRECTION_IMPORTANCE_THRESHOLD = 0.75;
+const STABILITY_SCORE_THRESHOLD = 0.6;
+
+// Default confidence for memory suppression
+const DEFAULT_SUPPRESSION_CONFIDENCE = 0.55;
+
 type EnhancementKey = keyof NonNullable<PluginConfig["hookEnhancements"]>;
 type InjectedSource = "auto-recall" | "session-primer";
 
@@ -124,16 +144,16 @@ function getSessionPrimerConfig(config: PluginConfig): NormalizedSessionPrimerCo
 function getSelfCorrectionLoopConfig(config: PluginConfig): NormalizedSelfCorrectionLoopConfig {
   const raw = config.hookEnhancements?.selfCorrectionLoop;
   if (raw === false) {
-    return { enabled: false, minConfidence: 0.55, suppressTurns: 12 };
+    return { enabled: false, minConfidence: DEFAULT_SUPPRESSION_CONFIDENCE, suppressTurns: 12 };
   }
   if (raw && typeof raw === "object") {
     return {
       enabled: raw.enabled !== false,
-      minConfidence: typeof raw.minConfidence === "number" ? Math.max(0, Math.min(1, raw.minConfidence)) : 0.55,
+      minConfidence: typeof raw.minConfidence === "number" ? Math.max(0, Math.min(1, raw.minConfidence)) : DEFAULT_SUPPRESSION_CONFIDENCE,
       suppressTurns: typeof raw.suppressTurns === "number" ? Math.max(1, Math.min(100, Math.floor(raw.suppressTurns))) : 12,
     };
   }
-  return { enabled: true, minConfidence: 0.55, suppressTurns: 12 };
+  return { enabled: true, minConfidence: DEFAULT_SUPPRESSION_CONFIDENCE, suppressTurns: 12 };
 }
 
 function getSessionKey(event: any, ctx: any): string {
@@ -218,7 +238,7 @@ function isSilentRecallIgnore(userMessage: string, injectedTexts: string[]): boo
   // Require both low ratio AND low absolute overlap.
   // Raised absolute threshold from 3 → 4 to reduce false positives
   // on short Chinese messages where a few shared character-pairs are coincidental.
-  return overlap / Math.max(userTokens.size, 1) < 0.08 && overlap < 4;
+  return overlap / Math.max(userTokens.size, 1) < TOKEN_OVERLAP_LOW_THRESHOLD && overlap < TOKEN_OVERLAP_LOW_MAX_COUNT;
 }
 
 function hasInjectedMemoryUseSignal(text: string, injectedTexts: string[]): boolean {
@@ -236,7 +256,7 @@ function hasInjectedMemoryUseSignal(text: string, injectedTexts: string[]): bool
     for (const token of memoryTokens) {
       if (textTokens.has(token)) overlap++;
     }
-    return overlap >= 3 || overlap / Math.max(memoryTokens.size, 1) >= 0.22;
+    return overlap >= TOKEN_OVERLAP_HIGH_MIN_COUNT || overlap / Math.max(memoryTokens.size, 1) >= TOKEN_OVERLAP_HIGH_THRESHOLD;
   });
 }
 
@@ -330,7 +350,7 @@ async function searchMemories(params: {
   minScore?: number;
 }): Promise<MemorySearchResult[]> {
   const vector = await params.embedder.embedQuery(params.query);
-  return params.store.vectorSearch(vector, params.limit ?? 5, params.minScore ?? 0.12, params.scopeFilter, { excludeInactive: true });
+  return params.store.vectorSearch(vector, params.limit ?? 5, params.minScore ?? DEFAULT_SEARCH_MIN_SCORE, params.scopeFilter, { excludeInactive: true });
 }
 
 function formatResults(results: MemorySearchResult[], maxChars: number): string {
@@ -373,7 +393,7 @@ function isPrimerPreferredMemory(result: MemorySearchResult): boolean {
     meta.source_reason === "preference_distiller" ||
     meta.compiled_strategy === true ||
     Number(meta.evidence_count || 0) >= 2 ||
-    Number(meta.stability_score || 0) >= 0.6 ||
+    Number(meta.stability_score || 0) >= STABILITY_SCORE_THRESHOLD ||
     meta.memory_category === "preferences" ||
     meta.memory_category === "patterns";
 }
@@ -481,7 +501,7 @@ async function applySelfCorrectionRule(params: {
     query: `${rule.text}; ${rule.canonicalId}`,
     scopeFilter: params.scopeFilter,
     limit: 4,
-    minScore: 0.08,
+    minScore: AGGRESSIVE_SEARCH_MIN_SCORE,
   });
 
   const sameTopic = results.filter((result) => {
@@ -518,12 +538,12 @@ async function applySelfCorrectionRule(params: {
 
   if (conflicting) {
     const conflictingMeta = parseSmartMetadata(conflicting.entry.metadata, conflicting.entry);
-    if (conflicting.score >= 0.18 || conflictingMeta.canonical_id === rule.canonicalId) {
+    if (conflicting.score >= CONFLICT_SCORE_THRESHOLD || conflictingMeta.canonical_id === rule.canonicalId) {
       const now = Date.now();
       await params.store.update(conflicting.entry.id, {
         text: rule.text,
         vector: await params.embedder.embedPassage(rule.text),
-        importance: Math.max(conflicting.entry.importance, rule.memoryCategory === "preferences" ? 0.9 : 0.85),
+        importance: Math.max(conflicting.entry.importance, rule.memoryCategory === "preferences" ? HIGH_IMPORTANCE_THRESHOLD : MEDIUM_IMPORTANCE_THRESHOLD),
         category: rule.storeCategory,
         metadata: stringifySmartMetadata(buildSmartMetadata(conflicting.entry, {
           summary: rule.text,
@@ -657,7 +677,7 @@ export function registerHookEnhancements(params: {
 
     if (enhancementEnabled(config, "toolErrorPlaybook") && session.lastToolError) {
       try {
-        const results = await searchMemories({ store, embedder, query: session.lastToolError, scopeFilter, limit: 4, minScore: 0.08 });
+        const results = await searchMemories({ store, embedder, query: session.lastToolError, scopeFilter, limit: 4, minScore: AGGRESSIVE_SEARCH_MIN_SCORE });
         const body = formatResults(results, PLAYBOOK_MAX_CHARS);
         if (body) {
           blocks.push({ priority: 100, text: `<tool-error-playbook>\nSimilar historical errors/learnings:\n${body}\n</tool-error-playbook>` });
@@ -741,7 +761,7 @@ export function registerHookEnhancements(params: {
     const agentId = resolveHookAgentId(typeof ctx?.agentId === "string" ? ctx.agentId : undefined, sessionKey);
     const scopeFilter = resolveScopeFilter(scopeManager, agentId);
     try {
-      const results = await searchMemories({ store, embedder, query: `${toolName} ${toolText}`, scopeFilter, limit: 4, minScore: 0.08 });
+      const results = await searchMemories({ store, embedder, query: `${toolName} ${toolText}`, scopeFilter, limit: 4, minScore: AGGRESSIVE_SEARCH_MIN_SCORE });
       const body = formatResults(results, SAFETY_HINT_MAX_CHARS);
       return {
         warning: `mymem: high-risk tool call detected for ${toolName}; review relevant memories before proceeding.`,
@@ -820,7 +840,7 @@ export function registerHookEnhancements(params: {
                 });
               }
             }
-            const results = await searchMemories({ store, embedder, query: correction.oldText, scopeFilter, limit: 1, minScore: 0.12 });
+            const results = await searchMemories({ store, embedder, query: correction.oldText, scopeFilter, limit: 1, minScore: DEFAULT_SEARCH_MIN_SCORE });
             const match = results[0]?.entry;
             if (match) {
               const vector = await embedder.embedPassage(correction.newText);
@@ -839,7 +859,7 @@ export function registerHookEnhancements(params: {
               await store.update(match.id, {
                 text: correction.newText,
                 vector,
-                importance: Math.max(match.importance, 0.75),
+                importance: Math.max(match.importance, CORRECTION_IMPORTANCE_THRESHOLD),
                 category: match.category,
                 metadata: stringifySmartMetadata(meta),
               }, scopeFilter);
@@ -920,7 +940,7 @@ export function createDefaultHookEnhancementsConfig() {
     },
     selfCorrectionLoop: {
       enabled: true,
-      minConfidence: 0.55,
+      minConfidence: DEFAULT_SUPPRESSION_CONFIDENCE,
       suppressTurns: 12,
     },
     workspaceDrift: true,

@@ -9,6 +9,7 @@
 import type { MemoryStore } from "./store.js";
 import type { Embedder } from "./embedder.js";
 import type { LlmClient } from "./llm-client.js";
+import { globalLlmRequestLimiter } from "./concurrency-limiter.js";
 import {
   buildExtractionPrompt,
 } from "./extraction-prompts.js";
@@ -433,14 +434,20 @@ export class SmartExtractor {
     const user = this.config.user ?? "User";
     const prompt = buildExtractionPrompt(cleaned, user);
 
-    const result = await this.llm.completeJson<{
-      memories: Array<{
-        category: string;
-        worth_storing?: boolean;
-        abstract: string;
-        content: string;
-      }>;
-    }>(prompt, "extract-candidates");
+    const release = await globalLlmRequestLimiter.acquire();
+    let result: { memories: Array<{ category: string; worth_storing?: boolean; abstract: string; content: string }> } | null;
+    try {
+      result = await this.llm.completeJson<{
+        memories: Array<{
+          category: string;
+          worth_storing?: boolean;
+          abstract: string;
+          content: string;
+        }>;
+      }>(prompt, "extract-candidates");
+    } finally {
+      release();
+    }
 
     if (!result) {
       this.debugLog(
