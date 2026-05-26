@@ -65,4 +65,48 @@ describe("LLM api-key client", () => {
     ]);
     assert.equal(requestBody.temperature, 0.1);
   });
+
+  it("limits concurrent provider requests across client calls", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    server = http.createServer(async (req, res) => {
+      for await (const _chunk of req) {
+        // Drain request body before responding.
+      }
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      inFlight -= 1;
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: "{\"memories\":[]}",
+            },
+          },
+        ],
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+
+    const llm = createLlmClient({
+      auth: "api-key",
+      apiKey: "test-api-key",
+      model: "gpt-4o-mini",
+      baseURL: `http://127.0.0.1:${port}/v1`,
+    });
+
+    await Promise.all([
+      llm.completeJson("one", "limited-one"),
+      llm.completeJson("two", "limited-two"),
+      llm.completeJson("three", "limited-three"),
+      llm.completeJson("four", "limited-four"),
+    ]);
+
+    assert.equal(maxInFlight, 2);
+  });
 });

@@ -31,9 +31,6 @@ import type { MemoryRetriever, RetrievalContext, RetrievalResult } from "./retri
 import { recordInjectedMemoriesForEnhancements, type HookEnhancementState } from "./hook-enhancements.js";
 import { isRecallSuppressedForSession } from "./recall-suppression.js";
 
-/** Maximum characters of raw user message to cache per session. */
-const MAX_CACHED_RAW_MESSAGE_LENGTH = 200;
-
 interface RecallResult {
   entry: {
     id: string;
@@ -376,14 +373,15 @@ export function registerAutoRecallHook(params: {
     const raw = extractTextContent(event.content)?.trim() || "";
     const text = raw.replace(/^(?:@\S+\s*|<@!?\d+>\s*)+/, "").trim();
     if (!text) return;
-    const truncated = text.length > MAX_CACHED_RAW_MESSAGE_LENGTH ? text.slice(-MAX_CACHED_RAW_MESSAGE_LENGTH) : text;
+    const maxCachedRawMessageLength = config.autoRecallMaxQueryLength ?? 2_000;
+    const cachedText = truncateAutoRecallQuery(text, maxCachedRawMessageLength);
     for (const cacheKey of collectRecallMessageCacheKeys({
       channelId: ctx?.channelId,
       conversationId: ctx?.conversationId,
       sessionId: ctx?.sessionId,
       sessionKey: ctx?.sessionKey,
     })) {
-      params.lastRawUserMessage.set(cacheKey, truncated);
+      params.lastRawUserMessage.set(cacheKey, cachedText);
     }
   });
 

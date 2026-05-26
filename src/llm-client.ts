@@ -13,6 +13,7 @@ import {
   refreshOAuthSession,
   saveOAuthSession,
 } from "./llm-oauth.js";
+import { globalLlmRequestLimiter } from "./concurrency-limiter.js";
 
 export interface LlmClientConfig {
   apiKey?: string;
@@ -189,6 +190,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
   return {
     async completeJson<T>(prompt: string, label = "generic"): Promise<T | null> {
       lastError = null;
+      const release = await globalLlmRequestLimiter.acquire();
       try {
         const response = await client.chat.completions.create({
           model: config.model,
@@ -253,6 +255,8 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
           `mymem: llm-client [${label}] request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
         (warnLog ?? log)(lastError);
         return null;
+      } finally {
+        release();
       }
     },
     getLastError(): string | null {
@@ -288,6 +292,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
   return {
     async completeJson<T>(prompt: string, label = "generic"): Promise<T | null> {
       lastError = null;
+      const release = await globalLlmRequestLimiter.acquire();
       try {
         const session = await getSession();
         const { signal, dispose } = createTimeoutSignal(config.timeoutMs);
@@ -404,6 +409,8 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
           `mymem: llm-client [${label}] OAuth request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
         (warnLog ?? log)(lastError);
         return null;
+      } finally {
+        release();
       }
     },
     getLastError(): string | null {

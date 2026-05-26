@@ -21,7 +21,6 @@ npm-debug.log*
 # Build & coverage
 dist/
 coverage/
-.c8rc.json
 
 # Output
 output/

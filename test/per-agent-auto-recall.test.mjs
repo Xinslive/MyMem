@@ -1039,6 +1039,77 @@ describe("real before_prompt_build hook", () => {
     }
   });
 
+  it("preserves configured query context for cached message_received text", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-cached-message-truncate-"));
+    let retrieveParams;
+
+    const retriever = {
+      async retrieve(params) {
+        retrieveParams = params;
+        return [];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMaxQueryLength: 120,
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {},
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+      const messageHooks = harness.eventHandlers.get("message_received") || [];
+      const beforePromptHooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: messageReceivedHook }] = messageHooks;
+      const [{ handler: autoRecallHook }] = beforePromptHooks;
+      const sessionKey = "agent:main:session:test-cached-message-truncate";
+      const longMessage = "BEGIN-" + "older message context ".repeat(40) + "LATEST USER REQUEST: optimize cached recall";
+
+      await messageReceivedHook({ content: longMessage, sessionKey }, { sessionId: "test-cached-message-truncate", sessionKey });
+      await autoRecallHook(
+        {
+          prompt: "Host prompt wrapper without the raw user wording",
+          sessionKey,
+        },
+        { sessionId: "test-cached-message-truncate", sessionKey },
+      );
+
+      assert.equal(retrieveParams.query.length, 120);
+      assert.ok(retrieveParams.query.startsWith("BEGIN-"));
+      assert.ok(retrieveParams.query.endsWith("LATEST USER REQUEST: optimize cached recall"));
+      assert.match(retrieveParams.query, /keeping latest context/);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps redundancy history isolated by sessionKey when sessionId is missing", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-sessionkey-isolation-"));
     let retrieveCalls = 0;
@@ -1233,18 +1304,18 @@ describe("real before_prompt_build hook", () => {
     }
   });
 
-  it("keeps legacy injection shape when learning memory is disabled", async () => {
+  it("keeps compact injection shape when learning memory is disabled", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-learning-disabled-"));
     const memoryResult = {
       entry: {
         id: "plain-memory-1",
-        text: "plain memory should inject with the legacy shape",
+        text: "plain memory should inject with the compact shape",
         category: "fact",
         scope: "global",
         importance: 0.8,
         timestamp: Date.now(),
         metadata: JSON.stringify({
-          summary: "plain memory should inject with the legacy shape",
+          summary: "plain memory should inject with the compact shape",
           memory_category: "cases",
           state: "confirmed",
           memory_layer: "working",
@@ -1317,7 +1388,7 @@ describe("real before_prompt_build hook", () => {
       );
 
       assert.ok(output?.prependContext?.includes("<relevant-memories>"));
-      assert.match(output.prependContext, /\[W\]\[cases:global\]/);
+      assert.match(output.prependContext, /- \[cases\] \[\d{4}-\d{2}-\d{2}\] plain memory should inject with the compact shape/);
       assert.doesNotMatch(output.prependContext, /member:/);
       assert.ok(patches.flat().every(({ patch }) => !Object.hasOwn(patch, "utility_score")));
     } finally {
