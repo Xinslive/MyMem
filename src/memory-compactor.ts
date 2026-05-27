@@ -25,6 +25,7 @@
 import type { MemoryEntry } from "./store.js";
 import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } from "./smart-metadata.js";
+import { LLM_COMPACTION_REFINEMENT_SCHEMA } from "./llm-output-schemas.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import { cosineSimilarity } from "./utils.js";
 export { cosineSimilarity } from "./utils.js";
@@ -372,6 +373,7 @@ async function refineClusterWithLlm(
   const response = await llm.completeJson<unknown>(
     buildRefinementPrompt(members),
     "memory-compaction-refine",
+    LLM_COMPACTION_REFINEMENT_SCHEMA,
   );
   return normalizeRefinedMemory(response, fallback);
 }

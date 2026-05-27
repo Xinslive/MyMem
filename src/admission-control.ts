@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { LlmClient } from "./llm-client.js";
 import type { CandidateMemory, MemoryCategory } from "./memory-categories.js";
 import type { MemorySearchResult, MemoryStore } from "./store.js";
+import { LLM_ADMISSION_UTILITY_SCHEMA } from "./llm-output-schemas.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import { cosineSimilarity } from "./utils.js";
 
@@ -627,6 +628,7 @@ async function scoreUtility(
     response = await llm.completeJson<{ utility?: number; reason?: string }>(
       buildUtilityPrompt(candidate, conversationText),
       "admission-utility",
+      LLM_ADMISSION_UTILITY_SCHEMA,
     );
   } catch {
     return { score: 0.5, reason: "Utility scoring failed" };

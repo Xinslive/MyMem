@@ -118,6 +118,8 @@ export class MemoryStore {
   private ftsIndexCreated = false;
   private vectorIndexCreated = false;
   private scalarIndexedColumns = new Set<string>();
+  /** Last FTS error for diagnostics. */
+  private _lastFtsError: string | null = null;
 
   // Flush-batch: buffer store() calls and write them in a single lock acquisition.
   private _batchBuffer: MemoryEntry[] = [];
@@ -593,11 +595,28 @@ export class MemoryStore {
 
     let table: LanceDB.Table;
 
-    // Idempotent table init: try openTable first, create only if missing,
-    // and handle the race where tableNames() misses an existing table but
-    // createTable then sees it (LanceDB eventual consistency).
+    let tableExists: boolean;
     try {
-      table = await db.openTable(TABLE_NAME);
+      tableExists = (await db.tableNames()).includes(TABLE_NAME);
+    } catch (err) {
+      throw new Error(
+        `Failed to list LanceDB tables at "${this.config.dbPath}": ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+
+    // Idempotent table init: use tableNames() to distinguish a missing table
+    // from a broken existing table. createTable still handles the race where
+    // another process creates the table after tableNames() returns.
+    if (tableExists) {
+      try {
+        table = await db.openTable(TABLE_NAME);
+      } catch (err) {
+        throw new Error(
+          `Failed to open existing LanceDB table "${TABLE_NAME}" at "${this.config.dbPath}": ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
 
       // Migrate legacy tables: add missing columns for backward compatibility
       try {
@@ -633,7 +652,7 @@ export class MemoryStore {
           this.log.warn(`could not check/migrate table schema: ${err}`);
         }
       }
-    } catch {
+    } else {
       // Table doesn't exist yet ??create it
       const schemaEntry: MemoryEntry = {
         id: "__schema__",
@@ -1580,9 +1599,29 @@ export class MemoryStore {
 
   /** Release database and table references, clearing caches. */
   close(): void {
+    const table = this.table;
+    const db = this.db;
+
+    try {
+      table?.close();
+    } catch (err) {
+      this.log.warn(`failed to close LanceDB table: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      db?.close();
+    } catch (err) {
+      this.log.warn(`failed to close LanceDB connection: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     this.table = null;
     this.db = null;
+    this.initPromise = null;
+    this.ftsIndexCreated = false;
+    this.vectorIndexCreated = false;
+    this.scalarIndexedColumns.clear();
     this._statsCache = null;
+    this._lastFtsError = null;
   }
 
   async getIndexStatus(): Promise<StoreIndexStatus> {
@@ -1593,9 +1632,6 @@ export class MemoryStore {
   get hasFtsSupport(): boolean {
     return this.ftsIndexCreated;
   }
-
-  /** Last FTS error for diagnostics */
-  private _lastFtsError: string | null = null;
 
   get lastFtsError(): string | null {
     return this._lastFtsError;

@@ -97,3 +97,63 @@ test("Ollama embedWithNativeFetch aborts slow request within expected time", asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("batch embeddings honor caller abort signals", async () => {
+  const ABORT_AFTER_MS = 50;
+  const SLOW_DELAY_MS = 2_000;
+  const DIMS = 8;
+
+  const server = http.createServer((req, res) => {
+    if (req.url === "/v1/embeddings" && req.method === "POST") {
+      const timer = setTimeout(() => {
+        if (res.writableEnded) return;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          data: [
+            { embedding: Array.from({ length: DIMS }, () => 0.1), index: 0 },
+            { embedding: Array.from({ length: DIMS }, () => 0.2), index: 1 },
+          ],
+        }));
+      }, SLOW_DELAY_MS);
+      req.on("aborted", () => clearTimeout(timer));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  try {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "text-embedding-3-small",
+      baseURL: `http://127.0.0.1:${port}/v1`,
+      dimensions: DIMS,
+    });
+
+    const start = Date.now();
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), ABORT_AFTER_MS);
+
+    let errorCaught;
+    try {
+      await embedder.embedBatchPassage(["first", "second"], controller.signal);
+      assert.fail("embedBatchPassage should have thrown");
+    } catch (e) {
+      errorCaught = e;
+    }
+
+    clearTimeout(abortTimer);
+    const elapsed = Date.now() - start;
+    assert.ok(errorCaught, "embedBatchPassage should have thrown");
+    assert.ok(
+      elapsed < SLOW_DELAY_MS * 0.75,
+      `Expected batch abort near ${ABORT_AFTER_MS}ms, got ${elapsed}ms`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
