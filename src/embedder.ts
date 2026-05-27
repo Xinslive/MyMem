@@ -582,16 +582,12 @@ export class Embedder {
     return this.embedWithInflight(text, this._taskPassage, "embedPassage", signal);
   }
 
-  // Note: embedBatchQuery/embedBatchPassage are NOT wrapped with withTimeout because
-  // they handle multiple texts in a single API call. The timeout would fire after
-  // EMBED_TIMEOUT_MS regardless of how many texts succeed. Individual text embedding
-  // within the batch is protected by the SDK's own timeout handling.
   async embedBatchQuery(texts: string[], signal?: AbortSignal): Promise<number[][]> {
-    return this.embedMany(texts, this._taskQuery, signal);
+    return this.withTimeout((sig) => this.embedMany(texts, this._taskQuery, sig), "embedBatchQuery", signal);
   }
 
   async embedBatchPassage(texts: string[], signal?: AbortSignal): Promise<number[][]> {
-    return this.embedMany(texts, this._taskPassage, signal);
+    return this.withTimeout((sig) => this.embedMany(texts, this._taskPassage, sig), "embedBatchPassage", signal);
   }
 
   // --------------------------------------------------------------------------

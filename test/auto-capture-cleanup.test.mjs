@@ -138,6 +138,109 @@ describe("auto-capture cleanup", () => {
     );
   });
 
+  it("serializes overlapping auto-capture runs for the same session", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    const capturedConversationTexts = [];
+    let activeExtractions = 0;
+    let maxActiveExtractions = 0;
+    let markFirstStarted;
+    let releaseFirst;
+    const firstStarted = new Promise((resolve) => {
+      markFirstStarted = resolve;
+    });
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        captureAssistantAgents: ["main"],
+        scopes: { default: "global" },
+      },
+      store: {},
+      embedder: {},
+      smartExtractor: {
+        async extractAndPersist(conversationText) {
+          activeExtractions++;
+          maxActiveExtractions = Math.max(maxActiveExtractions, activeExtractions);
+          capturedConversationTexts.push(conversationText);
+          if (capturedConversationTexts.length === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => {
+              releaseFirst = resolve;
+            });
+          }
+          activeExtractions--;
+          return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
+        },
+      },
+      extractionRateLimiter: {
+        isRateLimited() {
+          return false;
+        },
+        getRecentCount() {
+          return 0;
+        },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() {
+          return ["global"];
+        },
+        getDefaultScope() {
+          return "global";
+        },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    assert.ok(agentEndHook, "expected agent_end hook to be registered");
+
+    const ctx = {
+      agentId: "main",
+      sessionKey: "agent:main:channel-1:conversation-1",
+    };
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "assistant", content: "First assistant memory should be captured." },
+        ],
+      },
+      ctx,
+    );
+    const firstRun = agentEndHook.__lastRun;
+
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "assistant", content: "First assistant memory should be captured." },
+          { role: "assistant", content: "Second assistant memory should wait its turn." },
+        ],
+      },
+      ctx,
+    );
+    const secondRun = agentEndHook.__lastRun;
+
+    await firstStarted;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(capturedConversationTexts.length, 1);
+    releaseFirst();
+    await firstRun;
+    await secondRun;
+
+    assert.equal(maxActiveExtractions, 1);
+    assert.equal(capturedConversationTexts.length, 2);
+    assert.match(capturedConversationTexts[1], /Second assistant memory/);
+    assert.doesNotMatch(capturedConversationTexts[1], /First assistant memory/);
+  });
+
   it("skips non-main auto-capture before smart extraction by default", async () => {
     const { api, eventHandlers } = createAutoCaptureHarness();
     let extractionRuns = 0;

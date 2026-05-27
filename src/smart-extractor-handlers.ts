@@ -10,6 +10,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { AdmissionController, AdmissionAuditRecord } from "./admission-control.js";
 import type { CandidateMemory, MemoryCategory } from "./memory-categories.js";
 import { buildMergePrompt } from "./extraction-prompts.js";
+import { LLM_MERGE_MEMORY_SCHEMA } from "./llm-output-schemas.js";
 import {
   appendRelation,
   buildSmartMetadata,
@@ -291,7 +292,7 @@ export async function handleMerge(
   const merged = await ctx.llm.completeJson<{
     abstract: string;
     content: string;
-  }>(prompt, "merge-memory");
+  }>(prompt, "merge-memory", LLM_MERGE_MEMORY_SCHEMA);
 
   if (!merged) {
     ctx.log.warn("mymem：智能提取 LLM 合并失败，已跳过合并");

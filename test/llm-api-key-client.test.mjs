@@ -5,6 +5,7 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createLlmClient } = jiti("../src/llm-client.ts");
+const { LLM_EXTRACTION_SCHEMA } = jiti("../src/llm-output-schemas.ts");
 
 describe("LLM api-key client", () => {
   let server;
@@ -64,6 +65,82 @@ describe("LLM api-key client", () => {
       },
     ]);
     assert.equal(requestBody.temperature, 0.1);
+  });
+
+  it("retries transient provider failures", async () => {
+    let requestCount = 0;
+
+    server = http.createServer(async (req, res) => {
+      for await (const _chunk of req) {
+        // Drain request body before responding.
+      }
+      requestCount++;
+      if (requestCount === 1) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "try again later" } }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: "{\"memories\":[]}",
+            },
+          },
+        ],
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+
+    const logs = [];
+    const llm = createLlmClient({
+      auth: "api-key",
+      apiKey: "test-api-key",
+      model: "gpt-4o-mini",
+      baseURL: `http://127.0.0.1:${port}/v1`,
+      log: (message) => logs.push(message),
+    });
+
+    const result = await llm.completeJson("hello", "api-key-retry");
+    assert.deepEqual(result, { memories: [] });
+    assert.equal(requestCount, 2);
+    assert.ok(logs.some((message) => message.includes("transient request failure")));
+  });
+
+  it("rejects JSON that does not match the requested schema", async () => {
+    server = http.createServer(async (req, res) => {
+      for await (const _chunk of req) {
+        // Drain request body before responding.
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: "{\"memories\":\"not-an-array\"}",
+            },
+          },
+        ],
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+
+    const llm = createLlmClient({
+      auth: "api-key",
+      apiKey: "test-api-key",
+      model: "gpt-4o-mini",
+      baseURL: `http://127.0.0.1:${port}/v1`,
+    });
+
+    assert.equal(
+      await llm.completeJson("hello", "api-key-schema", LLM_EXTRACTION_SCHEMA),
+      null,
+    );
+    assert.match(llm.getLastError() || "", /schema validation failed/);
   });
 
   it("limits concurrent provider requests across client calls", async () => {

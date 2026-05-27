@@ -12,6 +12,7 @@ import type { LlmClient } from "./llm-client.js";
 import {
   buildExtractionPrompt,
 } from "./extraction-prompts.js";
+import { LLM_EXTRACTION_SCHEMA } from "./llm-output-schemas.js";
 import {
   AdmissionController,
   type AdmissionAuditRecord,
@@ -440,7 +441,7 @@ export class SmartExtractor {
         abstract: string;
         content: string;
       }>;
-    }>(prompt, "extract-candidates");
+    }>(prompt, "extract-candidates", LLM_EXTRACTION_SCHEMA);
 
     if (!result) {
       this.debugLog(

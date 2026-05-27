@@ -18,6 +18,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import type { MemoryTier } from "./memory-categories.js";
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { LLM_MEMORY_UPGRADE_SCHEMA } from "./llm-output-schemas.js";
 
 // ============================================================================
 // Types
@@ -302,7 +303,7 @@ export class MemoryUpgrader {
           summary: string;
           content: string;
           resolved_category?: string;
-        }>(prompt);
+        }>(prompt, "memory-upgrade", LLM_MEMORY_UPGRADE_SCHEMA);
 
         if (!llmResult) {
           const detail = this.llm.getLastError();

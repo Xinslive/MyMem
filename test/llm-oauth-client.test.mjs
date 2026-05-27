@@ -8,6 +8,7 @@ import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createLlmClient } = jiti("../src/llm-client.ts");
 const { resolveOAuthCallbackListenHost } = jiti("../src/llm-oauth.ts");
+const { LLM_EXTRACTION_SCHEMA } = jiti("../src/llm-output-schemas.ts");
 
 const ACCOUNT_ID_CLAIM = "https://api.openai.com/auth";
 const originalFetch = globalThis.fetch;
@@ -253,6 +254,186 @@ describe("LLM OAuth client", () => {
     assert.equal(persisted.refresh_token, "refresh-new");
     assert.equal(persisted.account_id, "acct_new");
     assert.ok(typeof persisted.updated_at === "string" && persisted.updated_at.length > 0);
+  });
+
+  it("reloads the OAuth file after a refresh failure", async () => {
+    const expiredAccessToken = makeJwt({
+      exp: Math.floor((Date.now() - 60_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_old",
+      },
+    });
+    const validAccessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_recovered",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: expiredAccessToken,
+        refresh_token: "refresh-old",
+      }),
+      "utf8",
+    );
+
+    let refreshRequests = 0;
+    let backendRequests = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/oauth/token")) {
+        refreshRequests++;
+        return new Response(
+          JSON.stringify({ error: "invalid_grant" }),
+          { status: 401 },
+        );
+      }
+
+      backendRequests++;
+      const eventPayload = JSON.stringify({
+        type: "response.output_text.done",
+        text: "{\"memories\":[]}",
+      });
+      return new Response(
+        [
+          "event: response.output_text.done",
+          `data: ${eventPayload}`,
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+        },
+      );
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 100,
+    });
+
+    assert.equal(await llm.completeJson("first"), null);
+    assert.equal(refreshRequests, 1);
+
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: validAccessToken,
+        refresh_token: "refresh-new",
+      }),
+      "utf8",
+    );
+
+    assert.deepEqual(await llm.completeJson("second"), { memories: [] });
+    assert.equal(refreshRequests, 1);
+    assert.equal(backendRequests, 1);
+  });
+
+  it("retries transient OAuth backend failures", async () => {
+    const accessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_retry",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: accessToken,
+        refresh_token: "refresh-token",
+      }),
+      "utf8",
+    );
+
+    let backendRequests = 0;
+    const logs = [];
+    globalThis.fetch = async () => {
+      backendRequests++;
+      if (backendRequests === 1) {
+        return new Response("temporary outage", { status: 503, statusText: "Service Unavailable" });
+      }
+
+      const eventPayload = JSON.stringify({
+        type: "response.output_text.done",
+        text: "{\"memories\":[]}",
+      });
+      return new Response(
+        [
+          "event: response.output_text.done",
+          `data: ${eventPayload}`,
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+        },
+      );
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 1_000,
+      log: (message) => logs.push(message),
+    });
+
+    assert.deepEqual(await llm.completeJson("retry me", "oauth-retry"), { memories: [] });
+    assert.equal(backendRequests, 2);
+    assert.ok(logs.some((message) => message.includes("transient request failure")));
+  });
+
+  it("rejects OAuth JSON that does not match the requested schema", async () => {
+    const accessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_schema",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: accessToken,
+        refresh_token: "refresh-token",
+      }),
+      "utf8",
+    );
+
+    globalThis.fetch = async () => {
+      const eventPayload = JSON.stringify({
+        type: "response.output_text.done",
+        text: "{\"memories\":\"not-an-array\"}",
+      });
+      return new Response(
+        [
+          "event: response.output_text.done",
+          `data: ${eventPayload}`,
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+        },
+      );
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 1_000,
+    });
+
+    assert.equal(
+      await llm.completeJson("schema check", "oauth-schema", LLM_EXTRACTION_SCHEMA),
+      null,
+    );
+    assert.match(llm.getLastError() || "", /schema validation failed/);
   });
 
   it("aborts stalled OAuth backend requests when timeoutMs elapses", async () => {

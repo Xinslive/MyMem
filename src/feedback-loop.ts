@@ -17,6 +17,7 @@ import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { buildReasoningStrategyFields } from "./reasoning-strategy.js";
 import { buildLessonWorthinessPrompt } from "./extraction-prompts.js";
+import { LLM_LESSON_WORTHINESS_SCHEMA } from "./llm-output-schemas.js";
 
 // ============================================================================
 // Types
@@ -546,6 +547,7 @@ export class FeedbackLoop {
       const result = await this.llm.completeJson<{ worth_storing?: boolean; reason?: string }>(
         prompt,
         "lesson-worthiness",
+        LLM_LESSON_WORTHINESS_SCHEMA,
       );
 
       if (!result || typeof result.worth_storing !== "boolean") {

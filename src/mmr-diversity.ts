@@ -27,7 +27,7 @@ function getOrConvertVector(vec: unknown): { arr: number[]; norm: number } | nul
  * relevant (high score) and diverse (low similarity to already-selected).
  *
  * Uses cosine similarity between memory vectors. If two memories have
- * cosine similarity > threshold (default 0.92), the lower-scored one
+ * cosine similarity > threshold (default 0.85), the lower-scored one
  * is demoted to the end rather than removed entirely.
  *
  * This prevents top-k from being filled with near-identical entries

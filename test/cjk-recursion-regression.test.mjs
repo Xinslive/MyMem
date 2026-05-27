@@ -210,7 +210,7 @@ async function testTimeoutAbortPropagation() {
 }
 
 async function testBatchEmbeddingStillWorks() {
-  console.log("Test 7: batch embedding still works without withTimeout wrapper");
+  console.log("Test 7: batch embedding still works with timeout wrapper");
 
   await withServer((_payload, _req, res) => {
     const dims = 1024;

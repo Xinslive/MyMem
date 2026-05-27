@@ -64,6 +64,20 @@ export function registerAutoCaptureHook(params: {
 
   if (config.autoCapture === false) return;
 
+  const sessionRuns = new Map<string, Promise<void>>();
+
+  const enqueueSessionRun = (sessionKey: string, run: () => Promise<void>): Promise<void> => {
+    const previous = sessionRuns.get(sessionKey) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(run);
+    sessionRuns.set(sessionKey, next);
+    void next.finally(() => {
+      if (sessionRuns.get(sessionKey) === next) {
+        sessionRuns.delete(sessionKey);
+      }
+    });
+    return next;
+  };
+
   type AgentEndAutoCaptureHook = {
     (event: any, ctx: any): void;
     __lastRun?: Promise<void>;
@@ -74,9 +88,9 @@ export function registerAutoCaptureHook(params: {
       return;
     }
 
-    const backgroundRun = (async () => {
+    const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
+    const backgroundRun = enqueueSessionRun(sessionKey, async () => {
       try {
-        const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
         const agentId = resolveHookAgentId(ctx?.agentId, sessionKey);
         const captureAgents = resolveCaptureAgents(config);
         if (!captureAgents.includes(agentId)) {
@@ -207,7 +221,7 @@ export function registerAutoCaptureHook(params: {
       } catch (err) {
         api.logger.warn(`mymem：捕获失败：${String(err)}`);
       }
-    })();
+    });
     agentEndAutoCaptureHook.__lastRun = backgroundRun;
     void backgroundRun;
   };

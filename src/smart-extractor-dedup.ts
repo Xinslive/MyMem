@@ -10,6 +10,7 @@ import type {
   DedupResult,
 } from "./memory-categories.js";
 import { buildDedupPrompt } from "./extraction-prompts.js";
+import { LLM_DEDUP_DECISION_SCHEMA } from "./llm-output-schemas.js";
 import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
 
 // ============================================================================
@@ -135,7 +136,7 @@ export async function llmDedupDecision(
       decision: string;
       reason: string;
       match_index?: number;
-    }>(prompt, "dedup-decision");
+    }>(prompt, "dedup-decision", LLM_DEDUP_DECISION_SCHEMA);
 
     if (!data) {
       ctx.log.warn(

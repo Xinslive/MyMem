@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { platform } from "node:os";
 import { spawn } from "node:child_process";
@@ -470,6 +470,7 @@ async function exchangeAuthorizationCode(code: string, verifier: string, provide
 
 export async function saveOAuthSession(authPath: string, session: OAuthSession): Promise<void> {
   await mkdir(dirname(authPath), { recursive: true });
+  const tempPath = `${authPath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   const payload = {
     provider: session.providerId,
     type: "oauth",
@@ -479,10 +480,16 @@ export async function saveOAuthSession(authPath: string, session: OAuthSession):
     account_id: session.accountId,
     updated_at: new Date().toISOString(),
   };
-  await writeFile(authPath, JSON.stringify(payload, null, 2) + "\n", {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  try {
+    await writeFile(tempPath, JSON.stringify(payload, null, 2) + "\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await rename(tempPath, authPath);
+  } catch (err) {
+    await unlink(tempPath).catch(() => undefined);
+    throw err;
+  }
 }
 
 function tryOpenBrowser(url: string): void {
