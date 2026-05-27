@@ -16,6 +16,56 @@ export const MEMORY_CATEGORIES = [
 
 export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 
+const CATEGORY_ALIASES: Record<string, MemoryCategory> = {
+  // Common singular forms returned by smaller/local extraction models.
+  preference: "preferences",
+  entity: "entities",
+  event: "events",
+  case: "cases",
+  pattern: "patterns",
+
+  // Legacy top-level store categories that older prompts/models may still emit.
+  fact: "entities",
+  decision: "events",
+  decisions: "events",
+
+  // Occasional descriptive labels instead of exact enum values.
+  user_profile: "profile",
+  user_preference: "preferences",
+  user_preferences: "preferences",
+  person: "entities",
+  project: "entities",
+  organization: "entities",
+  organisation: "entities",
+  problem_solution: "cases",
+  workflow: "patterns",
+  process: "patterns",
+
+  // Chinese labels seen from Simplified Chinese default-output models.
+  用户画像: "profile",
+  画像: "profile",
+  身份: "profile",
+  个人资料: "profile",
+  偏好: "preferences",
+  用户偏好: "preferences",
+  喜好: "preferences",
+  实体: "entities",
+  项目: "entities",
+  人物: "entities",
+  组织: "entities",
+  事实: "entities",
+  事件: "events",
+  决策: "events",
+  决定: "events",
+  里程碑: "events",
+  案例: "cases",
+  问题解决: "cases",
+  问题解决方案: "cases",
+  模式: "patterns",
+  流程: "patterns",
+  过程: "patterns",
+};
+
 /** Categories that always merge (skip dedup entirely). */
 export const ALWAYS_MERGE_CATEGORIES = new Set<MemoryCategory>(["profile"]);
 
@@ -135,9 +185,13 @@ export type ExtractionStats = {
 
 /** Validate and normalize a category string. */
 export function normalizeCategory(raw: string): MemoryCategory | null {
-  const lower = raw.toLowerCase().trim();
+  const lower = raw
+    .toLowerCase()
+    .trim()
+    .replace(/^memory[\s_-]*category\s*[:：]\s*/u, "")
+    .replace(/[\s-]+/gu, "_");
   if ((MEMORY_CATEGORIES as readonly string[]).includes(lower)) {
     return lower as MemoryCategory;
   }
-  return null;
+  return CATEGORY_ALIASES[lower] ?? null;
 }

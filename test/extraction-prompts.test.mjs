@@ -40,6 +40,15 @@ describe("extraction prompts", () => {
     assert.match(prompt, /助手建议用户按项目标签整理笔记，这不是用户偏好/);
   });
 
+  it("treats explicit remember requests as strong storage signals", () => {
+    const prompt = buildExtractionPrompt("User: 记住我喜欢乌龙茶。", "User");
+
+    assert.match(prompt, /Explicit capture intent/);
+    assert.match(prompt, /treat it as a strong storage signal/);
+    assert.match(prompt, /Store the underlying durable fact/);
+    assert.match(prompt, /记住我喜欢乌龙茶/);
+  });
+
   it("keeps technical identifiers unchanged in extraction and merge prompts", () => {
     const extractionPrompt = buildExtractionPrompt("User: Use LanceDB with Number(...).", "User");
     assert.match(extractionPrompt, /code identifiers, API names, file paths, commands, URLs, config keys, model names/);

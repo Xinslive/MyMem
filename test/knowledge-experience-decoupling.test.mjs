@@ -23,7 +23,7 @@ Module._initPaths();
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 
-const { classifyMemoryType } = jiti("../src/memory-categories.ts");
+const { classifyMemoryType, normalizeCategory } = jiti("../src/memory-categories.ts");
 const { parseSmartMetadata, buildSmartMetadata, stringifySmartMetadata } =
   jiti("../src/smart-metadata.ts");
 const { createDecayEngine, DEFAULT_DECAY_CONFIG } =
@@ -56,6 +56,17 @@ describe("classifyMemoryType", () => {
   it("defaults to knowledge when neither is informative", () => {
     assert.equal(classifyMemoryType(undefined, undefined), "knowledge");
     assert.equal(classifyMemoryType("totally-unknown"), "knowledge");
+  });
+});
+
+describe("normalizeCategory", () => {
+  it("accepts common LLM aliases for the 6 semantic categories", () => {
+    assert.equal(normalizeCategory("preference"), "preferences");
+    assert.equal(normalizeCategory("entity"), "entities");
+    assert.equal(normalizeCategory("case"), "cases");
+    assert.equal(normalizeCategory("decision"), "events");
+    assert.equal(normalizeCategory("problem solution"), "cases");
+    assert.equal(normalizeCategory("用户偏好"), "preferences");
   });
 });
 

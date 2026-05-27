@@ -5,7 +5,7 @@ import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { SmartExtractor } = jiti("../src/smart-extractor.ts");
 
-function makeExtractor(scopeFilters) {
+function makeExtractor(scopeFilters, category = "preferences") {
   const store = {
     async vectorSearch(_vector, _limit, _minScore, scopeFilter) {
       scopeFilters.push(scopeFilter);
@@ -28,7 +28,7 @@ function makeExtractor(scopeFilters) {
         return {
           memories: [
             {
-              category: "preferences",
+              category,
               abstract: "饮品偏好：乌龙茶",
               overview: "## Preference\n- 喜欢乌龙茶",
               content: "用户喜欢乌龙茶。",
@@ -96,5 +96,16 @@ describe("SmartExtractor scopeFilter semantics", () => {
     });
 
     assert.deepStrictEqual(seen, [["custom:foo"]]);
+  });
+
+  it("normalizes singular LLM category aliases before persistence", async () => {
+    const seen = [];
+    const extractor = makeExtractor(seen, "preference");
+
+    await extractor.extractAndPersist("用户喜欢乌龙茶。", "session-alias", {
+      scope: "agent:test",
+    });
+
+    assert.deepStrictEqual(seen, [["agent:test"]]);
   });
 });

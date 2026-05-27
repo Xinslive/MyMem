@@ -28,6 +28,7 @@ ${conversationText}
 - Personalized information: Information specific to this user, not general domain knowledge
 - Long-term validity: Information that will still be useful in future sessions
 - Specific and clear: Has concrete details, not vague generalizations
+- Explicit capture intent: If the user says "remember this", "note that", "don't forget", "记住", "记一下", or "别忘", treat it as a strong storage signal. Store the underlying durable fact/preference/decision, not the meta fact that the user asked to remember something.
 
 ## What is NOT worth remembering?
 - General knowledge that anyone would know
@@ -140,6 +141,7 @@ For each candidate memory, judge whether it is truly worth long-term storage.
 - Has concrete details, will still be useful weeks/months later
 - Durable preferences, profile facts, reusable procedures, key relationships, significant decisions
 - Problem-solution pairs with enough detail to be actionable
+- Explicit user capture requests with durable, non-sensitive content, such as "记住我喜欢乌龙茶" or "don't forget that we chose SQLite for this project"
 
 **worth_storing = false** when:
 - One-off chitchat, greetings, or transient situational remarks
