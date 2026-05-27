@@ -190,6 +190,8 @@ export function buildDedupPrompt(
 ): string {
   return `Determine how to handle this candidate memory.
 
+CRITICAL: Return ONLY a single valid JSON object. No markdown fences, no explanations, no extra text before or after the JSON.
+
 **Candidate Memory**:
 Abstract: ${candidateAbstract}
 Content: ${candidateContent}
@@ -211,18 +213,41 @@ IMPORTANT:
 - If the candidate appears to be derived from a recall question (e.g., "Do you remember X?" / "你记得X吗？") and an existing memory already covers topic X with equal or more detail, you MUST choose SKIP.
 - A candidate with less information than an existing memory on the same topic should NEVER be CREATED or MERGED — always SKIP.
 - For "preferences" and "entities", use SUPERSEDE when the candidate replaces the current truth instead of adding detail or context. Example: existing "Preferred editor: VS Code", candidate "Preferred editor: Zed".
-- For SUPPORT/CONTEXTUALIZE/CONTRADICT, you MUST provide a context_label from this vocabulary: general, morning, evening, night, weekday, weekend, work, leisure, summer, winter, travel.
+
+Example 1 — candidate duplicates existing memory, decision is SKIP:
+{
+  "decision": "skip",
+  "reason": "Candidate duplicates existing memory #1 on Python code style preference."
+}
+
+Example 2 — candidate adds new details to existing memory, decision is MERGE:
+{
+  "decision": "merge",
+  "match_index": 1,
+  "reason": "Candidate adds specific font size preference to existing code style memory."
+}
+
+Example 3 — candidate reinforces an existing memory in a specific context, decision is SUPPORT with context_label:
+{
+  "decision": "support",
+  "match_index": 2,
+  "reason": "Candidate confirms existing tea preference, adding evening context.",
+  "context_label": "evening"
+}
 
 Return JSON format:
 {
   "decision": "skip|create|merge|supersede|support|contextualize|contradict",
   "match_index": 1,
-  "reason": "Decision reason",
+  "reason": "short explanation",
   "context_label": "evening"
 }
 
-- If decision is "merge"/"supersede"/"support"/"contextualize"/"contradict", set "match_index" to the number of the existing memory (1-based).
-- Only include "context_label" for support/contextualize/contradict decisions.`;
+- "decision" and "reason" are REQUIRED.
+- If decision is "skip" or "create", do NOT include "match_index".
+- If decision is "merge"/"supersede"/"support"/"contextualize"/"contradict", "match_index" is REQUIRED (1-based index of the existing memory).
+- Only include "context_label" when decision is "support", "contextualize", or "contradict". Choose from: general, morning, evening, night, weekday, weekend, work, leisure, summer, winter, travel.
+- Do NOT include "context_label" for skip/create/merge/supersede.`;
 }
 
 export function buildMergePrompt(
