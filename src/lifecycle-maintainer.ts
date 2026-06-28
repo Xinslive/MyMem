@@ -1,5 +1,4 @@
-import { dirname } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { DecayEngine } from "./decay-engine.js";
 import type { TierManager } from "./tier-manager.js";
 import type { Logger } from "./logger.js";
@@ -11,6 +10,7 @@ import {
   type SmartMemoryMetadata,
 } from "./smart-metadata.js";
 import { inferGovernanceRuleFromMemory, rulesConflict } from "./governance-rules.js";
+import { writeJsonFileAtomic } from "./file-utils.js";
 
 export interface LifecycleMaintenanceConfig {
   enabled: boolean;
@@ -221,8 +221,7 @@ export async function shouldRunLifecycleMaintenance(
 }
 
 export async function recordLifecycleMaintenanceRun(stateFile: string): Promise<void> {
-  await mkdir(dirname(stateFile), { recursive: true });
-  await writeFile(stateFile, JSON.stringify({ lastRunAt: Date.now() }), "utf8");
+  await writeJsonFileAtomic(stateFile, { lastRunAt: Date.now() });
 }
 
 export async function runLifecycleMaintenance(

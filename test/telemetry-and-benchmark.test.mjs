@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import jitiFactory from "jiti";
@@ -9,6 +9,7 @@ const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const {
   TelemetryStore,
   normalizeTelemetryConfig,
+  trimJsonlFile,
 } = jiti("../src/telemetry.ts");
 const { runBenchmarkSummary } = jiti("../benchmark/run.ts");
 const { runBenchmarkScenarios, compareBenchmarkBaseline } = jiti("../benchmark/run.ts");
@@ -78,6 +79,31 @@ describe("telemetry persistence", () => {
       assert.equal(summary.extraction?.totalRuns, 2);
       assert.equal(summary.extraction?.totalCreated, 1);
       assert.equal(summary.extraction?.totalRejected, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("trims telemetry JSONL through an atomic file replacement", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-telemetry-trim-"));
+    try {
+      const filePath = join(dir, "retrieval.jsonl");
+      writeFileSync(
+        filePath,
+        [
+          JSON.stringify({ kind: "retrieval", query: "old" }),
+          JSON.stringify({ kind: "retrieval", query: "new" }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      await trimJsonlFile(filePath, 1);
+
+      assert.deepEqual(
+        readFileSync(filePath, "utf8").trim().split("\n").map((line) => JSON.parse(line).query),
+        ["new"],
+      );
+      assert.deepEqual(readdirSync(dir), ["retrieval.jsonl"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

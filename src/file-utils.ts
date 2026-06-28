@@ -4,8 +4,9 @@
  * Helper functions for file system operations.
  */
 
-import { stat, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { stat, readdir, mkdir, rename, writeFile, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 /**
  * Sorts file names by modification time (newest first).
@@ -38,4 +39,32 @@ export async function listDirNames(dirPath: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Atomically writes a small text file by writing a sibling temp file
+ * first, then renaming it into place.
+ */
+export async function writeTextFileAtomic(filePath: string, content: string): Promise<void> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, content, { encoding: "utf8", mode: 0o600 });
+    await rename(tmpPath, filePath);
+  } catch (err) {
+    try {
+      await unlink(tmpPath);
+    } catch {
+      // Best effort cleanup; preserve the original write/rename error.
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically writes a small JSON state file by writing a sibling temp file
+ * first, then renaming it into place.
+ */
+export async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+  await writeTextFileAtomic(filePath, JSON.stringify(value));
 }

@@ -1,10 +1,11 @@
-import { appendFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ExtractionStats } from "./memory-categories.js";
 import type { RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector, type AggregateStats } from "./retrieval-stats.js";
+import { writeTextFileAtomic } from "./file-utils.js";
 
 export interface TelemetryConfig {
   persist?: boolean;
@@ -145,7 +146,7 @@ export async function trimJsonlFile(filePath: string, maxRecords: number): Promi
 
     if (lines.length <= maxRecords) return;
     const trimmed = `${lines.slice(lines.length - maxRecords).join("\n")}\n`;
-    await writeFile(filePath, trimmed, "utf8");
+    await writeTextFileAtomic(filePath, trimmed);
   } catch {
     // File may not exist or be inaccessible; silently skip.
   }

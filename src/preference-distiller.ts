@@ -1,11 +1,11 @@
-import { dirname } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { Logger } from "./logger.js";
 import type { PreferenceDistillerConfig } from "./plugin-types.js";
 import type { Embedder } from "./embedder.js";
 import type { MemoryEntry } from "./store.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { inferGovernanceRuleFromMemory, rulesConflict, type GovernanceRule } from "./governance-rules.js";
+import { writeJsonFileAtomic } from "./file-utils.js";
 
 type DistillStore = {
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
@@ -211,8 +211,7 @@ export async function shouldRunPreferenceDistiller(
 }
 
 export async function recordPreferenceDistillerRun(stateFile: string): Promise<void> {
-  await mkdir(dirname(stateFile), { recursive: true });
-  await writeFile(stateFile, JSON.stringify({ lastRunAt: Date.now() }), "utf8");
+  await writeJsonFileAtomic(stateFile, { lastRunAt: Date.now() });
 }
 
 export async function runPreferenceDistiller(

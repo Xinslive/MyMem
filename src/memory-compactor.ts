@@ -28,6 +28,7 @@ import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } 
 import { LLM_COMPACTION_REFINEMENT_SCHEMA } from "./llm-output-schemas.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import { cosineSimilarity } from "./utils.js";
+import { writeJsonFileAtomic } from "./file-utils.js";
 export { cosineSimilarity } from "./utils.js";
 
 // ============================================================================
@@ -671,8 +672,5 @@ export async function shouldRunCompaction(
 }
 
 export async function recordCompactionRun(stateFile: string): Promise<void> {
-  const { writeFile, mkdir } = await import("node:fs/promises");
-  const { dirname } = await import("node:path");
-  await mkdir(dirname(stateFile), { recursive: true });
-  await writeFile(stateFile, JSON.stringify({ lastRunAt: Date.now() }), "utf8");
+  await writeJsonFileAtomic(stateFile, { lastRunAt: Date.now() });
 }

@@ -58,6 +58,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/memory-update-metadata-refresh.test.mjs" },
   { group: "core-regression", runner: "node", file: "test/memory-update-supersede.test.mjs" },
   { group: "core-regression", runner: "node", file: "test/memory-upgrader-diagnostics.test.mjs" },
+  { group: "core-regression", runner: "node", file: "test/maintenance-state-atomic.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/migrate-legacy-schema.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/mmr-diversity.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/nvidia-nim-provider-profile.test.mjs", args: ["--test"] },
