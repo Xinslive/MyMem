@@ -1,0 +1,1379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyMem 记忆管理台</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f9fafb;
+      --text: #172033;
+      --muted: #667085;
+      --line: #d9dee8;
+      --teal: #147d82;
+      --teal-soft: #d8f1ef;
+      --violet: #6d5dfc;
+      --amber: #b86e00;
+      --amber-soft: #fff3d6;
+      --green: #16833a;
+      --green-soft: #ddf7e6;
+      --red: #c2413a;
+      --red-soft: #fee4e2;
+      --shadow: 0 10px 30px rgba(23, 32, 51, 0.08);
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      letter-spacing: 0;
+    }
+    button, input, select {
+      font: inherit;
+      letter-spacing: 0;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 8px;
+      height: 38px;
+      padding: 0 12px;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #ffffff;
+    }
+    button.icon {
+      width: 38px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+    input, select {
+      height: 38px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0 10px;
+      min-width: 0;
+    }
+    input:focus, select:focus, button:focus {
+      outline: 2px solid rgba(20, 125, 130, 0.25);
+      outline-offset: 2px;
+    }
+    .app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(246, 247, 251, 0.92);
+      backdrop-filter: blur(14px);
+    }
+    .topbar-inner {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #172033;
+      color: #ffffff;
+      font-weight: 800;
+      flex: 0 0 auto;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .nav-link {
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px;
+      color: var(--text);
+      text-decoration: none;
+      background: var(--panel);
+      font-size: 13px;
+    }
+    .nav-link.active {
+      color: #ffffff;
+      background: var(--text);
+      border-color: var(--text);
+    }
+    .layout {
+      width: 100%;
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 18px 20px 28px;
+      display: grid;
+      gap: 16px;
+    }
+    .dashboard-workspace {
+      display: grid;
+      grid-template-columns: minmax(420px, 0.85fr) minmax(620px, 1.15fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .memory-console,
+    .recall-console {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+    .console-title-group {
+      min-width: 0;
+    }
+    .console-head {
+      min-width: 0;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .console-title {
+      margin: 0 0 4px;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+    .memory-console-body {
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 16px;
+      min-height: 0;
+    }
+    .map-section {
+      min-width: 0;
+    }
+    .map-split {
+      padding-top: 14px;
+    }
+    .map-split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      align-items: start;
+    }
+    .panel-body {
+      padding: 14px 16px 16px;
+    }
+    .chart-card {
+      min-width: 0;
+    }
+    .chart-card.wide {
+      grid-column: 1 / -1;
+    }
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 18px;
+      row-gap: 4px;
+    }
+    .category-column {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      min-width: 0;
+    }
+    .chart-title {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "label count"
+        "track track";
+      gap: 6px 12px;
+      align-items: end;
+      min-height: 44px;
+      font-size: 13px;
+    }
+    .bar-label {
+      grid-area: label;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .bar-track {
+      height: 10px;
+      background: #edf1f6;
+      border-radius: 999px;
+      overflow: hidden;
+      grid-area: track;
+      min-width: 0;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+    .bar-fill.alt { background: var(--violet); }
+    .bar-fill.third { background: var(--amber); }
+    .bar-count {
+      grid-area: count;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      min-width: max-content;
+    }
+    .memory-list {
+      display: grid;
+      gap: 10px;
+    }
+    .memories-page {
+      display: none;
+    }
+    body[data-view="memories"] .memories-page {
+      display: block;
+    }
+    body[data-view="memories"] [data-view-section="dashboard"] {
+      display: none;
+    }
+    body[data-view="dashboard"] [data-view-section="memories"] {
+      display: none;
+    }
+    body[data-view="dashboard"] .memory-filter {
+      display: none;
+    }
+    .masonry-list {
+      column-count: 3;
+      column-gap: 12px;
+    }
+    .masonry-list .memory-item {
+      display: inline-block;
+      width: 100%;
+      margin: 0 0 12px;
+      break-inside: avoid;
+    }
+    .memories-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .memory-head-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .memory-head-actions .memory-filter {
+      min-width: 112px;
+      max-width: 140px;
+    }
+    .memory-head-actions .quality-filter {
+      min-width: 126px;
+    }
+    .memory-item {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-soft);
+      min-width: 0;
+    }
+    .memory-item[data-id] {
+      padding-right: 64px;
+      cursor: pointer;
+    }
+    .memory-actions {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .memory-actions button {
+      height: 30px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+    .memory-actions .danger {
+      border-color: #f4b3ae;
+      color: var(--red);
+      background: #fff8f7;
+    }
+    .memory-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #edf1f6;
+      color: #344054;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .chip.teal { background: var(--teal-soft); color: #09575b; }
+    .chip.green { background: var(--green-soft); color: var(--green); }
+    .chip.amber { background: var(--amber-soft); color: var(--amber); }
+    .chip.red { background: var(--red-soft); color: var(--red); }
+    .chip.quality {
+      background: #eef0ff;
+      color: #5547b8;
+    }
+    .memory-text {
+      font-size: 14px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+    .memory-stats {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .explain-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 94px 118px;
+      gap: 8px;
+      align-items: center;
+    }
+    .explain-output {
+      display: grid;
+      gap: 12px;
+      min-height: 0;
+    }
+    .explain-columns {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+      min-height: 0;
+    }
+    .recall-console-body {
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+      min-height: 0;
+    }
+    .query-dock {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
+      padding: 12px;
+    }
+    .stage-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .stage-card,
+    .results-card {
+      min-width: 0;
+      min-height: 0;
+    }
+    .results-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+    }
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .preview-head .chart-title {
+      margin-bottom: 0;
+    }
+    .muted-preview {
+      color: var(--muted);
+    }
+    .preview-memory {
+      color: var(--muted);
+    }
+    .diagnosis {
+      border-left: 4px solid var(--teal);
+      background: #f3fbfa;
+      padding: 12px;
+      border-radius: 8px;
+    }
+    .diagnosis.placeholder { border-left-color: var(--line); background: var(--panel-soft); }
+    .diagnosis.empty { border-left-color: var(--amber); background: #fffaf0; }
+    .diagnosis.degraded { border-left-color: var(--red); background: #fff6f5; }
+    .diagnosis-title {
+      font-weight: 720;
+      margin-bottom: 6px;
+    }
+    .plain-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .stage-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stage {
+      position: relative;
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr);
+      grid-template-areas:
+        "dot name"
+        "dot flow"
+        "dot time";
+      gap: 2px 8px;
+      align-items: start;
+      font-size: 13px;
+      min-height: 70px;
+      border: 1px solid #e7ecf2;
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+      overflow: hidden;
+    }
+    .stage::before {
+      content: "";
+      grid-area: dot;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--teal);
+      margin-top: 4px;
+    }
+    .muted-preview.stage::before {
+      background: #b8c3cf;
+    }
+    .stage::after {
+      content: attr(data-step);
+      position: absolute;
+      right: 10px;
+      bottom: -8px;
+      color: rgba(102, 112, 133, 0.12);
+      font-size: 46px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .stage-main {
+      grid-area: name / name / flow / flow;
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .stage-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .stage-flow {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+    }
+    .stage-time {
+      grid-area: time;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .result-stack {
+      min-height: 0;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .result-list-scroll {
+      max-height: clamp(190px, 28vh, 300px);
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+    .result-list-scroll::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+    .alert {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-soft);
+    }
+    .alert.ok { border-color: #bde8ca; background: var(--green-soft); }
+    .alert.warning { border-color: #f6cf85; background: var(--amber-soft); }
+    .alert.danger { border-color: #f4b3ae; background: var(--red-soft); }
+    .alert-title {
+      font-weight: 720;
+      margin-bottom: 4px;
+    }
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .config-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--panel-soft);
+      min-width: 0;
+    }
+    .config-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .config-value {
+      font-weight: 720;
+      overflow-wrap: anywhere;
+    }
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      background: rgba(23, 32, 51, 0.46);
+      padding: 20px;
+      overflow: auto;
+    }
+    .detail-overlay.open {
+      display: grid;
+      place-items: center;
+    }
+    .detail-panel {
+      width: min(860px, 100%);
+      max-height: min(760px, calc(100vh - 40px));
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 24px 80px rgba(23, 32, 51, 0.22);
+    }
+    .detail-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .detail-title {
+      font-size: 15px;
+      font-weight: 760;
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    .detail-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .detail-section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-soft);
+    }
+    .detail-section h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+    .detail-text {
+      white-space: pre-wrap;
+      line-height: 1.55;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+      margin: 0;
+    }
+    .empty-state {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 18px 0;
+    }
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #b8c3cf;
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 1080px) {
+      .dashboard-workspace {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
+    }
+    @media (max-width: 720px) {
+      .topbar-inner {
+        grid-template-columns: 1fr;
+        padding: 12px;
+      }
+      .toolbar {
+        justify-content: stretch;
+      }
+      .toolbar button {
+        flex: 1 1 130px;
+      }
+      .memory-head-actions {
+        width: 100%;
+        justify-content: stretch;
+      }
+      .memory-head-actions .memory-filter {
+        flex: 1 1 130px;
+        max-width: none;
+      }
+      .memory-head-actions #memoryCount {
+        flex: 1 1 100%;
+      }
+      .layout { padding: 12px; }
+      .chart-card.wide { grid-column: auto; }
+      .category-grid { grid-template-columns: 1fr; }
+      .map-split { grid-template-columns: 1fr; }
+      .explain-form { grid-template-columns: 1fr; }
+      .explain-columns { grid-template-columns: 1fr; }
+      .stage-list { grid-template-columns: 1fr; }
+      .masonry-list { column-count: 2; }
+      .memory-stats { grid-template-columns: 1fr; }
+      .config-grid { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 440px) {
+      .masonry-list { column-count: 1; }
+    }
+  </style>
+</head>
+<body data-view="dashboard">
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <h1>MyMem 记忆管理台</h1>
+            <div class="subtle" id="lastUpdated">正在读取本地记忆库</div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <a class="nav-link" id="overviewLink" href="/">总览</a>
+          <a class="nav-link" id="memoriesLink" href="/memories">记忆管理</a>
+          <button class="icon" id="refreshBtn" title="刷新" aria-label="刷新">↻</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="dashboard-workspace" data-view-section="dashboard">
+        <section class="memory-console">
+          <div class="console-head">
+            <div>
+              <h2 class="console-title">记忆地图</h2>
+              <div class="subtle">类型、活跃度和层级分布</div>
+            </div>
+            <span class="subtle" id="distributionHint">--</span>
+          </div>
+          <div class="memory-console-body">
+            <section class="map-section">
+              <div class="chart-title">按记忆类型</div>
+              <div id="categoryChart"></div>
+            </section>
+            <div class="map-split">
+              <section class="map-section">
+                <div class="chart-title">按活跃时间</div>
+                <div id="activityChart"></div>
+              </section>
+              <section class="map-section">
+                <div class="chart-title">按层级</div>
+                <div id="tierChart"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <aside class="recall-console">
+          <div class="console-head">
+            <div>
+              <h2 class="console-title">召回实验台</h2>
+              <div class="subtle">查询、阶段链路和命中结果</div>
+            </div>
+            <span class="subtle" id="explainCount">尚未查询</span>
+          </div>
+          <div class="recall-console-body">
+            <section class="query-dock">
+              <div class="explain-form">
+                <input id="queryInput" placeholder="输入想查的记忆" aria-label="查询内容">
+                <select id="limitInput" aria-label="返回数量">
+                  <option value="3">前 3 条</option>
+                  <option value="5" selected>前 5 条</option>
+                  <option value="10">前 10 条</option>
+                </select>
+                <button class="primary" id="explainBtn">诊断</button>
+              </div>
+            </section>
+            <div class="explain-output" id="explainOutput">
+              <div class="explain-columns">
+                <section class="stage-card">
+                  <div class="preview-head">
+                    <div class="chart-title">处理阶段</div>
+                    <span class="subtle">待诊断</span>
+                  </div>
+                  <div class="stage-list">
+                    <div class="stage muted-preview" data-step="01"><div class="stage-main"><div class="stage-name">混合候选</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                    <div class="stage muted-preview" data-step="02"><div class="stage-main"><div class="stage-name">过滤与重排</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                    <div class="stage muted-preview" data-step="03"><div class="stage-main"><div class="stage-name">多样性处理</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>
+                  </div>
+                </section>
+                <section class="results-card">
+                  <div class="preview-head">
+                    <div class="chart-title">命中结果</div>
+                    <span class="subtle">待诊断</span>
+                  </div>
+                  <div class="result-stack">
+                    <div class="diagnosis placeholder">
+                      <div class="diagnosis-title">未生成诊断</div>
+                      <div class="subtle">状态：待查询</div>
+                    </div>
+                    <article class="memory-item preview-memory">
+                      <div class="memory-meta">
+                        <span class="chip">类别</span>
+                        <span class="chip">范围</span>
+                        <span class="chip">得分</span>
+                      </div>
+                      <div class="memory-text">暂无命中结果</div>
+                    </article>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+      <section class="memories-page" data-view-section="memories">
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">记忆瀑布流</h2>
+            <div class="memory-head-actions">
+              <select class="memory-filter" id="scopeFilter" aria-label="记忆范围"></select>
+              <select class="memory-filter" id="categoryFilter" aria-label="记忆类型">
+                <option value="">全部类型</option>
+                <option value="profile">用户画像</option>
+                <option value="preferences">用户偏好</option>
+                <option value="entities">相关实体</option>
+                <option value="events">事件记录</option>
+                <option value="cases">案例经验</option>
+                <option value="patterns">行为模式</option>
+              </select>
+              <select class="memory-filter quality-filter" id="qualityFilter" aria-label="质量筛选">
+                <option value="">全部质量</option>
+                <option value="bad_recall">差召回</option>
+                <option value="suppressed">已抑制</option>
+                <option value="low_confidence">低置信</option>
+                <option value="inactive">非有效</option>
+              </select>
+              <span class="subtle" id="memoryCount">--</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="masonry-list" id="masonryMemories"></div>
+            <div class="memories-controls">
+              <span class="subtle" id="memoryLoadHint">按当前筛选加载</span>
+              <button id="loadMoreBtn">加载更多</button>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <div class="detail-overlay" id="detailOverlay" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <div class="detail-panel">
+        <div class="detail-head">
+          <h2 class="detail-title" id="detailTitle">记忆详情</h2>
+          <button class="icon" id="detailCloseBtn" title="关闭" aria-label="关闭">×</button>
+        </div>
+        <div class="detail-body" id="detailBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CATEGORY_ORDER = ["用户画像", "用户偏好", "相关实体", "事件记录", "案例经验", "行为模式"];
+
+    const state = {
+      summary: null,
+      busy: false,
+      memoriesBusy: false,
+      memoryLimit: 36,
+      memoryOffset: 0,
+      hasMoreMemories: true,
+      memoriesById: new Map()
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
+    }
+
+    function pct(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.round(n * 100) + "%" : "--";
+    }
+
+    function fixed(value, digits) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(digits) : "--";
+    }
+
+    function qualityLabel(value) {
+      return ({
+        bad_recall: "差召回",
+        suppressed: "已抑制",
+        low_confidence: "低置信",
+        inactive: "非有效"
+      })[value] || "全部质量";
+    }
+
+    function currentFilters() {
+      const scope = $("scopeFilter").value;
+      const category = $("categoryFilter").value;
+      const quality = $("qualityFilter").value;
+      return {
+        scope,
+        category,
+        quality
+      };
+    }
+
+    function queryString(params) {
+      const sp = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") sp.set(key, value);
+      });
+      const text = sp.toString();
+      return text ? "?" + text : "";
+    }
+
+    async function fetchJson(path, options) {
+      const response = await fetch(path, { cache: "no-store", ...(options || {}) });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || "request failed");
+      }
+      return payload;
+    }
+
+    function renderScopeOptions(scopes, selected) {
+      const select = $("scopeFilter");
+      const previous = selected || select.value;
+      const labels = (state.summary && state.summary.scopes && state.summary.scopes.labels) || {};
+      const options = ['<option value="">全部范围</option>'].concat(
+        (scopes || []).map((scope) => '<option value="' + escapeHtml(scope) + '">' + escapeHtml(labels[scope] || scope) + '</option>')
+      );
+      select.innerHTML = options.join("");
+      select.value = previous;
+    }
+
+    function renderOverviewSummary(summary) {
+      const memory = summary.memory;
+      $("distributionHint").textContent = memory.totalCount + " 条可见";
+    }
+
+    function renderBars(targetId, data, className, options) {
+      const target = $(targetId);
+      const entries = Object.entries(data || {});
+      if (!(options && options.preserveOrder)) {
+        entries.sort((a, b) => b[1] - a[1]);
+      }
+      if (entries.length === 0) {
+        target.innerHTML = '<div class="empty-state">暂无数据</div>';
+        return;
+      }
+      const max = Math.max(1, ...entries.map(([, count]) => Number(count) || 0));
+      target.innerHTML = entries.map(([label, count]) => {
+        const width = Math.max(3, Math.round(((Number(count) || 0) / max) * 100));
+        return '<div class="bar-row">' +
+          '<div class="bar-label" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</div>' +
+          '<div class="bar-track"><div class="bar-fill ' + className + '" style="width:' + width + '%"></div></div>' +
+          '<div class="bar-count">' + escapeHtml(count) + '</div>' +
+          '</div>';
+      }).join("");
+    }
+
+    function renderCategoryBars(targetId, data) {
+      const target = $(targetId);
+      const source = data || {};
+      const knownEntries = CATEGORY_ORDER.map((label) => [label, Number(source[label]) || 0]);
+      const extraEntries = Object.entries(source)
+        .filter(([label]) => !CATEGORY_ORDER.includes(label))
+        .sort((a, b) => Number(b[1]) - Number(a[1]));
+      const entries = knownEntries.concat(extraEntries);
+      if (entries.length === 0) {
+        target.innerHTML = '<div class="empty-state">暂无数据</div>';
+        return;
+      }
+      const max = Math.max(1, ...entries.map(([, count]) => Number(count) || 0));
+      const renderRows = (rows) => rows.map(([label, count]) => {
+        const width = Math.max(3, Math.round(((Number(count) || 0) / max) * 100));
+        return '<div class="bar-row">' +
+          '<div class="bar-label" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</div>' +
+          '<div class="bar-track"><div class="bar-fill alt" style="width:' + width + '%"></div></div>' +
+          '<div class="bar-count">' + escapeHtml(count) + '</div>' +
+          '</div>';
+      }).join("");
+      target.innerHTML =
+        '<div class="category-grid">' +
+          '<div class="category-column">' + renderRows(entries.slice(0, 3)) + '</div>' +
+          '<div class="category-column">' + renderRows(entries.slice(3)) + '</div>' +
+        '</div>';
+    }
+
+    function renderCharts(summary) {
+      renderCategoryBars("categoryChart", summary.display.categoryCounts);
+      renderBars("tierChart", summary.display.tierDistribution, "third");
+      renderBars("activityChart", {
+        "1 天内": summary.display.recentActivity["1 天内"],
+        "7 天内": summary.display.recentActivity["7 天内"],
+        "1 月内": summary.display.recentActivity["1 月内"],
+        "全部": summary.display.recentActivity["全部"]
+      }, "", { preserveOrder: true });
+    }
+
+    function qualityChips(memory) {
+      return (memory.qualityFlags || []).map((flag) =>
+        '<span class="chip quality">' + escapeHtml(qualityLabel(flag)) + '</span>'
+      ).join("");
+    }
+
+    function accessChip(memory) {
+      return '<span class="chip">访问 ' + escapeHtml(memory.accessCount) + '</span>';
+    }
+
+    function renderMemoryCards(memories) {
+      return (memories || []).map((memory) => (
+        '<article class="memory-item" data-id="' + escapeHtml(memory.id) + '">' +
+          '<div class="memory-meta">' +
+            '<span class="chip teal">' + escapeHtml(memory.categoryLabel) + '</span>' +
+            '<span class="chip">' + escapeHtml(memory.scopeLabel) + '</span>' +
+            accessChip(memory) +
+            qualityChips(memory) +
+            '<span class="chip">' + escapeHtml(memory.ageLabel) + '</span>' +
+          '</div>' +
+          '<div class="memory-text">' + escapeHtml(memory.preview) + '</div>' +
+          '<div class="memory-stats">' +
+            '<span>重要性 ' + pct(memory.importance) + '</span>' +
+            '<span>置信度 ' + pct(memory.confidence) + '</span>' +
+          '</div>' +
+          '<div class="memory-actions">' +
+            '<button class="danger" data-action="delete" data-id="' + escapeHtml(memory.id) + '">删除</button>' +
+          '</div>' +
+        '</article>'
+      )).join("");
+    }
+
+    function renderMemoryPage(memories, reset) {
+      const list = $("masonryMemories");
+      if (reset) {
+        state.memoriesById = new Map();
+        list.innerHTML = "";
+      }
+      for (const memory of memories || []) {
+        state.memoriesById.set(memory.id, memory);
+      }
+      const shown = state.memoriesById.size;
+      $("memoryCount").textContent = shown > 0 ? "已显示 " + shown + " 条" : "暂无记忆";
+
+      if (!memories || memories.length === 0) {
+        if (reset) list.innerHTML = '<div class="empty-state">当前筛选下没有记忆。</div>';
+      } else if (reset) {
+        list.innerHTML = renderMemoryCards(memories);
+      } else {
+        list.insertAdjacentHTML("beforeend", renderMemoryCards(memories));
+      }
+
+      $("loadMoreBtn").disabled = !state.hasMoreMemories || state.memoriesBusy;
+      $("memoryLoadHint").textContent = state.hasMoreMemories ? "可以继续加载更多" : "当前筛选已全部加载";
+    }
+
+    function stageName(name) {
+      return ({
+        parallel_search: "混合候选",
+        vector_search: "向量搜索",
+        bm25_search: "关键词搜索",
+        rrf_fusion: "结果融合",
+        min_score_filter: "最低分过滤",
+        hard_cutoff: "硬阈值过滤",
+        rerank: "重排处理",
+        noise_filter: "噪声过滤",
+        soft_cutoff: "软阈值过滤",
+        candidate_cap: "候选上限",
+        mmr_diversity: "多样性处理",
+        length_normalization: "长度归一",
+        time_decay: "时间衰减",
+        decay_boost: "衰减增强",
+        recency_composite: "新近加权",
+        fallback_scoring: "降级评分",
+        learning_policy: "学习策略"
+      })[name] || name;
+    }
+
+    function renderExplain(report) {
+      const explanation = report.explanation || {};
+      $("explainCount").textContent = report.count + " 条结果";
+      const diagnosisClass = explanation.status === "empty" ? " empty" : explanation.status === "degraded" ? " degraded" : "";
+      const reasons = (explanation.reasons || []).map((item) => '<li>' + escapeHtml(item) + '</li>').join("");
+      const suggestions = (explanation.suggestions || []).map((item) => '<li>' + escapeHtml(item) + '</li>').join("");
+      const traceStages = (report.trace && report.trace.stages) || [];
+      const stages = traceStages.map((stage, index) => {
+        const dropped = Math.max(0, Number(stage.inputCount || 0) - Number(stage.outputCount || 0));
+        const flow = Number(stage.inputCount || 0) === 0
+          ? "找到 " + stage.outputCount + " 条"
+          : stage.inputCount + " → " + stage.outputCount + " (-" + dropped + ")";
+        return '<div class="stage" data-step="' + String(index + 1).padStart(2, "0") + '">' +
+          '<div class="stage-main">' +
+            '<div class="stage-name">' + escapeHtml(stageName(stage.name)) + '</div>' +
+            '<div class="stage-flow">' + escapeHtml(flow) + '</div>' +
+          '</div>' +
+          '<div class="stage-time">' + escapeHtml(stage.durationMs) + 'ms</div>' +
+        '</div>';
+      }).join("") || '<div class="empty-state">没有记录处理阶段。</div>';
+      const results = (report.results || []).map((result) => (
+        '<article class="memory-item">' +
+          '<div class="memory-meta">' +
+            '<span class="chip teal">' + escapeHtml(result.categoryLabel || result.category) + '</span>' +
+            '<span class="chip">' + escapeHtml(result.scopeLabel || result.scope) + '</span>' +
+            '<span class="chip green">得分 ' + fixed(result.score, 3) + '</span>' +
+          '</div>' +
+          '<div class="memory-text">' + escapeHtml(result.text) + '</div>' +
+        '</article>'
+      )).join("") || '<div class="empty-state">没有最终命中的记忆。</div>';
+
+      $("explainOutput").innerHTML =
+        '<div class="explain-columns">' +
+          '<section class="stage-card">' +
+            '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">' + traceStages.length + ' 个阶段</span></div>' +
+            '<div class="stage-list">' + stages + '</div>' +
+          '</section>' +
+          '<section class="results-card">' +
+            '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">' + report.count + ' 条</span></div>' +
+            '<div class="diagnosis' + diagnosisClass + '">' +
+              '<div class="diagnosis-title">' + escapeHtml(explanation.summary || "暂无诊断") + '</div>' +
+              (reasons ? '<ul class="plain-list">' + reasons + '</ul>' : "") +
+              (suggestions ? '<ul class="plain-list">' + suggestions + '</ul>' : "") +
+            '</div>' +
+            '<div class="result-list-scroll">' +
+              '<div class="memory-list">' + results + '</div>' +
+            '</div>' +
+          '</section>' +
+        '</div>';
+    }
+
+    function renderDetail(memory) {
+      $("detailTitle").textContent = memory.categoryLabel + " · " + memory.scopeLabel;
+      const detail = memory.details || {};
+      $("detailBody").innerHTML =
+        '<div class="detail-grid">' +
+          '<div class="config-item"><div class="config-label">创建时间</div><div class="config-value">' + escapeHtml(memory.timeLabel) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">重要性</div><div class="config-value">' + pct(memory.importance) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">置信度</div><div class="config-value">' + pct(memory.confidence) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">访问次数</div><div class="config-value">' + escapeHtml(memory.accessCount) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">记忆层级</div><div class="config-value">' + escapeHtml(memory.tierLabel) + '</div></div>' +
+          '<div class="config-item"><div class="config-label">质量标记</div><div class="config-value">' + escapeHtml((memory.qualityFlags || []).map(qualityLabel).join("、") || "无") + '</div></div>' +
+        '</div>' +
+        '<section class="detail-section"><h3>摘要</h3><p class="detail-text">' + escapeHtml(detail.summary || memory.preview) + '</p></section>' +
+        '<section class="detail-section"><h3>正文</h3><p class="detail-text">' + escapeHtml(detail.content || memory.text) + '</p></section>';
+      $("detailOverlay").classList.add("open");
+    }
+
+    function closeDetail() {
+      $("detailOverlay").classList.remove("open");
+    }
+
+    async function deleteMemory(id) {
+      const memory = state.memoriesById.get(id);
+      const label = memory ? memory.categoryLabel + " · " + memory.scopeLabel : id;
+      if (!confirm("确定删除这条记忆吗？\\n" + label)) return;
+      const filters = currentFilters();
+      await fetchJson("/api/memories/" + encodeURIComponent(id) + queryString({ scope: filters.scope }), {
+        method: "DELETE"
+      });
+      closeDetail();
+      if (isMemoriesView()) {
+        await loadMemories({ reset: true });
+      } else {
+        await refresh();
+      }
+    }
+
+    function renderError(targetId, message) {
+      $(targetId).innerHTML = '<div class="alert danger"><div class="alert-title">请求失败</div><div class="subtle">' + escapeHtml(message) + '</div></div>';
+    }
+
+    function isMemoriesView() {
+      return window.location.pathname === "/memories";
+    }
+
+    function setViewFromPath() {
+      const memoriesView = isMemoriesView();
+      document.body.dataset.view = memoriesView ? "memories" : "dashboard";
+      $("overviewLink").classList.toggle("active", !memoriesView);
+      $("memoriesLink").classList.toggle("active", memoriesView);
+    }
+
+    async function loadMemories(options) {
+      const reset = Boolean(options && options.reset);
+      if (state.memoriesBusy) return;
+      state.memoriesBusy = true;
+      if (reset) {
+        state.memoryOffset = 0;
+        state.hasMoreMemories = true;
+        $("masonryMemories").innerHTML = '<div class="empty-state">正在读取记忆...</div>';
+      }
+      $("loadMoreBtn").disabled = true;
+      $("loadMoreBtn").innerHTML = '<span class="spinner"></span>';
+      try {
+        const filters = currentFilters();
+        const offset = reset ? 0 : state.memoryOffset;
+        const payload = await fetchJson("/api/memories" + queryString({
+          scope: filters.scope,
+          category: filters.category,
+          quality: filters.quality,
+          limit: state.memoryLimit,
+          offset
+        }));
+        state.memoryOffset = offset + payload.memories.length;
+        state.hasMoreMemories = payload.memories.length >= state.memoryLimit;
+        renderMemoryPage(payload.memories, reset);
+      } catch (error) {
+        renderError("masonryMemories", error.message || String(error));
+      } finally {
+        state.memoriesBusy = false;
+        $("loadMoreBtn").textContent = "加载更多";
+        $("loadMoreBtn").disabled = !state.hasMoreMemories;
+      }
+    }
+
+    async function refresh() {
+      if (state.busy) return;
+      setViewFromPath();
+      state.busy = true;
+      $("refreshBtn").innerHTML = '<span class="spinner"></span>';
+      try {
+        const filters = currentFilters();
+        const summary = await fetchJson("/api/summary" + queryString(filters));
+        state.summary = summary;
+        renderScopeOptions(summary.scopes.available, filters.scope);
+        renderOverviewSummary(summary);
+        renderCharts(summary);
+        $("lastUpdated").textContent = "更新时间 " + new Date(summary.generatedAt).toLocaleString("zh-CN");
+        if (isMemoriesView()) await loadMemories({ reset: true });
+      } catch (error) {
+        $("lastUpdated").textContent = "读取失败：" + (error.message || String(error));
+      } finally {
+        state.busy = false;
+        $("refreshBtn").textContent = "↻";
+      }
+    }
+
+    async function explain() {
+      const query = $("queryInput").value.trim();
+      if (!query) {
+        $("explainCount").textContent = "尚未查询";
+        $("explainOutput").innerHTML =
+          '<div class="explain-columns">' +
+            '<section class="stage-card">' +
+              '<div class="preview-head"><div class="chart-title">处理阶段</div><span class="subtle">待诊断</span></div>' +
+              '<div class="stage-list">' +
+                '<div class="stage muted-preview" data-step="01"><div class="stage-main"><div class="stage-name">混合候选</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview" data-step="02"><div class="stage-main"><div class="stage-name">过滤与重排</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
+                '<div class="stage muted-preview" data-step="03"><div class="stage-main"><div class="stage-name">多样性处理</div><div class="stage-flow">等待查询</div></div><div class="stage-time">--</div></div>' +
+              '</div>' +
+            '</section>' +
+            '<section class="results-card">' +
+              '<div class="preview-head"><div class="chart-title">命中结果</div><span class="subtle">待诊断</span></div>' +
+              '<div class="diagnosis placeholder"><div class="diagnosis-title">未生成诊断</div><div class="subtle">状态：待查询</div></div>' +
+              '<div class="result-list-scroll">' +
+                '<article class="memory-item preview-memory"><div class="memory-meta"><span class="chip">类别</span><span class="chip">范围</span><span class="chip">得分</span></div><div class="memory-text">暂无命中结果</div></article>' +
+              '</div>' +
+            '</section>' +
+          '</div>';
+        return;
+      }
+      $("explainBtn").disabled = true;
+      $("explainBtn").innerHTML = '<span class="spinner"></span>';
+      try {
+        const filters = currentFilters();
+        const report = await fetchJson("/api/explain" + queryString({
+          query,
+          limit: $("limitInput").value,
+          scope: filters.scope,
+          category: filters.category
+        }));
+        renderExplain(report);
+      } catch (error) {
+        renderError("explainOutput", error.message || String(error));
+      } finally {
+        $("explainBtn").disabled = false;
+        $("explainBtn").textContent = "诊断";
+      }
+    }
+
+    $("refreshBtn").addEventListener("click", refresh);
+    $("scopeFilter").addEventListener("change", refresh);
+    $("categoryFilter").addEventListener("change", refresh);
+    $("qualityFilter").addEventListener("change", refresh);
+    $("explainBtn").addEventListener("click", explain);
+    $("loadMoreBtn").addEventListener("click", () => {
+      loadMemories({ reset: false }).catch((error) => alert(error.message || String(error)));
+    });
+    $("masonryMemories").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (button) {
+        const id = button.getAttribute("data-id");
+        if (!id) return;
+        if (button.getAttribute("data-action") === "delete") {
+          deleteMemory(id).catch((error) => alert(error.message || String(error)));
+        }
+        return;
+      }
+
+      const item = event.target.closest(".memory-item[data-id]");
+      const id = item && item.getAttribute("data-id");
+      if (id) {
+        const memory = state.memoriesById.get(id);
+        if (memory) renderDetail(memory);
+      }
+    });
+    $("detailCloseBtn").addEventListener("click", closeDetail);
+    $("detailOverlay").addEventListener("click", (event) => {
+      if (event.target === $("detailOverlay")) closeDetail();
+    });
+    $("queryInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") explain();
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeDetail();
+    });
+
+    setViewFromPath();
+    refresh();
+    setInterval(() => {
+      if (!isMemoriesView()) refresh();
+    }, 30000);
+  </script>
+</body>
+</html>

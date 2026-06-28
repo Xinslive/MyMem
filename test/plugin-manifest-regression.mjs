@@ -5,6 +5,7 @@ import http from "node:http";
 import Module from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import ts from "typescript";
 
 import jitiFactory from "jiti";
 
@@ -17,7 +18,7 @@ Module._initPaths();
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const plugin = jiti("../index.ts");
-const { __resetSingletonForTesting__ } = plugin;
+const { __resetSingletonForTesting__, __setPluginStateFactoryForTesting__, createPluginStateForTest } = plugin;
 const { Embedder } = jiti("../src/embedder.ts");
 
 const manifest = JSON.parse(
@@ -25,6 +26,10 @@ const manifest = JSON.parse(
 );
 const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+const pluginTypesSource = readFileSync(
+  new URL("../src/plugin-types.ts", import.meta.url),
+  "utf8",
 );
 
 function schemaAt(pathExpression) {
@@ -85,6 +90,24 @@ function assertToolCategoryEnum(toolDefinition, toolName) {
   }
 }
 
+function getPluginConfigTopLevelKeys() {
+  const sourceFile = ts.createSourceFile(
+    "plugin-types.ts",
+    pluginTypesSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const pluginConfig = sourceFile.statements.find(
+    (node) => ts.isInterfaceDeclaration(node) && node.name.text === "PluginConfig",
+  );
+  assert.ok(pluginConfig, "src/plugin-types.ts should declare PluginConfig");
+  return pluginConfig.members
+    .filter(ts.isPropertySignature)
+    .map((member) => member.name.getText(sourceFile).replace(/^['"]|['"]$/g, ""))
+    .sort();
+}
+
 function createMockApi(pluginConfig, options = {}) {
   return {
     pluginConfig,
@@ -132,6 +155,12 @@ for (const key of [
   schemaAt(key);
 }
 
+assert.deepEqual(
+  Object.keys(manifest.configSchema.properties).sort(),
+  getPluginConfigTopLevelKeys(),
+  "openclaw.plugin.json configSchema top-level properties should stay aligned with PluginConfig",
+);
+
 for (const pathExpression of ["llm.auth", "llm.oauthPath", "llm.oauthProvider"]) {
   schemaAt(pathExpression);
 }
@@ -146,6 +175,7 @@ assertSchemaDefault("autoRecallMaxChars", 1500);
 assertSchemaDefault("autoRecallPerItemMaxChars", 200);
 assertSchemaDefault("autoRecallCandidatePoolSize", 12);
 assertSchemaDefault("autoRecallTimeoutMs", 20000);
+assertSchemaDefault("autoRecallDegradeAfterMs", 5000);
 assertSchemaDefault("autoRecallMaxQueryLength", 2000);
 assertSchemaDefault("maxRecallPerTurn", 10);
 assertSchemaDefault("recallMode", "full");
@@ -321,6 +351,7 @@ try {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
   const scheduledTimeouts = [];
+  let statsCalled = 0;
   try {
     globalThis.setTimeout = (fn, delay = 0, ...args) => {
       scheduledTimeouts.push(Number(delay));
@@ -329,27 +360,123 @@ try {
     globalThis.clearTimeout = () => {};
     globalThis.setInterval = (fn, delay = 0, ...args) => ({ fn, delay, args });
     globalThis.clearInterval = () => {};
-    await assert.doesNotReject(
-      services[0].start(),
-      "service start should schedule deferred startup work without throwing",
+    __setPluginStateFactoryForTesting__((factoryApi) =>
+      createPluginStateForTest(factoryApi, {
+        store: {
+          hasFtsSupport: true,
+          lastFtsError: null,
+          stats: async () => {
+            statsCalled += 1;
+            return {
+              totalCount: 0,
+              scopeCounts: {},
+              categoryCounts: {},
+              memoryCategoryCounts: {},
+              recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
+              tierDistribution: {},
+              healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+            };
+          },
+          list: async () => [],
+          getById: async () => null,
+          update: async () => null,
+        },
+      }),
     );
+    const fastServices = [];
+    const fastApi = createMockApi(
+      {
+        dbPath: path.join(workDir, "db-fast-start"),
+        autoCapture: false,
+        autoRecall: false,
+        smartExtraction: false,
+        memoryReflection: { enabled: false },
+        sessionStrategy: "none",
+        memoryCompaction: { enabled: false },
+        lifecycleMaintenance: { enabled: false },
+        preferenceDistiller: { enabled: false },
+        learningMemory: { enabled: false },
+        embedding: {
+          provider: "openai-compatible",
+          apiKey: "dummy",
+          model: "text-embedding-3-small",
+          baseURL: "http://127.0.0.1:9/v1",
+          dimensions: 1536,
+        },
+      },
+      { services: fastServices },
+    );
+    plugin.register(fastApi);
+    await assert.doesNotReject(
+      fastServices[0].start(),
+      "service start should fail-fast check the local store and schedule deferred network health work",
+    );
+    assert.equal(statsCalled, 1, "service start should synchronously await a local store stats smoke test");
     assert.ok(
       scheduledTimeouts.includes(15_000),
-      "service start should defer startup health checks by 15 seconds",
+      "service start should still defer external startup health checks by 15 seconds",
     );
     assert.ok(
       !scheduledTimeouts.includes(0),
       "service start should no longer trigger startup health checks immediately",
     );
     await assert.doesNotReject(
-      services[0].stop(),
+      fastServices[0].stop(),
       "service stop should tolerate deferred startup work handles",
     );
   } finally {
+    __setPluginStateFactoryForTesting__(null);
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
+  }
+  __setPluginStateFactoryForTesting__((factoryApi) =>
+    createPluginStateForTest(factoryApi, {
+      store: {
+        hasFtsSupport: false,
+        lastFtsError: null,
+        stats: async () => {
+          throw new Error("corrupt test store");
+        },
+        list: async () => [],
+        getById: async () => null,
+        update: async () => null,
+      },
+    }),
+  );
+  try {
+    const failingServices = [];
+    const failingApi = createMockApi(
+      {
+        dbPath: path.join(workDir, "db-failing-start"),
+        autoCapture: false,
+        autoRecall: false,
+        smartExtraction: false,
+        memoryReflection: { enabled: false },
+        sessionStrategy: "none",
+        memoryCompaction: { enabled: false },
+        lifecycleMaintenance: { enabled: false },
+        preferenceDistiller: { enabled: false },
+        learningMemory: { enabled: false },
+        embedding: {
+          provider: "openai-compatible",
+          apiKey: "dummy",
+          model: "text-embedding-3-small",
+          baseURL: "http://127.0.0.1:9/v1",
+          dimensions: 1536,
+        },
+      },
+      { services: failingServices },
+    );
+    plugin.register(failingApi);
+    await assert.rejects(
+      failingServices[0].start(),
+      /corrupt test store/,
+      "service start should reject immediately when local store smoke test fails",
+    );
+  } finally {
+    __setPluginStateFactoryForTesting__(null);
   }
   await assert.doesNotReject(
     services[0].stop(),

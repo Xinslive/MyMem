@@ -51,6 +51,57 @@ describe("MemoryStore index status and list pagination", () => {
     }
   });
 
+  it("applies quality filters before list pagination", async () => {
+    const { dir, store } = makeStore();
+    try {
+      const base = Date.now() - 10_000;
+      const fixtures = [
+        { text: "new high confidence", timestamp: base + 4_000, metadata: { confidence: 0.91, state: "confirmed" } },
+        { text: "newest bad recall", timestamp: base + 3_000, metadata: { confidence: 0.8, state: "confirmed", bad_recall_count: 2 } },
+        { text: "older low confidence", timestamp: base + 2_000, metadata: { confidence: 0.21, state: "confirmed" } },
+        { text: "old archived", timestamp: base + 1_000, metadata: { confidence: 0.7, state: "archived" } },
+        {
+          text: "old suppressed",
+          timestamp: base,
+          metadata: {
+            confidence: 0.7,
+            state: "confirmed",
+            suppressed_until_turn: 3,
+            suppressed_session_key: "session-1",
+            suppressed_until_at: Date.now() + 60_000,
+          },
+        },
+      ];
+
+      for (let i = 0; i < fixtures.length; i++) {
+        await store.importEntry({
+          id: `10000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+          text: fixtures[i].text,
+          vector: [1, 0, 0, 0],
+          category: "fact",
+          scope: "global",
+          importance: 0.5,
+          timestamp: fixtures[i].timestamp,
+          metadata: JSON.stringify(fixtures[i].metadata),
+        });
+      }
+
+      const lowConfidence = await store.list(["global"], undefined, 1, 0, { quality: "low_confidence" });
+      assert.deepEqual(lowConfidence.map((entry) => entry.text), ["older low confidence"]);
+
+      const badRecall = await store.list(["global"], undefined, 1, 0, { quality: "bad_recall" });
+      assert.deepEqual(badRecall.map((entry) => entry.text), ["newest bad recall"]);
+
+      const suppressed = await store.list(["global"], undefined, 1, 0, { quality: "suppressed" });
+      assert.deepEqual(suppressed.map((entry) => entry.text), ["old suppressed"]);
+
+      const inactive = await store.list(["global"], undefined, 1, 0, { quality: "inactive" });
+      assert.deepEqual(inactive.map((entry) => entry.text), ["old archived"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("records the FTS initialization error when index creation fails", async () => {
     const originalCreateFtsIndex = MemoryStore.prototype.createFtsIndex;
     MemoryStore.prototype.createFtsIndex = async function mockCreateFtsIndex() {

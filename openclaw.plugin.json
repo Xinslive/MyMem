@@ -170,6 +170,13 @@
         "default": 20000,
         "description": "Timeout for the entire auto-recall pipeline (embedding + search + rerank) in milliseconds."
       },
+      "autoRecallDegradeAfterMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 60000,
+        "default": 5000,
+        "description": "Soft degradation threshold for auto-recall in milliseconds. The retriever can return partial/fallback results after this threshold while the hard timeout remains autoRecallTimeoutMs."
+      },
       "autoRecallMaxItems": {
         "type": "integer",
         "minimum": 1,

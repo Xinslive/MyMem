@@ -1,30 +1,21 @@
 ﻿// test/store-write-queue.test.mjs
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import jitiFactory from "jiti";
+import { rmSync } from "node:fs";
+import { makeMemoryEntry, makeTempMemoryStore } from "./helpers/store-fixture.mjs";
 
-const jiti = jitiFactory(import.meta.url, { interopDefault: true });
-const { MemoryStore } = jiti("../src/store.ts");
+function assertVectorClose(actual, expected) {
+  assert.equal(actual?.length, expected.length);
+  for (let i = 0; i < expected.length; i++) {
+    assert.ok(Math.abs(actual[i] - expected[i]) < 1e-6, `vector[${i}] expected ${expected[i]}, got ${actual[i]}`);
+  }
+}
 
 function makeStore() {
-  const dir = mkdtempSync(join(tmpdir(), "mymem-write-queue-"));
-  const store = new MemoryStore({ dbPath: dir, vectorDim: 3 });
-  return { store, dir };
+  return makeTempMemoryStore({ prefix: "mymem-write-queue-" });
 }
 
-function makeEntry(i) {
-  return {
-    text: `memory-${i}`,
-    vector: [0.1 * i, 0.2 * i, 0.3 * i],
-    category: "fact",
-    scope: "global",
-    importance: 0.5,
-    metadata: "{}",
-  };
-}
+const makeEntry = makeMemoryEntry;
 
 describe("MemoryStore write queue", () => {
   it("serializes concurrent writes within the same store instance", async () => {
@@ -121,6 +112,18 @@ describe("MemoryStore write queue", () => {
     try {
       const a = await store.store({ ...makeEntry(1), metadata: "{\"version\":1}" });
       const b = await store.store({ ...makeEntry(2), metadata: "{\"version\":1}" });
+      let updateCalls = 0;
+      let mergeInsertCalls = 0;
+      const originalUpdate = store.table.update.bind(store.table);
+      const originalMergeInsert = store.table.mergeInsert.bind(store.table);
+      store.table.update = (...args) => {
+        updateCalls++;
+        return originalUpdate(...args);
+      };
+      store.table.mergeInsert = (...args) => {
+        mergeInsertCalls++;
+        return originalMergeInsert(...args);
+      };
 
       const count = await store.updateBatchMetadata([
         { id: a.id, metadata: "{\"version\":2}" },
@@ -130,8 +133,14 @@ describe("MemoryStore write queue", () => {
       ]);
 
       assert.equal(count, 2);
-      assert.equal((await store.getById(a.id))?.metadata, "{\"version\":4}");
-      assert.equal((await store.getById(b.id))?.metadata, "{\"version\":3}");
+      assert.equal(updateCalls, 2);
+      assert.equal(mergeInsertCalls, 0);
+      const updatedA = await store.getById(a.id);
+      const updatedB = await store.getById(b.id);
+      assert.equal(updatedA?.text, "memory-1");
+      assertVectorClose(updatedA?.vector, [0.1, 0.2, 0.3]);
+      assert.equal(updatedA?.metadata, "{\"version\":4}");
+      assert.equal(updatedB?.metadata, "{\"version\":3}");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -142,6 +151,18 @@ describe("MemoryStore write queue", () => {
     try {
       const a = await store.store({ ...makeEntry(1), scope: "global", metadata: "{\"state\":\"confirmed\"}" });
       const b = await store.store({ ...makeEntry(2), scope: "agent:other", metadata: "{\"state\":\"confirmed\"}" });
+      let updateCalls = 0;
+      let mergeInsertCalls = 0;
+      const originalUpdate = store.table.update.bind(store.table);
+      const originalMergeInsert = store.table.mergeInsert.bind(store.table);
+      store.table.update = (...args) => {
+        updateCalls++;
+        return originalUpdate(...args);
+      };
+      store.table.mergeInsert = (...args) => {
+        mergeInsertCalls++;
+        return originalMergeInsert(...args);
+      };
 
       const count = await store.patchMetadataBatch([
         { id: a.id, patch: { injected_count: 1 } },
@@ -150,8 +171,12 @@ describe("MemoryStore write queue", () => {
       ], ["global"]);
 
       assert.equal(count, 1);
+      assert.equal(updateCalls, 1);
+      assert.equal(mergeInsertCalls, 0);
       const updatedA = await store.getById(a.id);
       const updatedB = await store.getById(b.id);
+      assert.equal(updatedA?.text, "memory-1");
+      assertVectorClose(updatedA?.vector, [0.1, 0.2, 0.3]);
       assert.match(updatedA?.metadata || "", /"injected_count":1/);
       assert.match(updatedA?.metadata || "", /"last_accessed_at":123/);
       assert.doesNotMatch(updatedB?.metadata || "", /"injected_count":99/);

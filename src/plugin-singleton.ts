@@ -93,25 +93,87 @@ export function __resetSingletonForTesting__(): void {
   _singletonState = null;
 }
 
-/**
- * Create a PluginSingletonState with optional field overrides.
- *
- * Audit #20: provides a public factory for test code. Callers pass an
- * OpenClawPluginApi as usual, but may supply partial overrides (e.g.
- * a mock store or embedder) that replace the auto-created values. This
- * decouples test setup from the full `initPluginState` constructor, which
- * reads real config and connects to real LanceDB.
- *
- * Usage in tests:
- *   const state = createPluginStateForTest(api, {
- *     store: new MemoryStore({ dbPath: tmpdir, vectorDim: 4 }),
- *   });
- */
 export function createPluginStateForTest(
   api: OpenClawPluginApi,
   overrides: Partial<PluginSingletonState> = {},
 ): PluginSingletonState {
-  const base = initPluginState(api);
+  const config = parsePluginConfig(api.pluginConfig);
+  const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
+  const noop = () => {};
+  const emptyStats = async () => ({
+    totalCount: 0,
+    scopeCounts: {},
+    categoryCounts: {},
+    memoryCategoryCounts: {},
+    recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
+    tierDistribution: {},
+    healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+  });
+  const storeStub = {
+    hasFtsSupport: true,
+    lastFtsError: null,
+    stats: emptyStats,
+    list: async () => [],
+    getById: async () => null,
+    update: async () => null,
+    store: async (entry: any) => ({ id: "test-memory", timestamp: Date.now(), ...entry }),
+    bm25Search: async () => [],
+    vectorSearch: async () => [],
+  } as unknown as MemoryStore;
+  const embedderStub = {
+    test: async () => ({ success: true }),
+    embedQuery: async () => [],
+    embedPassage: async () => [],
+  } as unknown as ReturnType<typeof createEmbedder>;
+  const retrieverStub = {
+    getConfig: () => ({ ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval }),
+    retrieve: async () => [],
+    setStatsCollector: noop,
+    getLastDiagnostics: () => null,
+  } as unknown as ReturnType<typeof createRetriever>;
+  const scopeManagerStub = createScopeManager(config.scopes);
+  const telemetryStoreStub = {
+    enabled: false,
+    recordRetrieval: noop,
+    recordExtraction: noop,
+    getPersistentSummary: async () => ({ retrieval: null, extraction: null }),
+  } as unknown as TelemetryStore;
+  const base: PluginSingletonState = {
+    config,
+    resolvedDbPath,
+    store: storeStub,
+    reflectionStore: storeStub,
+    resolvedReflectionDbPath: api.resolvePath(
+      config.memoryReflection?.dbPath || join(dirname(resolvedDbPath), "mymem-reflection"),
+    ),
+    embedder: embedderStub,
+    decayEngine: createDecayEngine({ ...DEFAULT_DECAY_CONFIG, ...(config.decay || {}) }),
+    recencyEngine: new RecencyEngine({
+      ...DEFAULT_RECENCY_CONFIG,
+      ...(config.retrieval?.timeDecayHalfLifeDays
+        ? { halfLifeDays: config.retrieval.timeDecayHalfLifeDays }
+        : {}),
+    }),
+    tierManager: createTierManager({ ...DEFAULT_TIER_CONFIG, ...(config.tier || {}) }),
+    retriever: retrieverStub,
+    scopeManager: scopeManagerStub,
+    migrator: createMigrator(storeStub),
+    smartExtractor: null,
+    smartExtractionLlmClient: null,
+    extractionRateLimiter: createExtractionRateLimiter({ maxExtractionsPerHour: 0 }),
+    feedbackLoop: null,
+    telemetryStore: telemetryStoreStub,
+    reflectionErrorStateBySession: new Map(),
+    reflectionDerivedBySession: new Map(),
+    reflectionByAgentCache: new Map(),
+    recallHistory: new Map(),
+    turnCounter: new Map(),
+    lastRawUserMessage: new Map(),
+    hookEnhancementState: createHookEnhancementState(),
+    autoCaptureSeenTextCount: new Map(),
+    autoCapturePendingIngressTexts: new Map(),
+    autoCaptureRecentTexts: new Map(),
+  };
   return { ...base, ...overrides };
 }
 

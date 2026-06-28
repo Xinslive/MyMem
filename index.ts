@@ -39,6 +39,8 @@ import {
 
 // Import singleton state management
 import {
+  type PluginSingletonState,
+  createPluginStateForTest,
   initPluginState,
   getSingletonState,
   setSingletonState,
@@ -60,6 +62,7 @@ const STARTUP_HEALTH_CHECK_DELAY_MS = 15_000;
 // Using WeakSet instead of a module-level boolean avoids the "second register() call skips
 // hook/tool registration for the new API instance" regression that rwmjhb identified.
 const _registeredApis = new WeakSet<OpenClawPluginApi>();
+let _pluginStateFactory: (api: OpenClawPluginApi) => PluginSingletonState = initPluginState;
 
 // ============================================================================
 // Hook Event Deduplication (Phase 1)
@@ -98,7 +101,7 @@ const myMemPlugin = {
     //   - Memory heap growth from repeated resource creation (~9 calls/process)
     //   - Accumulated session Maps being lost on re-registration
     // ========================================================================
-    if (!getSingletonState()) { setSingletonState(initPluginState(api)); }
+    if (!getSingletonState()) { setSingletonState(_pluginStateFactory(api)); }
     const {
       config,
       resolvedDbPath,
@@ -455,6 +458,22 @@ const myMemPlugin = {
     api.registerService?.({
       id: "mymem",
       start: async () => {
+        // Fail fast on local store corruption before starting dashboard,
+        // hooks, or background work. External embedder/retriever probes remain
+        // deferred below so network providers cannot block gateway startup.
+        let startupStats;
+        try {
+          startupStats = await store.stats();
+        } catch (err) {
+          api.logger.error(
+            `mymem：[FATAL] 存储库无法打开（${resolvedDbPath}）：${String(err)}` +
+            "\n  自动捕获和召回均不可用，请检查 LanceDB 数据库文件或执行 mymem doctor 排查。",
+          );
+          throw err;
+        }
+        const logStoreReady = isCliMode() ? api.logger.debug : api.logger.info;
+        logStoreReady(`mymem：存储库就绪（记忆总数：${startupStats.totalCount}）`);
+
         await startDashboard();
 
         // IMPORTANT: Do not block gateway startup on external network calls.
@@ -560,25 +579,6 @@ const myMemPlugin = {
           }
         };
 
-        // Audit #24: immediately validate that the store can be opened.
-        // Previously the first real store access was deferred by 15s via
-        // runStartupChecks. A corrupt LanceDB table was therefore invisible
-        // for the first ~15 seconds of the plugin's lifetime, during which
-        // auto-capture silently dropped all messages. This synchronous-ish
-        // check fires <1s after register() returns and surfaces failures
-        // via a loud error log. The store.open() itself is cheap (~5ms).
-        void store.stats()
-          .then((stats) => {
-            const log = isCliMode() ? api.logger.debug : api.logger.info;
-            log(`mymem：存储库就绪（记忆总数：${stats.totalCount}）`);
-          })
-          .catch((err) => {
-            api.logger.error(
-              `mymem：[FATAL] 存储库无法打开（${resolvedDbPath}）：${String(err)}` +
-              "\n  自动捕获和召回均不可用，请检查 LanceDB 数据库文件或执行 mymem doctor 排查。",
-            );
-          });
-
         // Fire-and-forget: allow gateway to start serving immediately, then
         // defer health probing so startup I/O does not contend with host init.
         setTimeout(() => void runStartupChecks(), STARTUP_HEALTH_CHECK_DELAY_MS);
@@ -616,6 +616,7 @@ const myMemPlugin = {
 };
 
 export { getDefaultMdMirrorDir, parsePluginConfig };
+export { createPluginStateForTest };
 
 /**
  * Resets the registration state — primarily intended for use in tests that need
@@ -630,5 +631,12 @@ export function resetRegistration() {
 }
 
 export { __resetSingletonForTesting__ };
+
+export function __setPluginStateFactoryForTesting__(
+  factory: ((api: OpenClawPluginApi) => PluginSingletonState) | null,
+): void {
+  _pluginStateFactory = factory ?? initPluginState;
+  __resetSingletonForTesting__();
+}
 
 export default myMemPlugin;

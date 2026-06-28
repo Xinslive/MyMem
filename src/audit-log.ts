@@ -39,12 +39,15 @@ export class AuditLogger {
    * @param dbPath Path to the LanceDB store directory. The audit file is
    *   written to `<dbPath>/audit.jsonl`.
    */
-  constructor(private readonly dbPath: string) {}
+  constructor(
+    private readonly dbPath: string,
+    private readonly configuredFilePath?: string,
+  ) {}
 
   /** Enable logging and ensure the parent directory exists. */
   async enable(): Promise<void> {
     if (this.enabled) return;
-    this.filePath = join(this.dbPath, "audit.jsonl");
+    this.filePath = this.configuredFilePath ?? join(this.dbPath, "audit.jsonl");
     this.initPromise = mkdir(dirname(this.filePath), { recursive: true }).then(() => undefined).catch(() => undefined);
     await this.initPromise;
     this.enabled = true;

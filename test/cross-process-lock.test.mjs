@@ -1,29 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import jitiFactory from "jiti";
-
-const jiti = jitiFactory(import.meta.url, { interopDefault: true });
-const { MemoryStore } = jiti("../src/store.ts");
+import { makeMemoryEntry, makeTempMemoryStore } from "./helpers/store-fixture.mjs";
 
 function makeStore() {
-  const dir = mkdtempSync(join(tmpdir(), "mymem-lock-"));
-  const store = new MemoryStore({ dbPath: dir, vectorDim: 3 });
-  return { store, dir };
+  return makeTempMemoryStore({ prefix: "mymem-lock-" });
 }
 
-function makeEntry(i) {
-  return {
-    text: `memory-${i}`,
-    vector: [0.1 * i, 0.2 * i, 0.3 * i],
-    category: "fact",
-    scope: "global",
-    importance: 0.5,
-    metadata: "{}",
-  };
-}
+const makeEntry = makeMemoryEntry;
 
 describe("Cross-process file lock", () => {
   // Note: proper-lockfile v4 uses mkdir-based locking, creating a DIRECTORY at

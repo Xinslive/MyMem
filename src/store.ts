@@ -13,8 +13,9 @@ import { hasActiveRecallSuppression } from "./recall-suppression.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
+import { AuditLogger, type AuditEntry } from "./audit-log.js";
 
-import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus, LanceRow, LanceIndex } from "./store-types.js";
+import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus, LanceRow, LanceIndex, MemoryListFilters } from "./store-types.js";
 import {
   FULL_ENTRY_COLUMNS,
   LIST_ENTRY_COLUMNS,
@@ -48,7 +49,7 @@ async function statAsync(filePath: string): Promise<Awaited<ReturnType<typeof st
 }
 
 // Re-export all public symbols for backward compatibility
-export type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus } from "./store-types.js";
+export type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus, MemoryListFilters } from "./store-types.js";
 export {
   FULL_ENTRY_COLUMNS,
   LIST_ENTRY_COLUMNS,
@@ -145,6 +146,7 @@ export class MemoryStore {
   // Stats result cache (invalidated on writes)
   private _statsCache: { key: string; result: StatsResult; ts: number } | null = null;
   private static STATS_CACHE_TTL_MS = 30_000;
+  private readonly auditLogger: AuditLogger | null;
 
   // Lock staleness check cooldown — skip stat() if lock was verified fresh recently.
   private _lastFreshLockCheckAt = 0;
@@ -263,12 +265,32 @@ export class MemoryStore {
       return entries;
     });
     this._statsCache = null;
+    for (const entry of written) {
+      this.recordAudit({
+        op: "store",
+        id: entry.id,
+        detail: `scope=${entry.scope};category=${entry.category};batch=true`,
+      });
+    }
     await this.maybeCreateDeferredVectorIndex();
     return written;
   }
 
   constructor(private readonly config: StoreConfig) {
     this.log = config.logger ?? createLogger();
+    this.auditLogger = config.auditLogEnabled === false
+      ? null
+      : new AuditLogger(config.dbPath, config.auditLogPath);
+    if (this.auditLogger) {
+      void this.auditLogger.enable();
+    }
+  }
+
+  private recordAudit(entry: Omit<AuditEntry, "at">): void {
+    this.auditLogger?.log({
+      at: new Date().toISOString(),
+      ...entry,
+    });
   }
 
   async runSerializedUpdate<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -432,6 +454,34 @@ export class MemoryStore {
     ]);
   }
 
+  private buildListFilterConditions(filters?: MemoryListFilters): string[] {
+    if (!filters?.quality) return [];
+
+    switch (filters.quality) {
+      case "bad_recall":
+        return [`regexp_like(metadata, '"bad_recall_count"\\s*:\\s*[1-9][0-9]*(?:[,}\\s])')`];
+      case "suppressed":
+        return [
+          `regexp_like(metadata, '"suppressed_until_turn"\\s*:\\s*[1-9][0-9]*(?:[,}\\s])')`,
+          `metadata LIKE '%"suppressed_session_key"%'`,
+          `metadata LIKE '%"suppressed_until_at"%'`,
+        ];
+      case "low_confidence":
+        return [`regexp_like(metadata, '"confidence"\\s*:\\s*(?:0(?:\\.[0-3][0-9]*)?|0?\\.[0-3][0-9]*)(?:[,}\\s])')`];
+      case "inactive":
+        return [
+          `(` +
+            combineWhereClauses([
+              `metadata NOT LIKE '%"state":"confirmed"%'`,
+              `metadata NOT LIKE '%"state": "confirmed"%'`,
+            ]) +
+            ` OR metadata LIKE '%"valid_until"%'` +
+            ` OR metadata LIKE '%"invalidated_at"%'` +
+          `)`,
+        ];
+    }
+  }
+
   private async findListWindowLowerBound(
     baseWhere: string | undefined,
     neededCount: number,
@@ -524,6 +574,21 @@ export class MemoryStore {
         .whenNotMatchedInsertAll()
         .execute(toLanceRows(chunk));
     }
+  }
+
+  private async updateMetadataValuesInChunks(entries: Array<Pick<MemoryEntry, "id" | "metadata">>): Promise<number> {
+    let updatedCount = 0;
+    for (let i = 0; i < entries.length; i += METADATA_BATCH_CHUNK_SIZE) {
+      const chunk = entries.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
+      for (const entry of chunk) {
+        const result = await this.table!.update({
+          where: `id = '${escapeSqlLiteral(entry.id)}'`,
+          values: { metadata: entry.metadata ?? "{}" },
+        });
+        updatedCount += Number(result.rowsUpdated ?? 0);
+      }
+    }
+    return updatedCount;
   }
 
   private async runWithFileLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -925,6 +990,11 @@ export class MemoryStore {
       return fullEntry;
     });
     this._statsCache = null;
+    this.recordAudit({
+      op: "store",
+      id: stored.id,
+      detail: `scope=${stored.scope};category=${stored.category}`,
+    });
     await this.maybeCreateDeferredVectorIndex();
     return stored;
   }
@@ -957,6 +1027,11 @@ export class MemoryStore {
       return full;
     });
     this._statsCache = null;
+    this.recordAudit({
+      op: "import",
+      id: imported.id,
+      detail: `scope=${imported.scope};category=${imported.category}`,
+    });
     await this.maybeCreateDeferredVectorIndex();
     return imported;
   }
@@ -1271,6 +1346,13 @@ export class MemoryStore {
       return true;
     });
     this._statsCache = null;
+    if (result) {
+      this.recordAudit({
+        op: "delete",
+        id: resolvedId,
+        detail: `scope=${rowScope}`,
+      });
+    }
     return result;
   }
 
@@ -1279,6 +1361,7 @@ export class MemoryStore {
     category?: string,
     limit = 20,
     offset = 0,
+    filters?: MemoryListFilters,
   ): Promise<MemoryEntry[]> {
     await this.ensureInitialized();
 
@@ -1286,7 +1369,11 @@ export class MemoryStore {
     const safeLimit = clampInt(limit, 1, 200);
     const safeOffset = Math.max(0, Math.floor(offset));
     const neededCount = safeLimit + safeOffset;
-    const baseWhere = this.buildBaseWhereClause(scopeFilter, category);
+    const baseWhere = this.buildBaseWhereClause(
+      scopeFilter,
+      category,
+      this.buildListFilterConditions(filters),
+    );
     const totalCount = await this.countRowsWithFilter(baseWhere);
 
     if (totalCount === 0 || safeOffset >= totalCount) return [];
@@ -1492,6 +1579,14 @@ export class MemoryStore {
     });
 
     this._statsCache = null;
+    if (result) {
+      const changed = Object.keys(updates).sort().join(",");
+      this.recordAudit({
+        op: "update",
+        id: result.id,
+        detail: `scope=${result.scope};category=${result.category};fields=${changed}`,
+      });
+    }
     return result;
   }
 
@@ -1523,9 +1618,7 @@ export class MemoryStore {
 
       if (updatedRows.length === 0) return 0;
 
-      await this.mergeInsertEntriesInChunks(updatedRows);
-
-      return updatedRows.length;
+      return await this.updateMetadataValuesInChunks(updatedRows);
     });
 
     this._statsCache = null;
@@ -1567,14 +1660,14 @@ export class MemoryStore {
       };
 
       try {
-        await this.table!
-          .mergeInsert(["id"])
-          .whenMatchedUpdateAll()
-          .whenNotMatchedInsertAll()
-          .execute(toLanceRows([updated]));
-      } catch (mergeError) {
+        const updateResult = await this.table!.update({
+          where: `id = '${escapeSqlLiteral(existing.id)}'`,
+          values: { metadata: updated.metadata ?? "{}" },
+        });
+        if (Number(updateResult.rowsUpdated ?? 0) === 0) return null;
+      } catch (updateError) {
         throw new Error(
-          `Failed to patch metadata for ${id}: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
+          `Failed to patch metadata for ${id}: ${updateError instanceof Error ? updateError.message : String(updateError)}`,
         );
       }
 
@@ -1629,14 +1722,12 @@ export class MemoryStore {
       if (updatedRows.length === 0) return 0;
 
       try {
-        await this.mergeInsertEntriesInChunks(updatedRows);
-      } catch (mergeError) {
+        return await this.updateMetadataValuesInChunks(updatedRows);
+      } catch (updateError) {
         throw new Error(
-          `Failed to batch-patch metadata: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
+          `Failed to batch-patch metadata: ${updateError instanceof Error ? updateError.message : String(updateError)}`,
         );
       }
-
-      return updatedRows.length;
     });
 
     this._statsCache = null;

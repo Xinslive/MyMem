@@ -117,6 +117,7 @@ function createContext() {
     }),
   };
   const entries = [entry, lowConfidenceEntry, labelPrefixedEntry];
+  const listCalls = [];
 
   return {
     store: {
@@ -140,7 +141,8 @@ function createContext() {
         tierDistribution: { durable: 1, working: 2 },
         healthSignals: { badRecall: 1, suppressed: 0, lowConfidence: 1 },
       }),
-      list: async (_scopeFilter, category, limit = 20, offset = 0) => {
+      list: async (_scopeFilter, category, limit = 20, offset = 0, filters = undefined) => {
+        listCalls.push({ category, limit, offset, filters });
         const filtered = category ? entries.filter((item) => item.category === category) : entries;
         return filtered.slice(offset, offset + limit);
       },
@@ -184,6 +186,7 @@ function createContext() {
         },
       }),
     },
+    listCalls,
     retriever: {
       getConfig: () => ({
         mode: "hybrid",
@@ -242,7 +245,8 @@ function createContext() {
 
 test("dashboard server serves page and read-only APIs", async () => {
   const authToken = "test-dashboard-token-123";
-  const server = await startMemoryDashboardServer(createContext(), {
+  const context = createContext();
+  const server = await startMemoryDashboardServer(context, {
     host: "127.0.0.1",
     port: 0,
     authToken,
@@ -336,6 +340,12 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(lowConfidenceMemories.body.filters.qualityLabel, "低置信");
     assert.deepEqual(lowConfidenceMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
     assert.deepEqual(lowConfidenceMemories.body.memories[0].qualityFlags.sort(), ["bad_recall", "low_confidence"]);
+    assert.deepEqual(context.listCalls.at(-1), {
+      category: undefined,
+      limit: 1000,
+      offset: 0,
+      filters: { quality: "low_confidence" },
+    });
 
     const explain = await requestJson(server.url + "/api/explain?query=dashboard&limit=3", { headers: authHeaders });
     assert.equal(explain.statusCode, 200);

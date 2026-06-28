@@ -113,6 +113,18 @@ describe("TraceCollector", () => {
     assert.equal(stage.outputCount, 2);
   });
 
+  it("can skip dropped ID collection while preserving drop counts", () => {
+    const tc = new TraceCollector({ collectDroppedIds: false });
+
+    tc.startStage("noise_filter", ["a", "b", "c"]);
+    tc.endStage(["a"], [0.9]);
+
+    const stage = tc.stages[0];
+    assert.equal(stage.inputCount, 3);
+    assert.equal(stage.outputCount, 1);
+    assert.deepEqual(stage.droppedIds, []);
+  });
+
   it("summarize produces human-readable output", () => {
     const tc = new TraceCollector();
     tc.startStage("vector_search", ["a", "b", "c"]);

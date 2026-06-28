@@ -267,3 +267,43 @@ test("single-element batch still routes to /v1/embeddings", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("native Ollama fetch uses a bounded keep-alive connection pool", async () => {
+  const remotePorts = [];
+  const connectionHeaders = [];
+
+  const server = makeOllamaMock(async (req, res, route) => {
+    assert.equal(route, "api");
+    remotePorts.push(req.socket.remotePort);
+    connectionHeaders.push(req.headers.connection);
+    await readJson(req);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ embedding: dims() }));
+  });
+
+  const port = await startMockServer(server);
+  const baseURL = `http://127.0.0.1:${port}/v1`;
+
+  try {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "mxbai-embed-large",
+      baseURL,
+      dimensions: DIMS,
+    });
+
+    for (let i = 0; i < 20; i++) {
+      await embedder.embedWithNativeFetch({ model: "mxbai-embed-large", input: `keep alive ${i}` });
+    }
+
+    assert.equal(connectionHeaders.length, 20);
+    assert.ok(connectionHeaders.every((value) => value === "keep-alive"));
+    assert.ok(
+      new Set(remotePorts).size <= 8,
+      `expected the undici Agent pool to cap connections at 8, got ${new Set(remotePorts).size}`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

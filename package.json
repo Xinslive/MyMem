@@ -59,7 +59,8 @@
     "json5": "^2.2.3",
     "openai": "^6.21.0",
     "proper-lockfile": "^4.1.2",
-    "stream-json": "^1.9.1"
+    "stream-json": "^1.9.1",
+    "undici": "^6.27.0"
   },
   "openclaw": {
     "extensions": [

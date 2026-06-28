@@ -9,6 +9,7 @@
  */
 
 import OpenAI from "openai";
+import { Agent as UndiciAgent, fetch as undiciFetch } from "undici";
 import { smartChunk } from "./chunker.js";
 import { EmbeddingCache } from "./embedding-cache.js";
 import {
@@ -34,6 +35,35 @@ import type { Logger } from "./logger.js";
 export { formatEmbeddingProviderError };
 
 const CONTEXT_LIMIT_ERROR_RE = /context[_.\s-]*(?:length|window|limit|size|tokens?)|context_length|token[_.\s-]*limit|too\s+(?:long|many\s+tokens)|max(?:imum)?[_.\s-]*(?:context|tokens?|input)|input\s+length\s+exceeds/i;
+const EMBEDDING_HTTP_AGENT = new UndiciAgent({
+  connections: 8,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 120_000,
+});
+
+type FetchInitWithDispatcher = RequestInit & {
+  dispatcher?: typeof EMBEDDING_HTTP_AGENT;
+};
+
+function withKeepAliveHeaders(init?: RequestInit): Headers {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Connection")) {
+    headers.set("Connection", "keep-alive");
+  }
+  return headers;
+}
+
+function embeddingFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const nextInit: FetchInitWithDispatcher = {
+    ...init,
+    headers: withKeepAliveHeaders(init),
+    dispatcher: EMBEDDING_HTTP_AGENT,
+  };
+  return undiciFetch(
+    input as Parameters<typeof undiciFetch>[0],
+    nextInit as Parameters<typeof undiciFetch>[1],
+  ) as unknown as Promise<Response>;
+}
 
 /** Payload shape for OpenAI-compatible embedding requests. */
 interface EmbedPayload {
@@ -197,6 +227,7 @@ export class Embedder {
         apiKey: key,
         ...(baseURL ? { baseURL } : {}),
         defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
+        fetch: embeddingFetch,
       });
     });
 
@@ -294,15 +325,12 @@ export class Embedder {
     // If a model doesn't support that endpoint, failure will be silent from the user's perspective.
     // This is acceptable because most Ollama embedding models support /v1/embeddings.
     if (Array.isArray(payload.input)) {
-      // Audit #8: Connection: keep-alive header hint. Full TCP+TLS connection
-      // reuse requires undici.Agent as explicit dependency — tracked separately.
       const response = await this.withGlobalConcurrencyLimit(
-        () => fetch(base + "/v1/embeddings", {
+        () => embeddingFetch(base + "/v1/embeddings", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${apiKey}`,
-            "Connection": "keep-alive",
           },
           body: JSON.stringify({
             model: payload.model,
@@ -344,7 +372,7 @@ export class Embedder {
 
     // Single request: use /api/embeddings + prompt (PR #621 fix)
     const response = await this.withGlobalConcurrencyLimit(
-      () => fetch(base + "/api/embeddings", {
+      () => embeddingFetch(base + "/api/embeddings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

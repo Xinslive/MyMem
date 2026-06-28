@@ -3,37 +3,21 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import jitiFactory from "jiti";
-
-const jiti = jitiFactory(import.meta.url, { interopDefault: true });
-const { MemoryStore } = jiti("../src/store.ts");
+import { makeMemoryEntry, makeTempMemoryStore } from "./helpers/store-fixture.mjs";
 
 function makeStore() {
-  const dir = mkdtempSync(join(tmpdir(), "mymem-lock-recovery-"));
-  const store = new MemoryStore({ dbPath: dir, vectorDim: 3 });
-  return { store, dir };
+  return makeTempMemoryStore({ prefix: "mymem-lock-recovery-" });
 }
 
-function makeEntry(i = 1) {
-  return {
-    text: `memory-${i}`,
-    vector: [0.1 * i, 0.2 * i, 0.3 * i],
-    category: "fact",
-    scope: "global",
-    importance: 0.5,
-    metadata: "{}",
-  };
-}
+const makeEntry = makeMemoryEntry;
 
 function waitForLine(stream, pattern, timeoutMs = 10_000) {
   return new Promise((resolve, reject) => {

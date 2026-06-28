@@ -93,6 +93,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/smart-memory-lifecycle.mjs" },
   { group: "core-regression", runner: "node", file: "test/smart-metadata-corrupt.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/smart-metadata-v2.mjs" },
+  { group: "storage-and-schema", runner: "node", file: "test/store-audit-log.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/store-empty-scope-filter.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/store-initialization-lifecycle.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/store-index-status-and-list.test.mjs", args: ["--test"] },

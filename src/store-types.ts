@@ -1,3 +1,4 @@
+import { Type, type Static } from "@sinclair/typebox";
 import type { Logger } from "./logger.js";
 import type { SmartMemoryMetadata } from "./smart-metadata.js";
 
@@ -27,22 +28,38 @@ export interface LanceIndex {
   [key: string]: unknown;
 }
 
-export interface MemoryEntry {
-  id: string;
-  text: string;
-  vector: number[];
-  category: "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
-  scope: string;
-  importance: number;
-  timestamp: number;
-  metadata?: string; // JSON string for extensible metadata
+export const STORE_CATEGORY_VALUES = [
+  "preference",
+  "fact",
+  "decision",
+  "entity",
+  "other",
+  "reflection",
+] as const;
+
+export const MemoryEntrySchema = Type.Object({
+  id: Type.String(),
+  text: Type.String(),
+  vector: Type.Array(Type.Number()),
+  category: Type.Union(STORE_CATEGORY_VALUES.map((category) => Type.Literal(category))),
+  scope: Type.String(),
+  importance: Type.Number(),
+  timestamp: Type.Number(),
+  metadata: Type.Optional(Type.String()),
+});
+
+export type MemoryEntry = Static<typeof MemoryEntrySchema> & {
   /** Cached parsed metadata — avoids repeated JSON.parse across retrieval pipeline. */
   _parsedMeta?: SmartMemoryMetadata;
-}
+};
 
 export interface MemorySearchResult {
   entry: MemoryEntry;
   score: number;
+}
+
+export interface MemoryListFilters {
+  quality?: "bad_recall" | "suppressed" | "low_confidence" | "inactive";
 }
 
 export interface StoreConfig {
@@ -50,6 +67,10 @@ export interface StoreConfig {
   vectorDim: number;
   /** Optional logger instance. If not provided, uses default console-based logger. */
   logger?: Logger;
+  /** Enable append-only mutation audit log. Defaults to true. */
+  auditLogEnabled?: boolean;
+  /** Optional audit JSONL path. Defaults to `<dbPath>/audit.jsonl`. */
+  auditLogPath?: string;
 }
 
 export interface MetadataPatch {

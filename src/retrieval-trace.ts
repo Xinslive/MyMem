@@ -49,13 +49,20 @@ interface PendingStage {
   startTime: number;
 }
 
+export interface TraceCollectorOptions {
+  /** Store per-entry dropped IDs. Disable for aggregate stats to avoid large arrays. */
+  collectDroppedIds?: boolean;
+}
+
 export class TraceCollector {
   private readonly _startTime: number;
+  private readonly _collectDroppedIds: boolean;
   private readonly _stages: RetrievalStageResult[] = [];
   private _pending: PendingStage | null = null;
 
-  constructor() {
+  constructor(options: TraceCollectorOptions = {}) {
     this._startTime = Date.now();
+    this._collectDroppedIds = options.collectDroppedIds !== false;
   }
 
   /**
@@ -87,9 +94,11 @@ export class TraceCollector {
     const survivingSet = new Set(survivingIds);
 
     const droppedIds: string[] = [];
-    for (const id of inputIds) {
-      if (!survivingSet.has(id)) {
-        droppedIds.push(id);
+    if (this._collectDroppedIds) {
+      for (const id of inputIds) {
+        if (!survivingSet.has(id)) {
+          droppedIds.push(id);
+        }
       }
     }
 

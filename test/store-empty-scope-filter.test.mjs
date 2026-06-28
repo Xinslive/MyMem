@@ -1,17 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import jitiFactory from "jiti";
-
-const jiti = jitiFactory(import.meta.url, { interopDefault: true });
-const { MemoryStore } = jiti("../src/store.ts");
+import { rmSync } from "node:fs";
+import { makeTempMemoryStore } from "./helpers/store-fixture.mjs";
 
 function makeStore() {
-  const dir = mkdtempSync(join(tmpdir(), "mymem-empty-scope-"));
-  const store = new MemoryStore({ dbPath: dir, vectorDim: 3 });
-  return { store, dir };
+  return makeTempMemoryStore({ prefix: "mymem-empty-scope-" });
 }
 
 describe("MemoryStore empty scopeFilter semantics", () => {

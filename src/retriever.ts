@@ -200,8 +200,9 @@ export class MemoryRetriever {
     this.lastDiagnostics = diagnostics;
 
     try {
-      // Create trace only when stats collector is active (zero overhead otherwise)
-      const trace = this._statsCollector ? new TraceCollector() : undefined;
+      // Aggregate stats only need counts, score ranges, and timings. Avoid
+      // retaining per-entry dropped ID arrays on normal recall paths.
+      const trace = this._statsCollector ? new TraceCollector({ collectDroppedIds: false }) : undefined;
 
       // Check if query contains tag prefixes -> use BM25-only + mustContain
       const tagTokens = this.extractTagTokens(query);
