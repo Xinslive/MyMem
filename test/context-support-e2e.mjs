@@ -96,6 +96,11 @@ async function runTest() {
                 reason: `test ${dedupDecision}`,
                 context_label: dedupContextLabel,
             });
+        } else if (prompt.includes("Merge the following memory into a single coherent record")) {
+            content = JSON.stringify({
+                abstract: "饮品偏好：乌龙茶",
+                content: "用户喜欢乌龙茶，并再次确认这个偏好。",
+            });
         } else {
             content = JSON.stringify({ memories: [] });
         }

@@ -12,7 +12,7 @@ import {
   clamp01,
   deriveManualMemoryLayer,
   fallbackToolLogger,
-  toMemoryCategory,
+  toStrictMemoryCategory,
 } from "./tools-shared.js";
 import { mapToStoreCategory } from "./smart-extractor-handlers.js";
 import { stripEnvelopeMetadata } from "./smart-extractor.js";
@@ -155,7 +155,7 @@ export function registerMemoryStoreTool(
           }
 
           const safeImportance = clamp01(importance, 0.7);
-          const memoryCategory = toMemoryCategory(category);
+          const memoryCategory = toStrictMemoryCategory(category);
           if (!memoryCategory) {
             return {
               content: [

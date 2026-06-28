@@ -16,6 +16,7 @@ export const LLM_DEDUP_DECISION_SCHEMA = Type.Object({
   decision: Type.String(),
   reason: Type.String(),
   match_index: Type.Optional(Type.Number()),
+  context_label: Type.Optional(Type.String()),
 });
 
 export const LLM_MERGE_MEMORY_SCHEMA = Type.Object({

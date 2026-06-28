@@ -95,6 +95,27 @@ describe("readPersistedEmbeddingDimension (audit #6)", () => {
     assert.strictEqual(dim, 4);
   });
 
+  it("refuses bad vectors on update as well as create", async () => {
+    const d = mkdtempSync(join(tmpdir(), "embed-update-guard-"));
+    const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
+    const created = await store.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.5, metadata: "{}" });
+
+    await assert.rejects(
+      () => store.update(created.id, { vector: [] }),
+      /zero-length vector/i,
+    );
+    await assert.rejects(
+      () => store.update(created.id, { vector: [0.1, 0.2, 0.3] }),
+      /dimension mismatch/i,
+    );
+    await assert.rejects(
+      () => store.update(created.id, { vector: [0.1, NaN, 0.3, 0.4] }),
+      /non-finite/i,
+    );
+
+    try { rmSync(d, { recursive: true }); } catch {}
+  });
+
   it("reads back the persisted dimension on a fresh store instance", async () => {
     const d = mkdtempSync(join(tmpdir(), "embed-dim-persist-"));
     const s1 = new MemoryStore({ dbPath: d, vectorDim: 8 });

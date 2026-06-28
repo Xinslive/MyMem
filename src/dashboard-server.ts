@@ -1152,10 +1152,6 @@ export async function startMemoryDashboardServer(
 ): Promise<RunningMemoryDashboardServer> {
   const host = normalizeHost(options.host);
   const port = normalizePort(options.port);
-  // Audit #36: cap concurrent sockets and prevent idle keep-alive leaks
-  server.maxConnections = 64;
-  server.keepAliveTimeout = 5_000;
-  server.headersTimeout = 10_000;
 
   const { token: authToken, tokenFile, generated } = await resolveAuthToken(context, options);
 
@@ -1165,6 +1161,10 @@ export async function startMemoryDashboardServer(
   const server = createServer((req, res) => {
     void routeDashboardRequest(context, req, res, authToken);
   });
+  // Audit #36: cap concurrent sockets and prevent idle keep-alive leaks.
+  server.maxConnections = 64;
+  server.keepAliveTimeout = 5_000;
+  server.headersTimeout = 10_000;
 
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {

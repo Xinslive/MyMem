@@ -8,23 +8,30 @@ const { startMemoryDashboardServer } = await jiti("../src/dashboard-server.ts");
 
 function requestJson(url, options = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method: options.method || "GET" }, (res) => {
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk) => {
-        body += chunk;
-      });
-      res.on("end", () => {
-        try {
-          resolve({
-            statusCode: res.statusCode,
-            body: JSON.parse(body),
-          });
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
+    const req = http.request(
+      url,
+      {
+        method: options.method || "GET",
+        headers: options.headers,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          try {
+            resolve({
+              statusCode: res.statusCode,
+              body: JSON.parse(body),
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
     req.on("error", reject);
     req.end();
   });
@@ -234,10 +241,13 @@ function createContext() {
 }
 
 test("dashboard server serves page and read-only APIs", async () => {
+  const authToken = "test-dashboard-token-123";
   const server = await startMemoryDashboardServer(createContext(), {
     host: "127.0.0.1",
     port: 0,
+    authToken,
   });
+  const authHeaders = { "X-Dashboard-Token": authToken };
 
   try {
     const page = await requestText(server.url + "/");
@@ -270,7 +280,11 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(memoriesPage.statusCode, 200);
     assert.match(memoriesPage.body, /记忆瀑布流/);
 
-    const summary = await requestJson(server.url + "/api/summary");
+    const unauthorized = await requestJson(server.url + "/api/summary");
+    assert.equal(unauthorized.statusCode, 401);
+    assert.equal(unauthorized.body.error, "unauthorized");
+
+    const summary = await requestJson(server.url + "/api/summary", { headers: authHeaders });
     assert.equal(summary.statusCode, 200);
     assert.equal(summary.body.memory.totalCount, 3);
     assert.equal(summary.body.retrieval.hasFtsSupport, true);
@@ -285,7 +299,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     assert.equal(summary.body.feedbackLoop.preventiveLessons.updated, 3);
     assert.equal(summary.body.feedbackLoop.priorAdaptation.cycles, 10);
 
-    const memories = await requestJson(server.url + "/api/memories?limit=1");
+    const memories = await requestJson(server.url + "/api/memories?limit=1", { headers: authHeaders });
     assert.equal(memories.statusCode, 200);
     assert.equal(memories.body.memories[0].categoryLabel, "用户偏好");
     assert.equal(memories.body.memories[0].scopeLabel, "全局");
@@ -299,31 +313,41 @@ test("dashboard server serves page and read-only APIs", async () => {
       utilityTrialCount: 3,
     });
 
-    const profileMemories = await requestJson(server.url + "/api/memories?category=profile&limit=10");
+    const profileMemories = await requestJson(server.url + "/api/memories?category=profile&limit=10", {
+      headers: authHeaders,
+    });
     assert.equal(profileMemories.statusCode, 200);
     assert.deepEqual(profileMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
     assert.equal(profileMemories.body.memories[0].categoryLabel, "用户画像");
     assert.equal(profileMemories.body.memories[0].preview, "A legacy fact stores a stale profile-like note.");
 
-    const patternMemories = await requestJson(server.url + "/api/memories?category=patterns&limit=10");
+    const patternMemories = await requestJson(server.url + "/api/memories?category=patterns&limit=10", {
+      headers: authHeaders,
+    });
     assert.equal(patternMemories.statusCode, 200);
     assert.equal(patternMemories.body.memories[0].preview, "OpenClaw web_search 需要 MiniMax Coding Plan key，不是普通 API key。");
     assert.doesNotMatch(patternMemories.body.memories[0].preview, /^Skill:/);
 
-    const lowConfidenceMemories = await requestJson(server.url + "/api/memories?quality=low_confidence&limit=10");
+    const lowConfidenceMemories = await requestJson(
+      server.url + "/api/memories?quality=low_confidence&limit=10",
+      { headers: authHeaders },
+    );
     assert.equal(lowConfidenceMemories.statusCode, 200);
     assert.equal(lowConfidenceMemories.body.filters.qualityLabel, "低置信");
     assert.deepEqual(lowConfidenceMemories.body.memories.map((memory) => memory.id), ["dashboard_2"]);
     assert.deepEqual(lowConfidenceMemories.body.memories[0].qualityFlags.sort(), ["bad_recall", "low_confidence"]);
 
-    const explain = await requestJson(server.url + "/api/explain?query=dashboard&limit=3");
+    const explain = await requestJson(server.url + "/api/explain?query=dashboard&limit=3", { headers: authHeaders });
     assert.equal(explain.statusCode, 200);
     assert.equal(explain.body.count, 1);
     assert.equal(explain.body.explanation.status, "matched");
     assert.equal(explain.body.results[0].id, "dashboard_1");
     assert.equal(explain.body.results[0].categoryLabel, "用户偏好");
 
-    const deleted = await requestJson(server.url + "/api/memories/dashboard_1", { method: "DELETE" });
+    const deleted = await requestJson(server.url + "/api/memories/dashboard_1", {
+      method: "DELETE",
+      headers: authHeaders,
+    });
     assert.equal(deleted.statusCode, 200);
     assert.equal(deleted.body.ok, true);
   } finally {

@@ -14,7 +14,7 @@ import {
   fallbackToolLogger,
   retrieveWithRetry,
   sanitizeMemoryForSerialization,
-  toMemoryCategory,
+  toStrictMemoryCategory,
 } from "./tools-shared.js";
 import type { MemoryEntry } from "./store.js";
 import { isNoise } from "./noise-filter.js";
@@ -156,7 +156,7 @@ export function registerMemoryUpdateTool(
           if (text || importance !== undefined || category) {
             existing = await runtimeContext.store.getById(resolvedId, scopeFilter);
           }
-          const requestedMemoryCategory = toMemoryCategory(category);
+          const requestedMemoryCategory = toStrictMemoryCategory(category);
           if (category && !requestedMemoryCategory) {
             return {
               content: [

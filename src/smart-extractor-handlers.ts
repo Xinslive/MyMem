@@ -113,6 +113,13 @@ function withAdmissionAudit<T extends Record<string, unknown>>(
   return { ...metadata, admission_control: admissionAudit };
 }
 
+function redactCandidate(candidate: CandidateMemory): { abstract: string; content: string } {
+  return {
+    abstract: redactSecrets(candidate.abstract),
+    content: redactSecrets(candidate.content),
+  };
+}
+
 /**
  * Store a candidate memory as a new entry with summary/content metadata.
  */
@@ -130,8 +137,7 @@ export async function storeCandidate(
   // Redact true secrets from both summary and content before persisting.
   // The extraction prompt is also scrubbed, but LLM echoes are not guaranteed;
   // this is the second line of defense against credentials ending up in long-term memory.
-  const safeAbstract = redactSecrets(candidate.abstract);
-  const safeContent = redactSecrets(candidate.content);
+  const { abstract: safeAbstract, content: safeContent } = redactCandidate(candidate);
 
   const classifyText = safeContent || safeAbstract;
   const metadata = stringifySmartMetadata(
@@ -383,12 +389,13 @@ export async function handleSupersede(
 
   const now = Date.now();
   const existingMeta = parseSmartMetadata(existing.metadata, existing);
+  const { abstract: safeAbstract, content: safeContent } = redactCandidate(candidate);
   const factKey =
-    existingMeta.fact_key ?? deriveFactKey(candidate.category, candidate.abstract);
+    existingMeta.fact_key ?? deriveFactKey(candidate.category, safeAbstract);
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
-  const supersedeClassifyText = candidate.content || candidate.abstract;
+  const supersedeClassifyText = safeContent || safeAbstract;
   const created = await ctx.store.store({
-    text: candidate.abstract,
+    text: safeAbstract,
     vector,
     category: storeCategory,
     scope: targetScope,
@@ -396,12 +403,12 @@ export async function handleSupersede(
     metadata: stringifySmartMetadata(
       buildSmartMetadata(
         {
-          text: candidate.abstract,
+          text: safeAbstract,
           category: storeCategory,
         },
         {
-          summary: candidate.abstract,
-          content: candidate.content,
+          summary: safeAbstract,
+          content: safeContent,
           memory_category: candidate.category,
           tier: "working",
           access_count: 0,
@@ -496,9 +503,10 @@ export async function handleContextualize(
   admissionAudit?: AdmissionAuditRecord,
 ): Promise<void> {
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
+  const { abstract: safeAbstract, content: safeContent } = redactCandidate(candidate);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
-    summary: candidate.abstract,
-    content: candidate.content,
+    summary: safeAbstract,
+    content: safeContent,
     memory_category: candidate.category,
     tier: "working" as const,
     access_count: 0,
@@ -517,7 +525,7 @@ export async function handleContextualize(
   }, admissionAudit));
 
   await ctx.store.store({
-    text: candidate.abstract,
+    text: safeAbstract,
     vector,
     category: storeCategory,
     scope: targetScope,
@@ -561,9 +569,10 @@ export async function handleContradict(
 
   // 2. Store the contradicting entry as a new memory
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
+  const { abstract: safeAbstract, content: safeContent } = redactCandidate(candidate);
   const metadata = stringifySmartMetadata(withAdmissionAudit(ctx, {
-    summary: candidate.abstract,
-    content: candidate.content,
+    summary: safeAbstract,
+    content: safeContent,
     memory_category: candidate.category,
     tier: "working" as const,
     access_count: 0,
@@ -582,7 +591,7 @@ export async function handleContradict(
   }, admissionAudit));
 
   await ctx.store.store({
-    text: candidate.abstract,
+    text: safeAbstract,
     vector,
     category: storeCategory,
     scope: targetScope,

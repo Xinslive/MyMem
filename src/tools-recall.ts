@@ -15,7 +15,7 @@ import {
   sanitizeMemoryForSerialization,
   retrieveWithRetry,
   filterResultsByMemoryCategory,
-  toMemoryCategory,
+  toStrictMemoryCategory,
 } from "./tools-shared.js";
 import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
@@ -90,7 +90,7 @@ export function registerMemoryRecallTool(
             ? clampInt(limit, 1, 20)
             : clampInt(limit, 1, 6);
           const safeCharsPerItem = clampInt(maxCharsPerItem, 60, 1000);
-          if (category && !toMemoryCategory(category)) {
+          if (category && !toStrictMemoryCategory(category)) {
             return {
               content: [
                 {

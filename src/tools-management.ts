@@ -17,7 +17,7 @@ import {
   sanitizeMemoryForSerialization,
   resolveMemoryId,
   filterEntriesByMemoryCategory,
-  toMemoryCategory,
+  toStrictMemoryCategory,
 } from "./tools-shared.js";
 import { clampInt } from "./utils.js";
 import { resolveScopeFilter } from "./scopes.js";
@@ -370,7 +370,7 @@ export function registerMemoryExplainTool(
               }
             }
 
-            if (category && !toMemoryCategory(category)) {
+            if (category && !toStrictMemoryCategory(category)) {
               return {
                 content: [
                   {
@@ -455,7 +455,7 @@ export function registerMemoryListTool(
         try {
           const safeLimit = clampInt(limit, 1, 50);
           const safeOffset = clampInt(offset, 0, 1000);
-          if (category && !toMemoryCategory(category)) {
+          if (category && !toStrictMemoryCategory(category)) {
             return {
               content: [
                 {

@@ -1472,6 +1472,7 @@ export class MemoryStore {
         timestamp: original.timestamp, // preserve original
         metadata: updates.metadata ?? original.metadata,
       };
+      assertValidVector(updated.vector, this.config.vectorDim, "update");
 
       // Use LanceDB mergeInsert for atomic upsert — eliminates the
       // delete+add race condition where a failed add could lose data.

@@ -35,6 +35,8 @@ export interface LlmClient {
   completeJson<T>(prompt: string, label?: string, schema?: TSchema): Promise<T | null>;
   /** Best-effort diagnostics for the most recent failure, if any. */
   getLastError(): string | null;
+  /** Count of completeJson failures observed by this client instance. */
+  readonly recentErrorCount: number;
 }
 
 /**
@@ -499,6 +501,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
             lastError =
               `mymem: llm-client [${label}] empty OAuth response content from model ${config.model}`;
             log(lastError);
+            errorCount++;
             return null;
           }
 
@@ -507,6 +510,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
             lastError =
               `mymem: llm-client [${label}] no JSON object found in OAuth response (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
             log(lastError);
+            errorCount++;
             return null;
           }
 
@@ -514,6 +518,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
           if (!parsed.value) {
             lastError = parsed.error ?? `mymem: llm-client [${label}] OAuth JSON response validation failed`;
             log(lastError);
+            errorCount++;
             return null;
           }
           return parsed.value;
@@ -524,6 +529,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
         lastError =
           `mymem: llm-client [${label}] OAuth request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
         (warnLog ?? log)(lastError);
+        errorCount++;
         return null;
       } finally {
         release();
@@ -531,6 +537,9 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
     },
     getLastError(): string | null {
       return lastError;
+    },
+    get recentErrorCount(): number {
+      return errorCount;
     },
   };
 }

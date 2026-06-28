@@ -88,8 +88,10 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/session-utils.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/smart-extractor-batch-embed.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/smart-extractor-branches.mjs" },
+  { group: "core-regression", runner: "node", file: "test/smart-extractor-handler-redaction.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/smart-extractor-scope-filter.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/smart-memory-lifecycle.mjs" },
+  { group: "core-regression", runner: "node", file: "test/smart-metadata-corrupt.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/smart-metadata-v2.mjs" },
   { group: "storage-and-schema", runner: "node", file: "test/store-empty-scope-filter.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/store-initialization-lifecycle.test.mjs", args: ["--test"] },
@@ -104,6 +106,7 @@ export const CI_TEST_MANIFEST = [
   { group: "packaging-and-workflow", runner: "node", file: "test/telemetry-and-benchmark.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/temporal-facts.test.mjs" },
   { group: "storage-and-schema", runner: "node", file: "test/update-consistency-lancedb.test.mjs", args: ["--test"] },
+  { group: "storage-and-schema", runner: "node", file: "test/vector-integrity.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/vector-search-cosine.test.mjs" },
   { group: "packaging-and-workflow", runner: "node", file: "test/workflow-fork-guards.test.mjs", args: ["--test"] },
 ];

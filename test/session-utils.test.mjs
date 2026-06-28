@@ -132,6 +132,13 @@ describe("redactSecrets", () => {
     assert.ok(scrubbed.includes("My current database"), "context around the secret is preserved");
   });
 
+  it("scrubs Chinese credentials with full-width punctuation", () => {
+    const userText = "数据库密码：hunter2-please-rotate-q1-2026";
+    const scrubbed = redactSecrets(userText);
+    assert.ok(!scrubbed.includes("hunter2-please-rotate-q1-2026"));
+    assert.ok(scrubbed.includes("[REDACTED]"));
+  });
+
   it("scrubs a secret without removing the rest of the sentence", () => {
     const userText = "Server is at https://api.example.com with token=ghp_abcdefghijklmnopqrstuvwxyz0123456789AB";
     const scrubbed = redactSecrets(userText);

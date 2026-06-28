@@ -106,6 +106,12 @@ export function toMemoryCategory(category: string | undefined): MemoryCategory |
   return typeof category === "string" ? normalizeCategory(category) ?? undefined : undefined;
 }
 
+export function toStrictMemoryCategory(category: string | undefined): MemoryCategory | undefined {
+  return typeof category === "string" && (MEMORY_CATEGORIES as readonly string[]).includes(category)
+    ? category as MemoryCategory
+    : undefined;
+}
+
 export function deriveManualMemoryLayer(category: MemoryCategory): "durable" | "working" {
   if (category === "profile" || category === "preferences" || category === "events") {
     return "durable";

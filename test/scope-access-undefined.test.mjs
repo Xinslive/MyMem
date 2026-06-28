@@ -19,7 +19,6 @@ describe("MemoryScopeManager - System & Reflection Scopes", () => {
 
   describe("System/Admin Bypass", () => {
     const bypassCases = [
-      { label: "reserved string undefined", agentId: "undefined" },
       { label: "reserved string system", agentId: "system" },
       { label: "empty string", agentId: "" },
       { label: "actual undefined", agentId: undefined },
@@ -54,7 +53,11 @@ describe("MemoryScopeManager - System & Reflection Scopes", () => {
 
     it("uses filter bypass only for reserved internal identifiers", () => {
       assert.strictEqual(manager.getScopeFilter("system"), undefined);
-      assert.strictEqual(manager.getScopeFilter("undefined"), undefined);
+      assert.deepStrictEqual(manager.getScopeFilter("undefined"), [
+        "global",
+        "agent:undefined",
+        "reflection:agent:undefined",
+      ]);
       assert.deepStrictEqual(manager.getScopeFilter("main"), [
         "global",
         "agent:main",
@@ -70,12 +73,16 @@ describe("MemoryScopeManager - System & Reflection Scopes", () => {
     it("rejects whitespace-padded reserved bypass ids extracted from session keys", () => {
       const { parseAgentIdFromSessionKey } = jiti("../src/scopes.ts");
       assert.strictEqual(parseAgentIdFromSessionKey("agent: system :discord:channel:1"), undefined);
-      assert.strictEqual(parseAgentIdFromSessionKey("agent: undefined :discord:channel:1"), undefined);
+      assert.strictEqual(parseAgentIdFromSessionKey("agent: undefined :discord:channel:1"), "undefined");
     });
 
     it("rejects explicit ACL configuration for reserved bypass identifiers", () => {
       assert.throws(() => manager.setAgentAccess("system", ["global"]), /Reserved bypass agent ID/);
-      assert.throws(() => manager.setAgentAccess("undefined", ["global"]), /Reserved bypass agent ID/);
+      assert.doesNotThrow(() => manager.setAgentAccess("undefined", ["global"]));
+      assert.deepStrictEqual(manager.getAccessibleScopes("undefined"), [
+        "global",
+        "reflection:agent:undefined",
+      ]);
     });
 
     it("rejects reserved bypass identifiers in constructor and importConfig without corrupting state", () => {
@@ -85,11 +92,12 @@ describe("MemoryScopeManager - System & Reflection Scopes", () => {
       );
 
       const before = manager.exportConfig();
-      assert.throws(
-        () => manager.importConfig({ default: "global", agentAccess: { undefined: ["global"] } }),
-        /Reserved bypass agent ID/,
-      );
-      assert.deepStrictEqual(manager.exportConfig(), before);
+      manager.importConfig({ default: "global", agentAccess: { undefined: ["global"] } });
+      assert.deepStrictEqual(manager.getAccessibleScopes("undefined"), [
+        "global",
+        "reflection:agent:undefined",
+      ]);
+      assert.notDeepStrictEqual(manager.exportConfig(), before);
     });
 
     it("normalizes whitespace-padded non-reserved ACL keys", () => {
