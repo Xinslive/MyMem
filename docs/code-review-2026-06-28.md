@@ -16,6 +16,8 @@
 
 本文件最初记录二次审查发现；2026-06-28 已按 CR-1 到 CR-10 完成本轮修复并回写为 fix log。修复后验证命令结果如下：
 
+备注：以下验证命令是当时的历史基线。2026-06-28 后续个人维护精简中，测试套件已收缩为 `npm test` 直接运行的 lightweight smoke suite。
+
 - `npm run typecheck`：通过。
 - `npm run lint`：通过，`no-explicit-any` 已从背景 warning 收敛为默认 error，仅在带注释的动态边界 allowlist 中放行。
 - `node scripts/verify-ci-test-manifest.mjs`：通过，107 个测试文件全部被 CI manifest 精确覆盖一次。
@@ -278,6 +280,8 @@ RH-1 已经修复维护状态文件的原子写，但这些新标记/凭证/审�
 - `npm run lint`：通过。
 - `node scripts/verify-ci-test-manifest.mjs`：通过，107 entries。
 - `node scripts/run-ci-tests.mjs --all`：通过。
+
+后续个人维护精简后，默认测试入口改为 `npm test` lightweight smoke suite，不再保留大规模 CI manifest。
 
 ## 后续维护备注
 

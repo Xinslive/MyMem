@@ -1096,18 +1096,17 @@ openclaw mymem dashboard          # 启动本机可视化管理台；日志会�
 
 ### 18.2 测试框架
 
-测试使用 Node.js 内置测试运行器 + `jiti`（无需预编译即可导入 .ts 文件）：
+测试使用 Node.js 内置测试运行器 + `jiti`（无需预编译即可导入 .ts 文件）。这是个人自用项目，默认测试入口刻意保持轻量：
 
 ```bash
-npm test                            # 全部测试
-npm run test:cli-smoke              # CLI 冒烟测试
-npm run test:core-regression        # 核心回归测试
-npm run test:storage-and-schema     # 存储和 schema 测试
-npm run test:llm-clients-and-auth   # LLM 客户端测试
-npm run test:packaging-and-workflow # 打包和工作流测试
+npm test                            # 轻量 smoke suite
+npm run typecheck                   # TypeScript 类型检查
+npm run lint                        # ESLint 检查
+node --test test/name.test.mjs       # 按需运行单个 node:test 文件
+node test/name.mjs                   # 按需运行普通 smoke 文件
 ```
 
-CI 编排通过 `scripts/run-ci-tests.mjs` 和 `scripts/ci-test-manifest.mjs` 实现。代码覆盖率通过 `c8` 配置，阈值为 60% 行覆盖率 / 50% 分支覆盖率。
+默认 smoke suite 直接由 `package.json` 编排，只保留配置解析、捕获判定、写入边界、插件 manifest/注册和 CLI 基础流程这几类个人维护最常用的检查。不再保留大规模 CI 分组和覆盖率门槛。
 
 ---
 
