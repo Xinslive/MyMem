@@ -252,18 +252,22 @@ export async function rerankResults(
 
       // Timeout: configurable via rerankTimeoutMs (default: 5000ms)
       // Also propagate external abort signal (e.g. auto-recall timeout).
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), config.rerankTimeoutMs ?? 5000);
+      // Audit #25: split timeout and external signal into independent controllers
+      // so the catch block can distinguish "local timeout" from "caller cancelled".
+      const timeoutCtrl = new AbortController();
+      const externalCtrl = new AbortController();
+      const timeout = setTimeout(() => timeoutCtrl.abort("rerank-timeout"), config.rerankTimeoutMs ?? 5000);
       let unsubscribe: (() => void) | undefined;
       if (signal) {
         if (signal.aborted) {
           clearTimeout(timeout);
           throw new DOMException("Rerank aborted (signal already aborted)", "AbortError");
         }
-        const handler = () => { controller.abort(); clearTimeout(timeout); };
+        const handler = () => { externalCtrl.abort("rerank-external"); clearTimeout(timeout); };
         signal.addEventListener("abort", handler, { once: true });
         unsubscribe = () => signal.removeEventListener("abort", handler);
       }
+      const combinedSignal = AbortSignal.any([timeoutCtrl.signal, externalCtrl.signal]);
 
       let response: Response;
       try {
@@ -271,7 +275,7 @@ export async function rerankResults(
           method: "POST",
           headers,
           body: JSON.stringify(body),
-          signal: controller.signal,
+          signal: combinedSignal,
         });
       } finally {
         clearTimeout(timeout);

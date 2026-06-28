@@ -74,7 +74,11 @@ const SCOPE_PATTERNS = {
   USER: (userId: string) => `user:${userId}`,
 };
 
-const SYSTEM_BYPASS_IDS = new Set(["system", "undefined"]);
+// Audit #28: remove "undefined" — it was a JS bug fallback (toString of undefined),
+// not a legitimate system ID. Keep "system" but only when explicitly opted-in
+// via environment variable or config (the warnLegacyFallback path below handles
+// migration from the permissive default).
+const SYSTEM_BYPASS_IDS = new Set<string>(["system"]);
 const warnedLegacyFallbackBypassIds = new Set<string>();
 
 export function isSystemBypassId(agentId?: string): boolean {

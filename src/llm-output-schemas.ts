@@ -1,8 +1,11 @@
 import { Type } from "@sinclair/typebox";
 
+// Audit #14: strict enum prevents LLM from injecting arbitrary category names
+const MEMORY_CATEGORIES = ["profile", "preferences", "entities", "events", "cases", "patterns"] as const;
+
 export const LLM_EXTRACTION_SCHEMA = Type.Object({
   memories: Type.Array(Type.Object({
-    category: Type.String(),
+    category: Type.Union(MEMORY_CATEGORIES.map((c) => Type.Literal(c))),
     worth_storing: Type.Optional(Type.Boolean()),
     abstract: Type.String(),
     content: Type.String(),

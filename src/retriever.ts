@@ -1078,8 +1078,13 @@ export class MemoryRetriever {
       }
 
       try {
-        await this.store.update(r.entry.id, {
+        // Audit #7: fire-and-forget to avoid blocking the recall hot path
+        // with a synchronous store.update(). queueAccessRetry handles retries.
+        void this.store.update(r.entry.id, {
           metadata: stringifySmartMetadata(meta),
+        }).catch((err) => {
+          this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);
+          this.queueAccessRetry(r.entry.id);
         });
       } catch (err) {
         this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);

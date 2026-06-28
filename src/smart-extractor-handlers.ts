@@ -22,6 +22,7 @@ import {
 } from "./smart-metadata.js";
 import { classifyTemporal, inferExpiry } from "./temporal-classifier.js";
 import { defaultLearningKindPatch } from "./learning-memory.js";
+import { redactSecrets } from "./session-utils.js";
 
 // ============================================================================
 // Context
@@ -126,16 +127,22 @@ export async function storeCandidate(
   // Map 6-category to existing store categories for backward compatibility
   const storeCategory = ctx.mapToStoreCategory(candidate.category);
 
-  const classifyText = candidate.content || candidate.abstract;
+  // Redact true secrets from both summary and content before persisting.
+  // The extraction prompt is also scrubbed, but LLM echoes are not guaranteed;
+  // this is the second line of defense against credentials ending up in long-term memory.
+  const safeAbstract = redactSecrets(candidate.abstract);
+  const safeContent = redactSecrets(candidate.content);
+
+  const classifyText = safeContent || safeAbstract;
   const metadata = stringifySmartMetadata(
     buildSmartMetadata(
       {
-        text: candidate.abstract,
+        text: safeAbstract,
         category: ctx.mapToStoreCategory(candidate.category),
       },
       {
-        summary: candidate.abstract,
-        content: candidate.content,
+        summary: safeAbstract,
+        content: safeContent,
         memory_category: candidate.category,
         tier: "working",
         access_count: 0,
@@ -155,7 +162,7 @@ export async function storeCandidate(
   );
 
   await ctx.store.store({
-    text: candidate.abstract, // Summary used as the searchable text
+    text: safeAbstract, // Summary used as the searchable text
     vector,
     category: storeCategory,
     scope: targetScope,
@@ -299,8 +306,13 @@ export async function handleMerge(
     return;
   }
 
+  // Defense in depth: LLM may have re-introduced secrets in the merged output.
+  // Scrub before persisting the merged memory.
+  const safeMergedAbstract = redactSecrets(merged.abstract);
+  const safeMergedContent = redactSecrets(merged.content);
+
   // Re-embed the merged content
-  const mergedText = `${merged.abstract} ${merged.content}`;
+  const mergedText = `${safeMergedAbstract} ${safeMergedContent}`;
   const newVector = await ctx.embedder.embed(mergedText);
 
   // Update existing memory via store.update()
@@ -308,9 +320,9 @@ export async function handleMerge(
   const metadata = stringifySmartMetadata(
     withAdmissionAudit(
       ctx,
-      buildSmartMetadata(existing ?? { text: merged.abstract }, {
-        summary: merged.abstract,
-        content: merged.content,
+      buildSmartMetadata(existing ?? { text: safeMergedAbstract }, {
+        summary: safeMergedAbstract,
+        content: safeMergedContent,
         memory_category: candidate.category,
         ...defaultLearningKindPatch(candidate.category),
         tier: "working",
@@ -323,7 +335,7 @@ export async function handleMerge(
   await ctx.store.update(
     matchId,
     {
-      text: merged.abstract,
+      text: safeMergedAbstract,
       vector: newVector,
       metadata,
     },

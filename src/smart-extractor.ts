@@ -34,6 +34,7 @@ import {
 } from "./workspace-boundary.js";
 import { batchDedup } from "./batch-dedup.js";
 import { stripEnvelopeMetadata } from "./envelope-stripping.js";
+import { redactSecrets } from "./session-utils.js";
 import {
   deduplicate,
   type DedupContext,
@@ -385,8 +386,20 @@ export class SmartExtractor {
         flushStartedAt = Date.now();
         await this.store.flushBatch();
       } catch (err) {
-        const cancelBatch = (this.store as unknown as { cancelBatch?: () => unknown }).cancelBatch;
-        if (typeof cancelBatch === "function") cancelBatch.call(this.store);
+        // If flushBatch itself failed, the store has already un-shifted
+        // entries back into _batchBuffer (see MemoryStore.flushBatch). We
+        // do NOT call cancelBatch here — the caller can decide whether to
+        // retry or discard. Only cancelBatch when the failure happened
+        // before flush was attempted (e.g. processCandidates threw on a
+        // non-store error).
+        if (flushStartedAt === 0) {
+          const cancelBatch = (this.store as unknown as { cancelBatch?: () => unknown }).cancelBatch;
+          if (typeof cancelBatch === "function") cancelBatch.call(this.store);
+        } else {
+          this.log(
+            `mymem：智能提取 flushBatch 失败，保留缓冲等待重试：${String(err)}`,
+          );
+        }
         throw err;
       }
     }
@@ -430,9 +443,14 @@ export class SmartExtractor {
     // (e.g. "System: [2026-03-18 14:21:36 GMT+8] Feishu[default] DM | ou_...")
     // These pollute extraction if treated as conversation content.
     const cleaned = stripEnvelopeMetadata(truncated);
+    // Redact true secrets (API keys, tokens, passwords, private keys) before
+    // the text is sent to the LLM and before any value is stored. This keeps
+    // user-provided credentials out of extraction prompts and out of long-term
+    // memory even when the LLM echoes the source content back.
+    const sanitized = redactSecrets(cleaned);
 
     const user = this.config.user ?? "User";
-    const prompt = buildExtractionPrompt(cleaned, user);
+    const prompt = buildExtractionPrompt(sanitized, user);
 
     const result = await this.llm.completeJson<{
       memories: Array<{
@@ -576,19 +594,37 @@ export class SmartExtractor {
 
     // Use pre-computed vector if available (batch embed optimization),
     // otherwise fall back to per-candidate embed call.
-    const vector = precomputedVector ?? await this.embedder.embed(`${candidate.abstract} ${candidate.content}`);
-    if (!vector || vector.length === 0) {
-      this.log("mymem：智能提取嵌入失败，将按原文存储");
-      await storeCandidate(handlerCtx, candidate, vector || [], sessionKey, targetScope);
-      stats.created++;
+    let vector: number[] | null;
+    try {
+      vector = precomputedVector ?? await this.embedder.embed(`${candidate.abstract} ${candidate.content}`);
+    } catch (err) {
+      // Audit #5: an embedder failure must be loud, not silent. Previously
+      // the code would log a message, write a zero-length vector, and
+      // pretend success. Zero-length vectors are invisible to every
+      // vector search and break cosine similarity scoring (NaN). Surface
+      // the failure in stats and skip persistence so the caller can retry.
+      this.log(
+        `mymem：智能提取嵌入失败，跳过此候选（category=${candidate.category}）：${String(err)}`,
+      );
+      stats.skipped += 1;
+      (stats as { embedFailures?: number }).embedFailures = ((stats as { embedFailures?: number }).embedFailures ?? 0) + 1;
       return;
     }
+    if (!vector || vector.length === 0) {
+      this.log(
+        `mymem：智能提取嵌入返回空向量，跳过此候选（category=${candidate.category}，abstract 前 60 字：${candidate.abstract.slice(0, 60)}）`,
+      );
+      stats.skipped += 1;
+      (stats as { embedFailures?: number }).embedFailures = ((stats as { embedFailures?: number }).embedFailures ?? 0) + 1;
+      return;
+    }
+    const safeVector: number[] = vector;
 
     // Admission control gate (before dedup)
     const admission = this.admissionController
       ? await this.admissionController.evaluate({
           candidate,
-          candidateVector: vector,
+          candidateVector: safeVector,
           conversationText,
           scopeFilter: scopeFilter ?? [targetScope],
           worthStoring: candidate.worth_storing,
@@ -622,11 +658,11 @@ export class SmartExtractor {
       llm: this.llm,
       log: { warn: (...args: unknown[]) => this.log(String(args[0])) },
     };
-    const dedupResult = await deduplicate(dedupCtx, candidate, vector, scopeFilter);
+    const dedupResult = await deduplicate(dedupCtx, candidate, safeVector, scopeFilter);
 
     switch (dedupResult.decision) {
       case "create":
-        await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+        await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
         stats.created++;
         break;
 
@@ -647,7 +683,7 @@ export class SmartExtractor {
           stats.merged++;
         } else {
           // Category doesn't support merge → create instead
-          await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+          await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
           stats.created++;
         }
         break;
@@ -677,7 +713,7 @@ export class SmartExtractor {
           stats.created++;
           stats.superseded = (stats.superseded ?? 0) + 1;
         } else {
-          await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+          await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
           stats.created++;
         }
         break;
@@ -687,17 +723,17 @@ export class SmartExtractor {
           await handleSupport(handlerCtx, dedupResult.matchId, { session: sessionKey, timestamp: Date.now() }, dedupResult.reason, dedupResult.contextLabel, scopeFilter, admission?.audit);
           stats.supported = (stats.supported ?? 0) + 1;
         } else {
-          await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+          await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
           stats.created++;
         }
         break;
 
       case "contextualize":
         if (dedupResult.matchId) {
-          await handleContextualize(handlerCtx, candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+          await handleContextualize(handlerCtx, candidate, safeVector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
           stats.created++;
         } else {
-          await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+          await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
           stats.created++;
         }
         break;
@@ -721,11 +757,11 @@ export class SmartExtractor {
             stats.created++;
             stats.superseded = (stats.superseded ?? 0) + 1;
           } else {
-            await handleContradict(handlerCtx, candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+            await handleContradict(handlerCtx, candidate, safeVector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
             stats.created++;
           }
         } else {
-          await storeCandidate(handlerCtx, candidate, vector, sessionKey, targetScope, admission?.audit);
+          await storeCandidate(handlerCtx, candidate, safeVector, sessionKey, targetScope, admission?.audit);
           stats.created++;
         }
         break;

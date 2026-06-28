@@ -27,6 +27,48 @@ type EntryWithParsedMetadata = EntryLike & {
   _parsedMeta?: SmartMemoryMetadata;
 };
 
+// ---------------------------------------------------------------------------
+// Corrupt metadata observability (audit #2)
+// ---------------------------------------------------------------------------
+// Persisted smart-metadata rows whose JSON is invalid used to be silently
+// treated as empty metadata, which caused important memories to be downgraded
+// to "legacy" category and lose their lifecycle / governance signals. We now
+// count corrupt parses per process, capture the most recent parse error, and
+// expose both via `getCorruptMetadataStats()` so dashboards and the CLI can
+// surface them. The `onCorrupt` callback still allows callers to plug in
+// their own logger (e.g. for unit tests).
+let corruptParseCount = 0;
+let lastCorruptError: { at: number; message: string; rawPreview: string } | null = null;
+
+export function getCorruptMetadataStats(): { count: number; lastError: { at: number; message: string; rawPreview: string } | null } {
+  return { count: corruptParseCount, lastError: lastCorruptError };
+}
+
+export function resetCorruptMetadataStats(): void {
+  corruptParseCount = 0;
+  lastCorruptError = null;
+}
+
+function recordCorruptParse(raw: string, err: unknown): void {
+  corruptParseCount += 1;
+  lastCorruptError = {
+    at: Date.now(),
+    message: err instanceof Error ? err.message : String(err),
+    rawPreview: raw.length > 200 ? `${raw.slice(0, 200)}…` : raw,
+  };
+}
+
+export interface ParseSmartMetadataOptions {
+  /**
+   * Called when rawMetadata is non-empty but JSON.parse fails. The first
+   * argument is the raw string, the second is the parse error. Defaults to
+   * recording into the module-level corrupt counter exposed via
+   * `getCorruptMetadataStats()`. Supply a custom handler for unit tests or
+   * when the caller wants to forward the event to a structured logger.
+   */
+  onCorrupt?: (raw: string, error: unknown) => void;
+}
+
 export interface MemoryRelation {
   type: string;
   targetId: string;
@@ -295,19 +337,38 @@ export function isMemoryExpired(
   return metadata.valid_until != null && metadata.valid_until <= at;
 }
 
+export interface ParseSmartMetadataOptions {
+  /**
+   * Called when rawMetadata is non-empty but JSON.parse fails. The first
+   * argument is the raw string, the second is the parse error. Listeners
+   * should at minimum emit a structured log entry so corrupt rows become
+   * visible instead of silently being treated as empty metadata.
+   */
+  onCorrupt?: (raw: string, error: unknown) => void;
+}
+
 export function parseSmartMetadata(
   rawMetadata: string | undefined,
   entry: EntryLike = {},
+  options: ParseSmartMetadataOptions = {},
 ): SmartMemoryMetadata {
   let parsed: Record<string, unknown> = {};
+  let corrupt = false;
   if (rawMetadata) {
     try {
       const obj = JSON.parse(rawMetadata);
       if (obj && typeof obj === "object") {
         parsed = obj as Record<string, unknown>;
+      } else {
+        corrupt = true;
+        const err = new Error("metadata JSON is not an object");
+        if (options.onCorrupt) options.onCorrupt(rawMetadata, err);
+        else recordCorruptParse(rawMetadata, err);
       }
-    } catch {
-      parsed = {};
+    } catch (err) {
+      corrupt = true;
+      if (options.onCorrupt) options.onCorrupt(rawMetadata, err);
+      else recordCorruptParse(rawMetadata, err);
     }
   }
 
@@ -396,6 +457,16 @@ export function parseSmartMetadata(
     case_steps: normalizeStringArray(parsed.case_steps, 12),
     canonical_id: normalizeOptionalString(parsed.canonical_id),
   };
+
+  // Surface corrupt metadata so dashboards and decay/decay-aware recall can
+  // either quarantine the row or show a visible "needs reindex" flag instead
+  // of treating the row as a low-information legacy entry. We attach the raw
+  // payload (truncated) for forensic recovery via `mymem doctor --recover`.
+  if (corrupt) {
+    (normalized as SmartMemoryMetadata & { __corrupt?: unknown }).__corrupt = true;
+    (normalized as SmartMemoryMetadata & { __corrupt_raw?: string }).__corrupt_raw =
+      rawMetadata && rawMetadata.length > 4096 ? `${rawMetadata.slice(0, 4096)}…` : rawMetadata;
+  }
 
   return normalized;
 }

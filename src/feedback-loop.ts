@@ -8,7 +8,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { open } from "node:fs/promises";
+import { appendFile, mkdir, open } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
@@ -379,10 +380,62 @@ export class FeedbackLoop {
 
   // --- Hot-path callbacks (no I/O) ---
 
+  /**
+   * Persist an admission rejection for the prior-adaptation cycle.
+   *
+   * When the host has not registered an external rejection-audit writer
+   * (config.admissionControl.persistRejectedAudits !== true), this callback
+   * is the sole sink for rejection evidence and must write the entry to the
+   * same jsonl file that {@link forceAdaptationCycle} reads from. Otherwise
+   * the adaptation cycle has no rejections to learn from.
+   *
+   * If runtime context (dbPath / admissionConfig) is not yet known, fall
+   * back to a bounded in-memory ring buffer that {@link forceAdaptationCycle}
+   * can still consume once context becomes available.
+   */
   onAdmissionRejected(entry: AdmissionRejectionAuditEntry): void {
-    void entry;
     if (this.disposed || !this.config.enabled) return;
-    this.debugLog("feedback-loop: onAdmissionRejected called (intentional no-op; prior adaptation uses timer-based audit scan)");
+    const { dbPath, admissionConfig } = this.runtimeContext;
+    if (dbPath && admissionConfig) {
+      const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
+      this.writeRejectionAuditEntry(filePath, entry).catch((err) => {
+        this.debugLog(`feedback-loop: rejection audit write failed, buffering in memory: ${err instanceof Error ? err.message : String(err)}`);
+        this.bufferRejectionInMemory(entry);
+      });
+      return;
+    }
+    this.bufferRejectionInMemory(entry);
+  }
+
+  private rejectionMemoryBuffer: AdmissionRejectionAuditEntry[] = [];
+
+  private bufferRejectionInMemory(entry: AdmissionRejectionAuditEntry): void {
+    this.rejectionMemoryBuffer.push(entry);
+    const cap = Math.max(50, this.config.priorAdaptation.maxRejectionAudits);
+    if (this.rejectionMemoryBuffer.length > cap) {
+      this.rejectionMemoryBuffer.splice(0, this.rejectionMemoryBuffer.length - cap);
+    }
+  }
+
+  private async writeRejectionAuditEntry(filePath: string, entry: AdmissionRejectionAuditEntry): Promise<void> {
+    await mkdir(dirname(filePath), { recursive: true });
+    await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+  }
+
+  /** Drain the in-memory rejection buffer into the file once context is known. */
+  private async flushRejectionMemoryBufferToFile(filePath: string): Promise<void> {
+    if (this.rejectionMemoryBuffer.length === 0) return;
+    const drained = this.rejectionMemoryBuffer.splice(0);
+    for (const entry of drained) {
+      try {
+        await this.writeRejectionAuditEntry(filePath, entry);
+      } catch (err) {
+        // Put it back at the head and stop — next cycle will retry.
+        this.rejectionMemoryBuffer.unshift(...drained.splice(0));
+        this.debugLog(`feedback-loop: rejection memory flush failed: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
   }
 
   /** Record an admitted memory by category for prior adaptation. */
@@ -603,6 +656,9 @@ export class FeedbackLoop {
       this.pruneAdmittedTimestamps(now);
       const since = this.getObservationWindowStart(now);
       const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
+      // First-time call: drain in-memory buffer to file so rejections
+      // that arrived before runtime context was known are still observable.
+      await this.flushRejectionMemoryBufferToFile(filePath);
       const rejectedEntries = await readRecentRejectionAudits(filePath, {
         maxEntries: this.config.priorAdaptation.maxRejectionAudits,
         since,

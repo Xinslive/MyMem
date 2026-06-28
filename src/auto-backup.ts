@@ -7,7 +7,8 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { MemoryStore } from "./store.js";
 import { join } from "node:path";
-import { mkdir, writeFile, readdir, unlink } from "node:fs/promises";
+import { mkdir, writeFile, readdir, unlink, rename } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 
 export interface AutoBackupParams {
   api: OpenClawPluginApi;
@@ -48,7 +49,11 @@ export function createAutoBackup(params: AutoBackupParams) {
         }),
       );
 
-      await writeFile(backupFile, lines.join("\n") + "\n");
+      // Audit #15: atomic write with tmpFile + rename + mode 0o600 to protect
+      // the backup from corruption on kill -9 and from other local processes.
+      const tmpPath = `${backupFile}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+      await writeFile(tmpPath, lines.join("\n") + "\n", { encoding: "utf8", mode: 0o600 });
+      await rename(tmpPath, backupFile);
 
       // Keep only last N backups
       const files = (await readdir(backupDir))

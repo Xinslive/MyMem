@@ -90,3 +90,8 @@ Recent history uses conventional commits: `fix:`, `feat:`, `refactor:`, `perf:`,
 - `README.md` explains product behavior, memory taxonomy, retrieval design, dashboard usage, and recommended OpenClaw configuration.
 - `TECHNICAL_DOC.md` contains the detailed architecture and subsystem design.
 - `AGENTS.md` contains general repository contributor guidance; keep this `CLAUDE.md` aligned with it when repository workflows change.
+
+## Known issues and ongoing audits
+
+- `docs/audit-2026-06-28.md` — design audit covering reliability, performance, security, and maintainability (38 ranked issues, P0–P3). Update this file when fixing items so it doubles as a fix log. Items currently in flight: **#3 (redactSecrets in extract path)**, **#16 (feedback-loop onAdmissionRejected stub)**.
+- Before adding new security-sensitive code paths (anything that touches the LLM prompt, stores memory text, or accepts inbound network), re-read the P0/P1 sections of the audit to avoid reintroducing fixed issues.

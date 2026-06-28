@@ -37,7 +37,7 @@ export class EmbeddingCache {
   public hits = 0;
   public misses = 0;
 
-  constructor(maxSize = 1024, ttlMinutes = 30) {
+  constructor(maxSize = 4096, ttlMinutes = 10) {
     this.maxSize = maxSize;
     this.ttlMs = ttlMinutes * 60_000;
   }

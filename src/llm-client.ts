@@ -309,6 +309,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
     maxRetries: 0,
   });
   let lastError: string | null = null;
+  let errorCount = 0;
 
   return {
     async completeJson<T>(prompt: string, label = "generic", schema?: TSchema): Promise<T | null> {
@@ -336,12 +337,14 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
           lastError =
             `mymem: llm-client [${label}] empty response content from model ${config.model}`;
           log(lastError);
+          errorCount++;
           return null;
         }
         if (typeof raw !== "string") {
           lastError =
             `mymem: llm-client [${label}] non-string response content type=${Array.isArray(raw) ? "array" : typeof raw} from model ${config.model}`;
           log(lastError);
+          errorCount++;
           return null;
         }
 
@@ -350,6 +353,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
           lastError =
             `mymem: llm-client [${label}] no JSON object found (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
           log(lastError);
+          errorCount++;
           return null;
         }
 
@@ -357,6 +361,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
         if (!parsed.value) {
           lastError = parsed.error ?? `mymem: llm-client [${label}] JSON response validation failed`;
           log(lastError);
+          errorCount++;
           return null;
         }
         return parsed.value;
@@ -364,6 +369,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
         lastError =
           `mymem: llm-client [${label}] request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
         (warnLog ?? log)(lastError);
+        errorCount++;
         return null;
       } finally {
         release();
@@ -371,6 +377,10 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
     },
     getLastError(): string | null {
       return lastError;
+    },
+    /** Count of recent completeJson failures (resets on session restart). */
+    get recentErrorCount(): number {
+      return errorCount;
     },
   };
 }
@@ -382,6 +392,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
 
   let cachedSessionPromise: Promise<Awaited<ReturnType<typeof loadOAuthSession>>> | null = null;
   let lastError: string | null = null;
+  let errorCount = 0;
 
   async function getSession() {
     if (!cachedSessionPromise) {

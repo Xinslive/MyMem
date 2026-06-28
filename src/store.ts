@@ -32,6 +32,7 @@ import {
   scoreLexicalHitPreTokenized,
   normalizeSearchText,
   resolveMemoryId,
+  assertValidVector,
 } from "./store-sql-utils.js";
 import { toLanceRows, mapRowToMemoryEntry } from "./store-row-mappers.js";
 import { loadLanceDB } from "./lancedb-loader.js";
@@ -106,6 +107,18 @@ const batchStoreContext = new AsyncLocalStorage<Map<object, MemoryEntry[]>>();
 const METADATA_BATCH_CHUNK_SIZE = 200;
 const FTS_INDEX_VERSION = "ngram-v1";
 const FTS_INDEX_VERSION_FILE = ".mymem-fts-index.version";
+/**
+ * Persistent marker recording the embedding-model dimensions this store
+ * was opened with. Read on startup to detect the "user switched embedding
+ * model" scenario (audit #6): the LanceDB table contains rows at dimension
+ * N but config now wants dimension M. Without this file we would only
+ * detect the mismatch by sampling a row, which is cheap but not a durable
+ * signal. With the file we can:
+ *   - log a precise "expected vs actual" diagnostic instead of a generic throw
+ *   - point the user at `mymem doctor --reembed` (or a new dbPath) as the fix
+ *   - never silently write rows at the wrong dimension
+ */
+const EMBEDDING_DIMENSION_FILE = ".mymem-embedding-dimension.json";
 
 type BatchRunOptions = {
   onBeforeFlush?: () => void;
@@ -185,7 +198,19 @@ export class MemoryStore {
         const written = await this.flushBatch();
         return { result, written };
       } catch (err) {
-        batchBuffer.length = 0;
+        // Defensive: flushBatch() un-shifts entries back into the context
+        // buffer on failure, so the data is still recoverable. We must NOT
+        // clear the context buffer here — that would silently drop user
+        // memory. Instead, merge retained entries back into the main
+        // _batchBuffer so they survive this AsyncLocalStorage scope ending,
+        // and the caller can retry or explicitly cancel.
+        if (batchBuffer.length > 0) {
+          this._batchBuffer.unshift(...batchBuffer);
+          this._batchActive = true;
+          this.log.warn(
+            `store: runBatch failed mid-flight, ${batchBuffer.length} entries preserved in _batchBuffer for retry or cancelBatch()`,
+          );
+        }
         throw err;
       } finally {
         nextBatches.delete(this);
@@ -688,11 +713,24 @@ export class MemoryStore {
     if (sample.length > 0 && sample[0]?.vector?.length) {
       const existingDim = sample[0].vector.length;
       if (existingDim !== this.config.vectorDim) {
+        const expected = await this.readPersistedEmbeddingDimension();
         throw new Error(
-          `Vector dimension mismatch: table=${existingDim}, config=${this.config.vectorDim}. Create a new table/dbPath or set matching embedding.dimensions.`,
+          [
+            `Vector dimension mismatch: table=${existingDim}, config=${this.config.vectorDim}.`,
+            expected !== null && expected !== this.config.vectorDim
+              ? `The store was previously opened with dimension ${expected}; you have since changed embedding.dimensions to ${this.config.vectorDim}.`
+              : `The table was created with a different embedding model.`,
+            `Fix: run "mymem doctor --reembed" to re-embed all rows, OR set embedding.dimensions back to ${existingDim} to keep the existing data, OR open a new dbPath.`,
+          ].join(" "),
         );
       }
     }
+
+    // Record the current dimension for next-time mismatch detection. We
+    // only write when this is a fresh table or when the existing file
+    // already matches — overwriting a stored value that disagrees with
+    // `vectorDim` would defeat the whole point of the file.
+    await this.writePersistedEmbeddingDimension();
 
     // Create FTS index for BM25 search (graceful fallback if unavailable)
     this._lastFtsError = null;
@@ -716,6 +754,56 @@ export class MemoryStore {
 
   private getFtsIndexVersionPath(): string {
     return join(this.config.dbPath, FTS_INDEX_VERSION_FILE);
+  }
+
+  private getEmbeddingDimensionFilePath(): string {
+    return join(this.config.dbPath, EMBEDDING_DIMENSION_FILE);
+  }
+
+  /**
+   * Read the embedding dimension this store was last opened with.
+   * Returns null when no marker exists (fresh install, or pre-audit #6
+   * upgrade). The marker is a tiny JSON file — not security sensitive,
+   * but kept inside the dbPath so it follows the store's life cycle.
+   */
+  async readPersistedEmbeddingDimension(): Promise<number | null> {
+    try {
+      const raw = await readFile(this.getEmbeddingDimensionFilePath(), "utf8");
+      const parsed = JSON.parse(raw) as { dimension?: unknown };
+      const dim = typeof parsed.dimension === "number" && Number.isFinite(parsed.dimension)
+        ? Math.trunc(parsed.dimension)
+        : NaN;
+      return Number.isFinite(dim) && dim > 0 ? dim : null;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      this.log.warn(`could not read embedding-dimension marker: ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Persist the current `vectorDim` for next-time startup. Refuses to
+   * overwrite a stored dimension that disagrees with `vectorDim` — that
+   * would mask the "user switched models" scenario the marker exists to
+   * surface.
+   */
+  private async writePersistedEmbeddingDimension(): Promise<void> {
+    const filePath = this.getEmbeddingDimensionFilePath();
+    const existing = await this.readPersistedEmbeddingDimension();
+    if (existing !== null && existing !== this.config.vectorDim) {
+      // Do not clobber a disagreeing marker — caller will hit the
+      // mismatch error from ensureInitialized() anyway.
+      return;
+    }
+    try {
+      await writeFile(
+        filePath,
+        JSON.stringify({ dimension: this.config.vectorDim, recordedAt: Date.now() }, null, 2),
+        "utf8",
+      );
+    } catch (err) {
+      this.log.warn(`could not write embedding-dimension marker: ${err}`);
+    }
   }
 
   private async readFtsIndexVersion(): Promise<string | null> {
@@ -801,6 +889,7 @@ export class MemoryStore {
     entry: Omit<MemoryEntry, "id" | "timestamp">,
   ): Promise<MemoryEntry> {
     await this.ensureInitialized();
+    assertValidVector(entry.vector, this.config.vectorDim, "store");
 
     const fullEntry: MemoryEntry = {
       ...entry,
@@ -851,12 +940,7 @@ export class MemoryStore {
     if (!entry.id || typeof entry.id !== "string") {
       throw new Error("importEntry requires a stable id");
     }
-    const vector = entry.vector || [];
-    if (!Array.isArray(vector) || vector.length !== this.config.vectorDim) {
-      throw new Error(
-        `Vector dimension mismatch: expected ${this.config.vectorDim}, got ${Array.isArray(vector) ? vector.length : "non-array"}`,
-      );
-    }
+    assertValidVector(entry.vector, this.config.vectorDim, "importEntry");
 
     const full: MemoryEntry = {
       ...entry,

@@ -228,7 +228,7 @@ export function redactSecrets(text: string): string {
     /\bAIza[0-9A-Za-z_-]{20,}\b/g,
     /\bAKIA[0-9A-Z]{16}\b/g,
     /\bnpm_[A-Za-z0-9]{36,}\b/g,
-    /\b(?:token|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"',;)}\]]{6,}["']?\b/gi,
+    /\b(?:token|api[_-]?key|secret|password|密码|口令|密钥)\s*[:=]\s*["']?[^\s"',;)}\]]{6,}["']?\b/gi,
     /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,
     /(?<=:\/\/)[^@\s]+:[^@\s]+(?=@)/g,
   ];

@@ -560,6 +560,25 @@ const myMemPlugin = {
           }
         };
 
+        // Audit #24: immediately validate that the store can be opened.
+        // Previously the first real store access was deferred by 15s via
+        // runStartupChecks. A corrupt LanceDB table was therefore invisible
+        // for the first ~15 seconds of the plugin's lifetime, during which
+        // auto-capture silently dropped all messages. This synchronous-ish
+        // check fires <1s after register() returns and surfaces failures
+        // via a loud error log. The store.open() itself is cheap (~5ms).
+        void store.stats()
+          .then((stats) => {
+            const log = isCliMode() ? api.logger.debug : api.logger.info;
+            log(`mymem：存储库就绪（记忆总数：${stats.totalCount}）`);
+          })
+          .catch((err) => {
+            api.logger.error(
+              `mymem：[FATAL] 存储库无法打开（${resolvedDbPath}）：${String(err)}` +
+              "\n  自动捕获和召回均不可用，请检查 LanceDB 数据库文件或执行 mymem doctor 排查。",
+            );
+          });
+
         // Fire-and-forget: allow gateway to start serving immediately, then
         // defer health probing so startup I/O does not contend with host init.
         setTimeout(() => void runStartupChecks(), STARTUP_HEALTH_CHECK_DELAY_MS);

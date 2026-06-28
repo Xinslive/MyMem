@@ -121,4 +121,22 @@ describe("redactSecrets", () => {
     const result = redactSecrets("hello world");
     assert.strictEqual(result, "hello world");
   });
+
+  it("scrubs explicit credentials from user-typed conversation text (audit #3)", () => {
+    // Simulates a user typing a password with "password:" syntax in a chat message.
+    // The regex matches "password: VALUE" and replaces the whole match.
+    const userText = "My current database password: hunter2-please-rotate-q1-2026";
+    const scrubbed = redactSecrets(userText);
+    assert.ok(!scrubbed.includes("hunter2-please-rotate-q1-2026"), "secret value must be removed");
+    assert.ok(scrubbed.includes("[REDACTED]"), "must show redacted marker");
+    assert.ok(scrubbed.includes("My current database"), "context around the secret is preserved");
+  });
+
+  it("scrubs a secret without removing the rest of the sentence", () => {
+    const userText = "Server is at https://api.example.com with token=ghp_abcdefghijklmnopqrstuvwxyz0123456789AB";
+    const scrubbed = redactSecrets(userText);
+    assert.ok(!scrubbed.includes("ghp_abcdefghijklmnopqrstuvwxyz0123456789AB"));
+    assert.ok(scrubbed.includes("Server is at"));
+    assert.ok(scrubbed.includes("api.example.com"));
+  });
 });

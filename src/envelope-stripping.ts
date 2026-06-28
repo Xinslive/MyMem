@@ -25,6 +25,13 @@ const INLINE_BOILERPLATE_RE =
   /^(?:(?:You are running as a subagent\b.*?(?:(?<=\.)\s+|$)|Results auto-announce to your requester\.?\s*|do not busy-poll for status\.?\s*|Reply with a brief acknowledgment only\.?\s*|Do not use any memory tools\.?\s*))+/i;
 const SUBAGENT_RUNNING_RE = /^You are running as a subagent\b/i;
 const SYSTEM_LINE_RE = /^System:\s*\[[\d\-: +GMT]+\]\s+\S+\[.*?\].*$/gm;
+// Audit #13: strip envelope metadata from IM platforms beyond Feishu.
+// WeChat, DingTalk, Slack, and Discord each inject sender metadata that
+// is not useful for long-term memory extraction.
+const WECHAT_ENVELOPE_RE = /^\[微信\][^\n]*\d{4}-\d{2}-\d{2}[^\n]*$/gm;
+const DINGTALK_ENVELOPE_RE = /^\[(?:钉钉|DingTalk)\][^\n]*GMT[+-]\d+[^\n]*$/gm;
+const SLACK_ENVELOPE_RE = /^@\w+\s+\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}]\s*$/gm;
+const DISCORD_ENVELOPE_RE = /^\[(?:Discord)\s+#\w+]\s+\d{4}-\d{2}-\d{2}[^\n]*$/gm;
 const METADATA_JSON_BLOCK_RE = /(?:Conversation info|Sender|Replied message)\s*\(untrusted[^)]*\):\s*```json\s*\{[\s\S]*?\}\s*```/g;
 const ENVELOPE_JSON_BLOCK_RE = /```json\s*(?=\{[\s\S]*?"message_id"\s*:)(?=\{[\s\S]*?"sender_id"\s*:)\{[\s\S]*?\}\s*```/g;
 const EXCESS_BLANK_LINES_RE = /\n{3,}/g;
@@ -111,6 +118,12 @@ export function stripEnvelopeMetadata(text: string): string {
 
   // 1. Strip "System: [timestamp] Channel..." lines
   cleaned = cleaned.replace(SYSTEM_LINE_RE, "");
+
+  // 1b. Audit #13: strip IM platform envelope lines (WeChat, DingTalk, Slack, Discord)
+  cleaned = cleaned.replace(WECHAT_ENVELOPE_RE, "");
+  cleaned = cleaned.replace(DINGTALK_ENVELOPE_RE, "");
+  cleaned = cleaned.replace(SLACK_ENVELOPE_RE, "");
+  cleaned = cleaned.replace(DISCORD_ENVELOPE_RE, "");
 
   // 2. Strip labeled metadata sections with their JSON code blocks
   cleaned = cleaned.replace(METADATA_JSON_BLOCK_RE, "");

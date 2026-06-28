@@ -410,7 +410,10 @@ export class AccessTracker {
           continue;
         }
         const updatedMeta = buildUpdatedMetadata(current.metadata, delta);
-        await this.store.update(id, { metadata: updatedMeta });
+        // Audit #7: fire-and-forget to avoid blocking the access-tracker flush path
+        void this.store.update(id, { metadata: updatedMeta }).catch((err) => {
+          this.handleSingleFailure(id, delta, err);
+        });
         this._retryCount.delete(id);
         this._retryFirstFailureAt.delete(id);
       } catch (err) {

@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Embedder } from "./embedder.js";
 import type { MemoryEntry, MemoryStore, StoreIndexStatus } from "./store.js";
 import { createRetriever, type MemoryRetriever, type RetrievalDiagnostics } from "./retriever.js";
@@ -8,11 +11,12 @@ import {
   isMemoryActiveAt,
   isMemoryExpired,
   parseSmartMetadata,
+  getCorruptMetadataStats,
   reverseMapLegacyCategory,
   type SmartMemoryMetadata,
 } from "./smart-metadata.js";
 import { hasActiveRecallSuppression } from "./recall-suppression.js";
-import { redactSecrets } from "./session-utils.js";
+import { redactPII, redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 import type { FeedbackLoopStatus } from "./feedback-loop.js";
 
@@ -43,17 +47,42 @@ export interface MemoryDashboardContext {
   scopeManager: DashboardScopeManager;
   embedder?: Embedder;
   feedbackLoop?: { getStatus: () => FeedbackLoopStatus } | null;
+  /**
+   * Optional absolute path to the LanceDB store. Used as the default parent
+   * directory for the auto-generated dashboard auth-token file
+   * (`.dashboard-token`). When omitted, the token must be supplied via
+   * `MemoryDashboardServerOptions.authToken`.
+   */
+  dbPath?: string;
 }
 
 export interface MemoryDashboardServerOptions {
   host?: string;
   port?: number;
+  /**
+   * Auth token required for all /api/* requests. The browser-side dashboard
+   * reads this token from the `?token=` query parameter and sends it back as
+   * the `X-Dashboard-Token` header. When omitted, the server generates one,
+   * writes it to a file under the configured dbPath, and logs the token
+   * (once) on startup. Required because the dashboard runs on 127.0.0.1
+   * and any other local process could otherwise read/write the entire
+   * memory store.
+   */
+  authToken?: string;
+  /**
+   * Absolute path to the auth-token file. Defaults to `<resolvedDbPath>/.dashboard-token`.
+   * Ignored when `authToken` is supplied directly. The file is created with
+   * mode 0o600 if the server generates a new token.
+   */
+  authTokenFile?: string;
 }
 
 export interface RunningMemoryDashboardServer {
   url: string;
   host: string;
   port: number;
+  /** Auth token required by /api/* routes. Callers that need to embed it in HTML should use this. */
+  authToken: string;
   close: () => Promise<void>;
 }
 
@@ -114,6 +143,84 @@ type DashboardMemory = {
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 1314;
+const DEFAULT_DASHBOARD_TOKEN_FILE = ".dashboard-token";
+
+/**
+ * Resolve the auth token used to gate /api/* requests. The token is required
+ * to defend against local malicious processes reading/writing the store via
+ * the dashboard, even though the listener is bound to loopback (audit #4).
+ *
+ * Resolution order:
+ *   1. `options.authToken` if supplied
+ *   2. existing token file at `options.authTokenFile` or `<dbPath>/.dashboard-token`
+ *   3. newly generated random token (also written to disk, mode 0o600)
+ *
+ * The resolved token is returned alongside the chosen file path so the
+ * server can inject it into the dashboard HTML and surface it via the
+ * `X-Dashboard-Token` header from the front-end.
+ */
+async function resolveAuthToken(
+  context: MemoryDashboardContext,
+  options: MemoryDashboardServerOptions,
+): Promise<{ token: string; tokenFile: string | null; generated: boolean }> {
+  if (typeof options.authToken === "string" && options.authToken.length > 0) {
+    return { token: options.authToken, tokenFile: null, generated: false };
+  }
+  const tokenFile = options.authTokenFile
+    ?? (context.dbPath ? join(context.dbPath, DEFAULT_DASHBOARD_TOKEN_FILE) : null);
+  if (!tokenFile) {
+    // No persistent location and no caller-supplied token: refuse to start
+    // an unauthenticated server.
+    throw new Error(
+      "dashboard auth token required: pass `authToken` or `authTokenFile`, or set `context.dbPath`",
+    );
+  }
+  try {
+    const existing = await readFile(tokenFile, "utf8");
+    const trimmed = existing.trim();
+    if (trimmed.length >= 16) {
+      return { token: trimmed, tokenFile, generated: false };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      // Permission errors etc. — surface to caller.
+      throw err;
+    }
+  }
+  const generatedToken = randomBytes(24).toString("base64url");
+  await mkdir(dirname(tokenFile), { recursive: true });
+  await writeFile(tokenFile, generatedToken, { encoding: "utf8", mode: 0o600 });
+  return { token: generatedToken, tokenFile, generated: true };
+}
+
+/**
+ * Constant-time string comparison to avoid timing oracles on the dashboard
+ * auth token. The token is short (43 base64url chars), so the comparison
+ * should always be cheap; the constant-time bit only matters for paranoia.
+ */
+function safeTokenEquals(provided: string | null | undefined, expected: string): boolean {
+  if (typeof provided !== "string" || provided.length === 0) return false;
+  if (provided.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < provided.length; i++) {
+    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
+ * Extract the auth token from an incoming request: prefer the explicit
+ * `X-Dashboard-Token` header, fall back to the `?token=` query param so
+ * the same-origin browser-side fetch can pass it through after the user
+ * lands on the dashboard via a one-time URL.
+ */
+function extractRequestToken(req: IncomingMessage, url: URL): string | null {
+  const headerToken = req.headers["x-dashboard-token"];
+  if (typeof headerToken === "string" && headerToken.length > 0) return headerToken;
+  if (Array.isArray(headerToken) && headerToken[0]?.length) return headerToken[0];
+  const queryToken = url.searchParams.get("token");
+  return queryToken && queryToken.length > 0 ? queryToken : null;
+}
 const MEMORY_CATEGORY_LABELS: Record<string, string> = {
   profile: "用户画像",
   preferences: "用户偏好",
@@ -231,6 +338,15 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Escape a value for safe inclusion in a double-quoted HTML attribute. */
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function truncateText(text: string, maxChars: number): string {
   const normalized = text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
@@ -330,7 +446,7 @@ function displayScope(scope: string): string {
 }
 
 function displayMemoryText(text: string): string {
-  return redactSecrets(text)
+  return redactPII(redactSecrets(text))
     .replace(/\bother:agent:[\w.-]+/g, "other")
     .replace(/\breflection:agent:([\w.-]+)/g, "$1")
     .replace(/\bagent:([\w.-]+)/g, "$1");
@@ -641,6 +757,7 @@ function buildAlerts(params: {
   retrievalMode?: string;
   ftsStatus: ReturnType<MemoryStore["getFtsStatus"]> | null;
   indexStatus: StoreIndexStatus | null;
+  corruptMetadata?: { count: number; lastError: { at: number; message: string; rawPreview: string } | null };
 }): DashboardAlert[] {
   const alerts: DashboardAlert[] = [];
 
@@ -689,6 +806,18 @@ function buildAlerts(params: {
       level: "warning",
       title: "记忆质量信号需要关注",
       detail: `疑似差召回 ${params.healthSignals.badRecall} 条，已抑制 ${params.healthSignals.suppressed} 条，低置信 ${params.healthSignals.lowConfidence} 条。`,
+    });
+  }
+
+  if (params.corruptMetadata && params.corruptMetadata.count > 0) {
+    alerts.push({
+      level: "danger",
+      title: "存在 corrupt 记忆元数据",
+      detail:
+        `本进程内检测到 ${params.corruptMetadata.count} 条 metadata 解析失败。` +
+        (params.corruptMetadata.lastError
+          ? `最近一次：${params.corruptMetadata.lastError.message}。建议执行 mymem doctor 排查。`
+          : "建议执行 mymem doctor 排查。"),
     });
   }
 
@@ -797,6 +926,7 @@ async function buildDashboardSummary(
       retrievalMode: retrievalConfig.mode,
       ftsStatus,
       indexStatus,
+      corruptMetadata: getCorruptMetadataStats(),
     }),
   };
 }
@@ -927,9 +1057,22 @@ async function routeDashboardRequest(
   context: MemoryDashboardContext,
   req: IncomingMessage,
   res: ServerResponse,
+  authToken: string,
 ): Promise<void> {
   const host = req.headers.host || `${DEFAULT_HOST}:${DEFAULT_PORT}`;
   const url = new URL(req.url || "/", `http://${host}`);
+
+  // /api/* requires a valid token; static HTML is served unauthenticated so
+  // the browser can land on the page (the front-end then includes the token
+  // via meta tag or query string for subsequent fetches).
+  const requiresAuth = url.pathname.startsWith("/api/") || req.method === "DELETE";
+  if (requiresAuth) {
+    const provided = extractRequestToken(req, url);
+    if (!safeTokenEquals(provided, authToken)) {
+      sendJson(res, 401, { error: "unauthorized", message: "缺少或错误的仪表盘访问令牌。" });
+      return;
+    }
+  }
 
   try {
     if (req.method === "DELETE" && url.pathname.startsWith("/api/memories/")) {
@@ -958,7 +1101,15 @@ async function routeDashboardRequest(
     }
 
     if (url.pathname === "/" || url.pathname === "/dashboard" || url.pathname === "/memories") {
-      sendHtml(res, DASHBOARD_HTML);
+      // Inject the auth token into the served HTML so the front-end can echo
+      // it back via the X-Dashboard-Token header on subsequent fetches.
+      // The token is also accepted via ?token= query string for the initial
+      // landing; strip it from the URL so it does not leak via Referer.
+      const sanitizedHtml = DASHBOARD_HTML.replace(
+        "__DASHBOARD_AUTH_TOKEN__",
+        escapeHtmlAttr(authToken),
+      );
+      sendHtml(res, sanitizedHtml);
       return;
     }
 
@@ -1001,8 +1152,18 @@ export async function startMemoryDashboardServer(
 ): Promise<RunningMemoryDashboardServer> {
   const host = normalizeHost(options.host);
   const port = normalizePort(options.port);
+  // Audit #36: cap concurrent sockets and prevent idle keep-alive leaks
+  server.maxConnections = 64;
+  server.keepAliveTimeout = 5_000;
+  server.headersTimeout = 10_000;
+
+  const { token: authToken, tokenFile, generated } = await resolveAuthToken(context, options);
+
+  // Capture for closure; the same token is also injected into DASHBOARD_HTML
+  // so the front-end can echo it back on every fetch. (Replace the literal
+  // sentinel at HTML render time.)
   const server = createServer((req, res) => {
-    void routeDashboardRequest(context, req, res);
+    void routeDashboardRequest(context, req, res, authToken);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -1021,9 +1182,15 @@ export async function startMemoryDashboardServer(
 
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
+  if (generated) {
+    console.warn(
+      `[mymem] dashboard auth token written to ${tokenFile} — start a browser at http://${host}:${resolvedPort}/?token=${authToken} to use the dashboard`,
+    );
+  }
   return {
     host,
     port: resolvedPort,
+    authToken,
     url: `http://${host}:${resolvedPort}`,
     close: () => closeServer(server),
   };

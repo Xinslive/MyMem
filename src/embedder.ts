@@ -294,12 +294,15 @@ export class Embedder {
     // If a model doesn't support that endpoint, failure will be silent from the user's perspective.
     // This is acceptable because most Ollama embedding models support /v1/embeddings.
     if (Array.isArray(payload.input)) {
+      // Audit #8: Connection: keep-alive header hint. Full TCP+TLS connection
+      // reuse requires undici.Agent as explicit dependency — tracked separately.
       const response = await this.withGlobalConcurrencyLimit(
         () => fetch(base + "/v1/embeddings", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${apiKey}`,
+            "Connection": "keep-alive",
           },
           body: JSON.stringify({
             model: payload.model,

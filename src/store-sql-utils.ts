@@ -68,7 +68,9 @@ export function isScalarIndexType(indexType: string): boolean {
 
 export function recommendedVectorPartitions(totalRows: number): number {
   const sqrt = Math.sqrt(Math.max(totalRows, 1));
-  const rough = Math.max(8, Math.min(256, Math.round(sqrt)));
+  // Audit #10: raise upper bound from 256 to 1024 for 100K+ datasets.
+  // IVF standard: partitions ≈ 4*sqrt(N). 10K rows → ~128, 100K → ~400.
+  const rough = Math.max(8, Math.min(1024, Math.round(sqrt)));
   return Math.max(8, Math.pow(2, Math.round(Math.log2(rough))));
 }
 
@@ -248,4 +250,47 @@ export function resolveMemoryId(id: string): ResolvedMemoryId {
   if (PREFIX_RE.test(id)) return { raw: id, isFullId: false };
 
   throw new Error(`Invalid memory ID format: ${id}`);
+}
+
+/**
+ * Validate that a vector is a plain array of finite numbers with the
+ * expected dimensionality. Throws a descriptive error when:
+ *   - the vector is empty (would be invisible to all vector searches)
+ *   - the vector length does not match the configured `vectorDim`
+ *   - the input is not an array (e.g. an Arrow Vector was passed in)
+ *
+ * Audit #5: previously a failed embedder would leave `vector: []` (or
+ * undefined) and the store would happily write the row. The memory then
+ * could never be retrieved by vector search and `cosineSimilarity(_, [])`
+ * produced NaN which corrupted scoring. This guard makes those failures
+ * loud at the write site so callers (smart-extractor, tools, etc.) can
+ * decide whether to retry, skip, or surface an error to the user.
+ */
+export function assertValidVector(
+  vector: number[] | undefined | null,
+  expectedDim: number,
+  operation: string,
+): void {
+  if (!Array.isArray(vector)) {
+    throw new Error(
+      `${operation}: expected vector to be an array, got ${vector === null ? "null" : typeof vector}`,
+    );
+  }
+  if (vector.length === 0) {
+    throw new Error(
+      `${operation}: refused to write a zero-length vector (memory would be invisible to vector search; usually caused by an embedder failure — see audit #5)`,
+    );
+  }
+  if (vector.length !== expectedDim) {
+    throw new Error(
+      `${operation}: vector dimension mismatch: expected ${expectedDim}, got ${vector.length}`,
+    );
+  }
+  for (let i = 0; i < vector.length; i++) {
+    if (!Number.isFinite(vector[i])) {
+      throw new Error(
+        `${operation}: vector contains non-finite value at index ${i} (likely a failed embedder call)`,
+      );
+    }
+  }
 }

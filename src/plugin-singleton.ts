@@ -93,6 +93,28 @@ export function __resetSingletonForTesting__(): void {
   _singletonState = null;
 }
 
+/**
+ * Create a PluginSingletonState with optional field overrides.
+ *
+ * Audit #20: provides a public factory for test code. Callers pass an
+ * OpenClawPluginApi as usual, but may supply partial overrides (e.g.
+ * a mock store or embedder) that replace the auto-created values. This
+ * decouples test setup from the full `initPluginState` constructor, which
+ * reads real config and connects to real LanceDB.
+ *
+ * Usage in tests:
+ *   const state = createPluginStateForTest(api, {
+ *     store: new MemoryStore({ dbPath: tmpdir, vectorDim: 4 }),
+ *   });
+ */
+export function createPluginStateForTest(
+  api: OpenClawPluginApi,
+  overrides: Partial<PluginSingletonState> = {},
+): PluginSingletonState {
+  const base = initPluginState(api);
+  return { ...base, ...overrides };
+}
+
 // ── Initialization ─────────────────────────────────────────────────────
 
 export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
