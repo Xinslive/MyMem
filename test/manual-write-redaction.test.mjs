@@ -100,6 +100,21 @@ describe("manual memory write redaction", () => {
     assert.match(serializedStore, /\[REDACTED\]/);
   });
 
+  it("redacts rejected envelope-only mymem_store details", async () => {
+    const harness = createContext();
+    const tool = createTool(registerMemoryStoreTool, harness.context);
+
+    const result = await tool.execute(null, {
+      text: "System: [0] X[y] password:hunter2",
+      category: "patterns",
+    });
+
+    assert.equal(result.details.action, "envelope_metadata_rejected");
+    assert.doesNotMatch(JSON.stringify(result.details), /hunter2/);
+    assert.equal(harness.embeddedTexts.length, 0);
+    assert.equal(harness.stored.length, 0);
+  });
+
   it("redacts secrets during Markdown import before embedding and storage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mymem-import-redaction-"));
     try {

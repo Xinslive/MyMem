@@ -12,6 +12,10 @@ import {
 import { clampInt } from "../utils.js";
 import { sanitizeMemoryWriteText } from "../memory-write-sanitizer.js";
 
+function redactedPreview(text: string, maxChars: number): string {
+  return sanitizeMemoryWriteText(text).slice(0, maxChars);
+}
+
 export async function runImportMarkdown(
   ctx: { embedder?: Embedder; store: MemoryStore },
   workspaceGlob: string | undefined,
@@ -197,17 +201,17 @@ export async function runImportMarkdown(
           if (existing.length > 0 && existing[0].entry.text === text) {
             skipped++;
             if (!options.dryRun) {
-              console.log(`  [skip] already imported: ${text.slice(0, 60)}${text.length > 60 ? "..." : ""}`);
+              console.log(`  [skip] already imported: ${redactedPreview(text, 60)}${text.length > 60 ? "..." : ""}`);
             }
             continue;
           }
         } catch (err) {
-          console.warn(`  [import-markdown] dedup check failed (${err}), proceeding with import: ${text.slice(0, 60)}...`);
+          console.warn(`  [import-markdown] dedup check failed (${err}), proceeding with import: ${redactedPreview(text, 60)}...`);
         }
       }
 
       if (options.dryRun) {
-        console.log(`  [dry-run] would import: ${text.slice(0, 80)}${text.length > 80 ? "..." : ""}`);
+        console.log(`  [dry-run] would import: ${redactedPreview(text, 80)}${text.length > 80 ? "..." : ""}`);
         imported++;
         continue;
       }
@@ -235,7 +239,7 @@ export async function runImportMarkdown(
         });
         imported++;
       } catch (err) {
-        console.warn(`  Failed to import: ${text.slice(0, 60)}... - ${err}`);
+        console.warn(`  Failed to import: ${redactedPreview(text, 60)}... - ${err}`);
         skipped++;
       }
     }

@@ -57,6 +57,7 @@ export class AutoRecallMetadataAccumulator {
   private readonly debounceMs: number;
   private readonly pending = new Map<string, PendingAutoRecallPatch>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private activeFlush: Promise<void> | null = null;
 
   constructor(options: AutoRecallMetadataAccumulatorOptions) {
     this.store = options.store;
@@ -106,6 +107,11 @@ export class AutoRecallMetadataAccumulator {
   }
 
   async flushNow(): Promise<void> {
+    const inFlight = this.activeFlush;
+    if (inFlight) {
+      await inFlight;
+    }
+
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -113,6 +119,15 @@ export class AutoRecallMetadataAccumulator {
 
     if (this.pending.size === 0) return;
 
+    this.activeFlush = this.flushPending();
+    try {
+      await this.activeFlush;
+    } finally {
+      this.activeFlush = null;
+    }
+  }
+
+  private async flushPending(): Promise<void> {
     const pending = new Map(this.pending);
     this.pending.clear();
 

@@ -226,7 +226,7 @@ async function main() {
         {
           id: "11111111-1111-4111-8111-111111111111",
           text: "用户偏好是乌龙茶，不喜欢冰美式咖啡。",
-          category: "preference",
+          category: "preferences",
           scope: "global",
           importance: 0.9,
           timestamp: 1772931900000,
@@ -235,7 +235,7 @@ async function main() {
         {
           id: "22222222-2222-4222-8222-222222222222",
           text: "当前项目统一使用 TypeScript 编写插件逻辑。",
-          category: "decision",
+          category: "events",
           scope: "global",
           importance: 0.85,
           timestamp: 1772931960000,

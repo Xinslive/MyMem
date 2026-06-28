@@ -606,6 +606,7 @@ export function registerHookEnhancements(params: {
   scopeManager: ScopeManager;
   feedbackLoop?: FeedbackLoop | null;
   state?: HookEnhancementState;
+  backgroundTasks?: Set<Promise<void>>;
   isCliMode?: () => boolean;
 }): HookEnhancementState {
   const { api, config, store, embedder, scopeManager, feedbackLoop } = params;
@@ -792,7 +793,7 @@ export function registerHookEnhancements(params: {
     if (latestUserContent) session.lastUserText = latestUserContent;
     const userText = session.lastUserText || text;
 
-    void (async () => {
+    const backgroundRun = (async () => {
       try {
         // Only check the user's latest message for negative recall signals,
         // NOT the full conversation (which includes agent responses about code
@@ -888,6 +889,10 @@ export function registerHookEnhancements(params: {
         }
       }
     })();
+    params.backgroundTasks?.add(backgroundRun);
+    void backgroundRun.finally(() => {
+      params.backgroundTasks?.delete(backgroundRun);
+    });
   }, { priority: 18 });
 
   api.on("session_end", (_event: any, ctx: any) => {

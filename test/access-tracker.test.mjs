@@ -44,8 +44,13 @@ function createMockLogger() {
   return {
     /** @type {unknown[][]} */
     warnings: [],
+    /** @type {unknown[][]} */
+    errors: [],
     warn(...args) {
       this.warnings.push(args);
+    },
+    error(...args) {
+      this.errors.push(args);
     },
     info() {},
   };
@@ -754,6 +759,106 @@ describe("AccessTracker flush integration", () => {
 
     // Pending should be cleared after destroy
     assert.equal(tracker.getPendingUpdates().size, 0);
+  });
+
+  it("close drains pending writes before clearing state", async () => {
+    const id1 = "hhhhhhhh-1111-2222-3333-444444444444";
+    const store = createMockStore(new Map([
+      [id1, { id: id1, metadata: JSON.stringify({ accessCount: 2 }) }],
+    ]));
+    const logger = createMockLogger();
+    const tracker = new AccessTracker({ store, logger, debounceMs: 60_000 });
+
+    tracker.recordAccess([id1, id1]);
+    await tracker.close();
+
+    assert.equal(tracker.getPendingUpdates().size, 0);
+    assert.equal(store.updateCalls.length, 1);
+    const updated = JSON.parse(store.updateCalls[0].updates.metadata);
+    assert.equal(updated.accessCount, 4);
+    assert.equal(logger.warnings.length, 0);
+  });
+
+  it("close waits for individual update writes to finish", async () => {
+    const id1 = "iiiiiiii-1111-2222-3333-444444444444";
+    let updateFinished = false;
+    let releaseUpdate;
+    const store = {
+      async getById(id) {
+        return { id, metadata: JSON.stringify({ accessCount: 0 }) };
+      },
+      async update() {
+        await new Promise((resolve) => {
+          releaseUpdate = resolve;
+        });
+        updateFinished = true;
+        return { id: id1, metadata: "{}" };
+      },
+    };
+    const logger = createMockLogger();
+    const tracker = new AccessTracker({ store, logger, debounceMs: 60_000 });
+
+    tracker.recordAccess([id1]);
+    const closePromise = tracker.close();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(updateFinished, false, "close should still be waiting for update()");
+    releaseUpdate();
+    await closePromise;
+    assert.equal(updateFinished, true);
+    assert.equal(tracker.getPendingUpdates().size, 0);
+  });
+
+  it("close retries requeued writes before clearing state", async () => {
+    const id1 = "jjjjjjjj-1111-2222-3333-444444444444";
+    let updateAttempts = 0;
+    const store = {
+      async getById(id) {
+        return { id, metadata: JSON.stringify({ accessCount: 0 }) };
+      },
+      async update(id, updates) {
+        updateAttempts++;
+        if (updateAttempts === 1) {
+          throw new Error("transient close failure");
+        }
+        return { id, metadata: updates.metadata || "{}" };
+      },
+    };
+    const logger = createMockLogger();
+    const tracker = new AccessTracker({ store, logger, debounceMs: 60_000 });
+
+    tracker.recordAccess([id1]);
+    await tracker.close();
+
+    assert.equal(updateAttempts, 2);
+    assert.equal(tracker.getPendingUpdates().size, 0);
+    assert.equal(logger.errors.length, 0);
+  });
+
+  it("close logs when shutdown retries still leave pending writes", async () => {
+    const id1 = "kkkkkkkk-1111-2222-3333-444444444444";
+    let updateAttempts = 0;
+    const store = {
+      async getById(id) {
+        return { id, metadata: JSON.stringify({ accessCount: 0 }) };
+      },
+      async update() {
+        updateAttempts++;
+        throw new Error("permanent close failure");
+      },
+    };
+    const logger = createMockLogger();
+    const tracker = new AccessTracker({ store, logger, debounceMs: 60_000 });
+
+    tracker.recordAccess([id1]);
+    await tracker.close();
+
+    assert.equal(updateAttempts, 6);
+    assert.equal(tracker.getPendingUpdates().size, 0);
+    assert.ok(
+      logger.errors.some((args) => String(args[0]).includes("dropping kkkkkkkk after 6 failed retries")),
+      "close should surface writes dropped after shutdown retries",
+    );
   });
 
   it("flush is a no-op when pending map is empty", async () => {

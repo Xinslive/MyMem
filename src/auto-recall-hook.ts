@@ -277,6 +277,8 @@ export function registerAutoRecallHook(params: {
   hookEnhancementState?: HookEnhancementState;
   decayEngine?: DecayEngine;
   tierManager?: TierManager;
+  metadataAccumulators?: Set<AutoRecallMetadataAccumulator>;
+  backgroundTasks?: Set<Promise<void>>;
 }): void {
   const { api, config, retriever } = params;
 
@@ -290,6 +292,34 @@ export function registerAutoRecallHook(params: {
     logger: api.logger,
     learningMemory: config.learningMemory,
   });
+  params.metadataAccumulators?.add(metadataAccumulator);
+
+  const trackBackgroundTask = (promise: Promise<void>): void => {
+    params.backgroundTasks?.add(promise);
+    void promise.finally(() => {
+      params.backgroundTasks?.delete(promise);
+    });
+  };
+
+  const delayUnlessAborted = (ms: number, signal?: AbortSignal): Promise<void> => {
+    if (!signal) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    if (signal.aborted) {
+      return Promise.reject(signal.reason ?? new Error("auto-recall aborted"));
+    }
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error("auto-recall aborted"));
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  };
 
   async function retrieveWithRetry(retrieveParams: Pick<RetrievalContext, "query" | "limit" | "scopeFilter" | "category" | "source" | "signal" | "candidatePoolSize" | "overFetchMultiplier" | "degradeAfterMs" | "deadlineAt">): Promise<RetrievalResult[]> {
     try {
@@ -297,7 +327,7 @@ export function registerAutoRecallHook(params: {
     } catch (firstError) {
       if (retrieveParams.signal?.aborted) throw firstError;
       api.logger.debug?.(`mymem: retrieve retry after initial failure: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await delayUnlessAborted(200, retrieveParams.signal);
       try {
         return await retriever.retrieve(retrieveParams);
       } catch (retryError) {
@@ -495,7 +525,7 @@ export function registerAutoRecallHook(params: {
 
       let reasoningStrategies: RecallSelection[] = [];
       if (reasoningStrategyEnabled) {
-        const strategyResults = (filterUserMdExclusiveRecallResults(await retrieveWithRetry({
+        const rawStrategyResults = filterUserMdExclusiveRecallResults(await retrieveWithRetry({
           query: recallQuery,
           limit: reasoningStrategyCandidatePoolSize,
           scopeFilter: accessibleScopes,
@@ -505,7 +535,9 @@ export function registerAutoRecallHook(params: {
           overFetchMultiplier: 6,
           degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
           deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
-        }), config.workspaceBoundary) as RecallResult[])
+        }), config.workspaceBoundary) as RecallResult[];
+        throwIfAborted();
+        const strategyResults = rawStrategyResults
           .filter((result) => isReasoningStrategyResult(result))
           .filter((result) => (result.score ?? 0) >= reasoningStrategyMinScore)
           .slice(0, reasoningStrategyMaxItems);
@@ -713,8 +745,10 @@ export function registerAutoRecallHook(params: {
 
       // Run tier maintenance asynchronously after injection
       if (selected.length > 0 || reasoningStrategies.length > 0) {
-        void runTierMaintenance([...reasoningStrategies, ...selected], accessibleScopes).catch((err) =>
-          api.logger.warn("mymem：后台层级维护失败：" + String(err)),
+        trackBackgroundTask(
+          runTierMaintenance([...reasoningStrategies, ...selected], accessibleScopes).catch((err) =>
+            api.logger.warn("mymem：后台层级维护失败：" + String(err)),
+          ),
         );
       }
 

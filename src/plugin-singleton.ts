@@ -40,6 +40,7 @@ import {
   createAdmissionRejectionAuditWriter,
 } from "./workspace-utils.js";
 import { createHookEnhancementState } from "./hook-enhancements.js";
+import type { AutoRecallMetadataAccumulator } from "./auto-recall-metadata-accumulator.js";
 
 const pluginVersion = getPluginVersion();
 const isCliMode = () => process.env.OPENCLAW_CLI === "1";
@@ -74,6 +75,12 @@ export interface PluginSingletonState {
   autoCaptureSeenTextCount: Map<string, number>;
   autoCapturePendingIngressTexts: Map<string, string[]>;
   autoCaptureRecentTexts: Map<string, string[]>;
+  sessionPruneInterval: ReturnType<typeof setInterval> | null;
+  autoRecallMetadataAccumulators: Set<AutoRecallMetadataAccumulator>;
+  autoRecallBackgroundTasks: Set<Promise<void>>;
+  autoCaptureBackgroundTasks: Set<Promise<void>>;
+  hookEnhancementBackgroundTasks: Set<Promise<void>>;
+  reflectionBackgroundTasks: Set<Promise<void>>;
 }
 
 // ── Singleton Lifecycle ────────────────────────────────────────────────
@@ -136,6 +143,7 @@ export function createPluginStateForTest(
     enabled: false,
     recordRetrieval: noop,
     recordExtraction: noop,
+    flush: async () => undefined,
     getPersistentSummary: async () => ({ retrieval: null, extraction: null }),
   } as unknown as TelemetryStore;
   const base: PluginSingletonState = {
@@ -173,6 +181,12 @@ export function createPluginStateForTest(
     autoCaptureSeenTextCount: new Map(),
     autoCapturePendingIngressTexts: new Map(),
     autoCaptureRecentTexts: new Map(),
+    sessionPruneInterval: null,
+    autoRecallMetadataAccumulators: new Set(),
+    autoRecallBackgroundTasks: new Set(),
+    autoCaptureBackgroundTasks: new Set(),
+    hookEnhancementBackgroundTasks: new Set(),
+    reflectionBackgroundTasks: new Set(),
   };
   return { ...base, ...overrides };
 }
@@ -213,7 +227,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     config.embedding.dimensions,
   );
   const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim });
-  const reflectionStore = new MemoryStore({ dbPath: resolvedReflectionDbPath, vectorDim });
+  const reflectionStore = new MemoryStore({
+    dbPath: resolvedReflectionDbPath,
+    vectorDim,
+    allowReflectionCategory: true,
+  });
   const embedder = createEmbedder({
     provider: config.embedding.provider,
     apiVersion: config.embedding.apiVersion,
@@ -397,6 +415,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   const autoCaptureSeenTextCount = new Map<string, number>();
   const autoCapturePendingIngressTexts = new Map<string, string[]>();
   const autoCaptureRecentTexts = new Map<string, string[]>();
+  const autoRecallMetadataAccumulators = new Set<AutoRecallMetadataAccumulator>();
+  const autoRecallBackgroundTasks = new Set<Promise<void>>();
+  const autoCaptureBackgroundTasks = new Set<Promise<void>>();
+  const hookEnhancementBackgroundTasks = new Set<Promise<void>>();
+  const reflectionBackgroundTasks = new Set<Promise<void>>();
 
   // Periodically prune unbounded session-keyed Maps to prevent memory leaks
   const SESSION_MAP_MAX = 500;
@@ -451,5 +474,11 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     autoCaptureSeenTextCount,
     autoCapturePendingIngressTexts,
     autoCaptureRecentTexts,
+    sessionPruneInterval: _pruneInterval,
+    autoRecallMetadataAccumulators,
+    autoRecallBackgroundTasks,
+    autoCaptureBackgroundTasks,
+    hookEnhancementBackgroundTasks,
+    reflectionBackgroundTasks,
   };
 }

@@ -32,7 +32,7 @@ function entry(overrides = {}) {
     id: overrides.id ?? "id-" + Math.random().toString(36).slice(2),
     text: overrides.text ?? "some memory",
     vector: overrides.vector ?? vec(4, 1, 0, 0, 0),
-    category: overrides.category ?? "fact",
+    category: overrides.category ?? "cases",
     scope: overrides.scope ?? "global",
     importance: overrides.importance ?? 0.5,
     timestamp: overrides.timestamp ?? Date.now() - 8 * 24 * 60 * 60 * 1000,
@@ -219,11 +219,11 @@ describe("buildMergedEntry", () => {
   });
 
   it("uses plurality category", () => {
-    const a = entry({ category: "preference" });
-    const b = entry({ category: "fact" });
-    const c = entry({ category: "fact" });
+    const a = entry({ category: "preferences" });
+    const b = entry({ category: "cases" });
+    const c = entry({ category: "cases" });
     const merged = buildMergedEntry([a, b, c]);
-    assert.equal(merged.category, "fact");
+    assert.equal(merged.category, "cases");
   });
 
   it("marks metadata as compacted with sourceCount", () => {
@@ -290,8 +290,8 @@ describe("runCompaction", () => {
   });
 
   it("uses LLM refinement for canonical memory and records source metadata", async () => {
-    const a = entry({ id: "a", text: "User prefers Neovim for coding.", vector: vec(4, 1, 0.01, 0, 0), importance: 0.7, category: "preference" });
-    const b = entry({ id: "b", text: "Coding editor preference is Neovim.", vector: vec(4, 1, 0.02, 0, 0), importance: 0.5, category: "preference" });
+    const a = entry({ id: "a", text: "User prefers Neovim for coding.", vector: vec(4, 1, 0.01, 0, 0), importance: 0.7, category: "preferences" });
+    const b = entry({ id: "b", text: "Coding editor preference is Neovim.", vector: vec(4, 1, 0.02, 0, 0), importance: 0.5, category: "preferences" });
     const store = makeStore([a, b]);
     const llm = {
       async completeJson() {
@@ -299,7 +299,7 @@ describe("runCompaction", () => {
           abstract: "User prefers Neovim for coding.",
           overview: "- Neovim is the user's preferred coding editor.",
           content: "User prefers Neovim as their coding editor.",
-          category: "preference",
+          category: "preferences",
           importance: 0.82,
           reason: "duplicate_preference_refined",
         };
@@ -323,8 +323,8 @@ describe("runCompaction", () => {
 
   it("normalizes LLM pattern categories to store category patterns with smart metadata patterns", async () => {
     for (const rawCategory of ["pattern", "patterns"]) {
-      const a = entry({ id: `${rawCategory}-a`, text: "Use bounded retries for transient failures.", vector: vec(4, 1, 0.01, 0, 0), category: "other" });
-      const b = entry({ id: `${rawCategory}-b`, text: "Retry transient failures with a bounded policy.", vector: vec(4, 1, 0.02, 0, 0), category: "other" });
+      const a = entry({ id: `${rawCategory}-a`, text: "Use bounded retries for transient failures.", vector: vec(4, 1, 0.01, 0, 0), category: "patterns" });
+      const b = entry({ id: `${rawCategory}-b`, text: "Retry transient failures with a bounded policy.", vector: vec(4, 1, 0.02, 0, 0), category: "patterns" });
       const store = makeStore([a, b]);
       const llm = {
         async completeJson() {

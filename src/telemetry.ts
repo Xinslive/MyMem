@@ -80,6 +80,17 @@ async function withWriteQueue<T>(filePath: string, action: () => Promise<T>): Pr
   }
 }
 
+export async function flushJsonlWrites(filePaths: string[]): Promise<void> {
+  const uniquePaths = [...new Set(filePaths)];
+  while (true) {
+    const pending = uniquePaths
+      .map((filePath) => writeQueues.get(filePath))
+      .filter((promise): promise is Promise<void> => Boolean(promise));
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }
+}
+
 export function normalizeTelemetryConfig(
   value: unknown,
 ): ParsedTelemetryConfig {
@@ -287,6 +298,10 @@ export class TelemetryStore {
       stats,
     };
     await appendJsonlRecord(this.files.extraction, record, this.config.maxRecords);
+  }
+
+  async flush(): Promise<void> {
+    await flushJsonlWrites([this.files.retrieval, this.files.extraction]);
   }
 
   async getPersistentSummary(limit = this.config.maxRecords): Promise<{

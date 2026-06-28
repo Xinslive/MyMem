@@ -39,8 +39,8 @@ try {
     vecC[1] = 1.0; // orthogonal to vecA → cos_sim=0
 
     // Store memories with known vectors
-    await store.store({ text: "similar memory", vector: vecB, category: "preference", scope: "test", importance: 0.8 });
-    await store.store({ text: "orthogonal memory", vector: vecC, category: "fact", scope: "test", importance: 0.5 });
+    await store.store({ text: "similar memory", vector: vecB, category: "preferences", scope: "test", importance: 0.8 });
+    await store.store({ text: "orthogonal memory", vector: vecC, category: "cases", scope: "test", importance: 0.5 });
 
     // Test 1: vectorSearch returns results with correct cosine-based scores
     console.log("Test 1: vectorSearch uses cosine distance and scores are meaningful...");

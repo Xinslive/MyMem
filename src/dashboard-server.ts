@@ -62,12 +62,11 @@ export interface MemoryDashboardServerOptions {
   port?: number;
   /**
    * Auth token required for all /api/* requests. The browser-side dashboard
-   * reads this token from the `?token=` query parameter and sends it back as
-   * the `X-Dashboard-Token` header. When omitted, the server generates one,
-   * writes it to a file under the configured dbPath, and logs the token
-   * (once) on startup. Required because the dashboard runs on 127.0.0.1
-   * and any other local process could otherwise read/write the entire
-   * memory store.
+   * receives a short-lived same-origin auth cookie only after landing with a
+   * valid `?token=` URL. When omitted, the server generates one and writes it
+   * to a file under the configured dbPath. Required because the dashboard runs
+   * on 127.0.0.1 and any other local process could otherwise read/write the
+   * entire memory store.
    */
   authToken?: string;
   /**
@@ -84,6 +83,8 @@ export interface RunningMemoryDashboardServer {
   port: number;
   /** Auth token required by /api/* routes. Callers that need to embed it in HTML should use this. */
   authToken: string;
+  /** Path to the persisted dashboard auth-token file, when one was used. */
+  authTokenFile: string | null;
   close: () => Promise<void>;
 }
 
@@ -145,6 +146,15 @@ type DashboardMemory = {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 1314;
 const DEFAULT_DASHBOARD_TOKEN_FILE = ".dashboard-token";
+const DASHBOARD_AUTH_COOKIE = "mymem_dashboard_token";
+
+function shellQuoteSingle(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function formatDashboardUnlockUrl(baseUrl: string, tokenFile: string): string {
+  return `${baseUrl}/?token=$(cat ${shellQuoteSingle(tokenFile)})`;
+}
 
 /**
  * Resolve the auth token used to gate /api/* requests. The token is required
@@ -157,8 +167,8 @@ const DEFAULT_DASHBOARD_TOKEN_FILE = ".dashboard-token";
  *   3. newly generated random token (also written to disk, mode 0o600)
  *
  * The resolved token is returned alongside the chosen file path so the
- * server can inject it into the dashboard HTML and surface it via the
- * `X-Dashboard-Token` header from the front-end.
+ * server can validate browser/API requests and report where the operator can
+ * read the token without printing the token itself.
  */
 async function resolveAuthToken(
   context: MemoryDashboardContext,
@@ -210,16 +220,33 @@ function safeTokenEquals(provided: string | null | undefined, expected: string):
 
 /**
  * Extract the auth token from an incoming request: prefer the explicit
- * `X-Dashboard-Token` header, fall back to the `?token=` query param so
- * the same-origin browser-side fetch can pass it through after the user
- * lands on the dashboard via a one-time URL.
+ * `X-Dashboard-Token` header, fall back to `?token=`, then to the HttpOnly
+ * same-origin cookie set after a valid token landing URL.
  */
+function extractCookieToken(req: IncomingMessage): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (typeof cookieHeader !== "string") return null;
+  for (const part of cookieHeader.split(";")) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+    if (rawName !== DASHBOARD_AUTH_COOKIE) continue;
+    const value = rawValue.join("=");
+    if (!value) return null;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+  return null;
+}
+
 function extractRequestToken(req: IncomingMessage, url: URL): string | null {
   const headerToken = req.headers["x-dashboard-token"];
   if (typeof headerToken === "string" && headerToken.length > 0) return headerToken;
   if (Array.isArray(headerToken) && headerToken[0]?.length) return headerToken[0];
   const queryToken = url.searchParams.get("token");
-  return queryToken && queryToken.length > 0 ? queryToken : null;
+  if (queryToken && queryToken.length > 0) return queryToken;
+  return extractCookieToken(req);
 }
 const MEMORY_CATEGORY_LABELS: Record<string, string> = {
   profile: "用户画像",
@@ -327,15 +354,6 @@ function sendHtml(res: ServerResponse, body: string): void {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/** Escape a value for safe inclusion in a double-quoted HTML attribute. */
-function escapeHtmlAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function truncateText(text: string, maxChars: number): string {
@@ -1049,9 +1067,9 @@ async function routeDashboardRequest(
   const host = req.headers.host || `${DEFAULT_HOST}:${DEFAULT_PORT}`;
   const url = new URL(req.url || "/", `http://${host}`);
 
-  // /api/* requires a valid token; static HTML is served unauthenticated so
-  // the browser can land on the page (the front-end then includes the token
-  // via meta tag or query string for subsequent fetches).
+  // /api/* requires a valid token. Static HTML can be served without one, but
+  // only a valid ?token= landing request receives the HttpOnly auth cookie
+  // needed for subsequent browser fetches.
   const requiresAuth = url.pathname.startsWith("/api/") || req.method === "DELETE";
   if (requiresAuth) {
     const provided = extractRequestToken(req, url);
@@ -1088,14 +1106,22 @@ async function routeDashboardRequest(
     }
 
     if (url.pathname === "/" || url.pathname === "/dashboard" || url.pathname === "/memories") {
-      // Inject the auth token into the served HTML so the front-end can echo
-      // it back via the X-Dashboard-Token header on subsequent fetches.
-      // The token is also accepted via ?token= query string for the initial
-      // landing; strip it from the URL so it does not leak via Referer.
+      const queryToken = url.searchParams.get("token");
+      if (safeTokenEquals(queryToken, authToken)) {
+        url.searchParams.delete("token");
+        res.writeHead(302, {
+          location: `${url.pathname}${url.search}${url.hash}`,
+          "cache-control": "no-store",
+          "set-cookie": `${DASHBOARD_AUTH_COOKIE}=${encodeURIComponent(authToken)}; HttpOnly; SameSite=Strict; Path=/`,
+        });
+        res.end();
+        return;
+      }
+
       const dashboardHtml = await loadDashboardHtml();
       const sanitizedHtml = dashboardHtml.replace(
         "__DASHBOARD_AUTH_TOKEN__",
-        escapeHtmlAttr(authToken),
+        "",
       );
       sendHtml(res, sanitizedHtml);
       return;
@@ -1143,8 +1169,8 @@ export async function startMemoryDashboardServer(
 
   const { token: authToken, tokenFile, generated } = await resolveAuthToken(context, options);
 
-  // Capture for closure; the same token is injected into the dashboard HTML so
-  // the front-end can echo it back on every fetch.
+  // Capture for closure; the same token gates API requests and valid token
+  // landing URLs that receive the browser auth cookie.
   const server = createServer((req, res) => {
     void routeDashboardRequest(context, req, res, authToken);
   });
@@ -1169,15 +1195,18 @@ export async function startMemoryDashboardServer(
 
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
-  if (generated) {
+  if (tokenFile) {
+    const unlockUrl = formatDashboardUnlockUrl(`http://${host}:${resolvedPort}`, tokenFile);
+    const tokenStatus = generated ? "written to" : "loaded from";
     console.warn(
-      `[mymem] dashboard auth token written to ${tokenFile} — start a browser at http://${host}:${resolvedPort}/?token=${authToken} to use the dashboard`,
+      `[mymem] dashboard auth token ${tokenStatus} ${tokenFile} — open ${unlockUrl} to unlock the dashboard`,
     );
   }
   return {
     host,
     port: resolvedPort,
     authToken,
+    authTokenFile: tokenFile,
     url: `http://${host}:${resolvedPort}`,
     close: () => closeServer(server),
   };

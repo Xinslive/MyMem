@@ -19,6 +19,7 @@ interface PendingPermit {
   reject: (reason: unknown) => void;
   signal?: AbortSignal;
   onAbort?: () => void;
+  settled?: boolean;
 }
 
 export class ConcurrencyLimiter {
@@ -42,16 +43,29 @@ export class ConcurrencyLimiter {
 
     return new Promise<() => void>((resolve, reject) => {
       const pending: PendingPermit = { resolve, reject, signal };
+      const cleanup = () => {
+        if (pending.onAbort && pending.signal) {
+          pending.signal.removeEventListener("abort", pending.onAbort);
+        }
+      };
+      const finish = (fn: () => void) => {
+        if (pending.settled) return;
+        pending.settled = true;
+        cleanup();
+        fn();
+      };
       if (signal) {
         pending.onAbort = () => {
           const idx = this.queue.indexOf(pending);
           if (idx >= 0) {
             this.queue.splice(idx, 1);
           }
-          reject(signal.reason ?? new Error("aborted"));
+          finish(() => reject(signal.reason ?? new Error("aborted")));
         };
         signal.addEventListener("abort", pending.onAbort, { once: true });
       }
+      pending.resolve = (release) => finish(() => resolve(release));
+      pending.reject = (reason) => finish(() => reject(reason));
       this.queue.push(pending);
     });
   }
@@ -71,14 +85,10 @@ export class ConcurrencyLimiter {
       if (!pending) break;
 
       if (pending.signal?.aborted) {
-        if (pending.onAbort) pending.signal.removeEventListener("abort", pending.onAbort);
         pending.reject(pending.signal.reason ?? new Error("aborted"));
         continue;
       }
 
-      if (pending.onAbort && pending.signal) {
-        pending.signal.removeEventListener("abort", pending.onAbort);
-      }
       pending.resolve(this.makeRelease());
       return;
     }

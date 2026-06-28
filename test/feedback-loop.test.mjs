@@ -6,7 +6,7 @@
 
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import jitiFactory from "jiti";
@@ -252,6 +252,95 @@ it("FeedbackLoop: onAdmissionRejected is accepted but no longer buffers noise sa
   const status = loop.getStatus();
   assert.equal("noiseLearning" in status, false);
   loop.dispose();
+});
+
+it("FeedbackLoop: close waits for pending rejection audit writes", async () => {
+  const dir = tmpDir();
+  const dbPath = join(dir, "db");
+  const admissionConfig = makeAdmissionConfig();
+  try {
+    mkdirSync(dbPath, { recursive: true });
+    const loop = new FeedbackLoop({
+      admissionController: null,
+      config: {
+        enabled: true,
+        priorAdaptation: DEFAULT_PRIOR_ADAPTATION_CONFIG,
+      },
+      runtimeContext: { dbPath, admissionConfig },
+    });
+
+    loop.onAdmissionRejected(makeRejectedAudit("preferences", Date.now(), 0.2));
+    await loop.close();
+
+    const auditPath = join(dir, "admission-audit", "rejections.jsonl");
+    assert.equal(existsSync(auditPath), true);
+    const records = readFileSync(auditPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records.length, 1);
+    assert.equal(records[0].candidate.category, "preferences");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("FeedbackLoop: close waits for already-triggered adaptation cycles", async () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const intervalHandles = [];
+  let loop;
+  try {
+    globalThis.setInterval = (fn, delay = 0, ...args) => {
+      const handle = { fn, delay: Number(delay), args };
+      intervalHandles.push(handle);
+      return handle;
+    };
+    globalThis.clearInterval = () => {};
+
+    let releaseCycle;
+    let markCycleStarted;
+    const cycleStarted = new Promise((resolve) => {
+      markCycleStarted = resolve;
+    });
+    loop = new FeedbackLoop({
+      admissionController: { setAdaptiveTypePriors: () => {} },
+      config: {
+        enabled: true,
+        priorAdaptation: { ...DEFAULT_PRIOR_ADAPTATION_CONFIG, adaptationIntervalMs: 300_000 },
+      },
+      runtimeContext: {
+        dbPath: "/tmp/db",
+        admissionConfig: makeAdmissionConfig(),
+      },
+    });
+    loop.forceAdaptationCycle = async () => {
+      markCycleStarted();
+      await new Promise((resolve) => {
+        releaseCycle = resolve;
+      });
+    };
+
+    loop.start();
+    const adaptationTimer = intervalHandles.find((handle) => handle.delay === 300_000);
+    assert.ok(adaptationTimer, "start should schedule an adaptation cycle timer");
+    adaptationTimer.fn(...adaptationTimer.args);
+    await cycleStarted;
+
+    let closeResolved = false;
+    const closePromise = loop.close().then(() => {
+      closeResolved = true;
+    });
+    await Promise.resolve();
+    assert.equal(closeResolved, false, "close should wait for the active adaptation cycle");
+    releaseCycle();
+    await closePromise;
+    assert.equal(closeResolved, true);
+  } finally {
+    loop?.dispose();
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
 });
 
 it("FeedbackLoop: getStatus exposes runtime context, lessons, and admitted counts", () => {

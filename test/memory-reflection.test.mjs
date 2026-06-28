@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,7 @@ const jiti = jitiFactory(import.meta.url, {
 });
 
 const { readSessionConversationWithResetFallback, buildReflectionPrompt } = jiti("../src/session-recovery-utils.ts");
-const { generateReflectionText } = jiti("../src/reflection-cli.ts");
+const { generateReflectionText, runReflectionViaCli, MAX_REFLECTION_CLI_OUTPUT_CHARS } = jiti("../src/reflection-cli.ts");
 const { resolveRuntimeEmbeddedPiRunner } = jiti("../src/openclaw-extension-utils.ts");
 const { parsePluginConfig } = jiti("../src/plugin-config-parser.ts");
 const pluginModule = jiti("../index.ts");
@@ -254,6 +254,8 @@ describe("memory reflection", () => {
         assert.equal(seenParams.disableMessageTool, true);
         assert.equal(seenParams.provider, "openai");
         assert.equal(seenParams.model, "gpt-test");
+        assert.ok(seenParams.signal instanceof AbortSignal);
+        assert.equal(seenParams.signal.aborted, false);
       } finally {
         rmSync(workDir, { recursive: true, force: true });
       }
@@ -287,6 +289,42 @@ describe("memory reflection", () => {
       assert.doesNotMatch(source, /extensionAPI\.js/);
       assert.doesNotMatch(source, /OPENCLAW_EXTENSION_API_PATH/);
       assert.doesNotMatch(source, /openclaw\/dist\/extensionAPI/);
+    });
+  });
+
+  describe("reflection CLI runner", () => {
+    it("rejects and terminates when CLI stdout exceeds the safety cap", async () => {
+      const workDir = mkdtempSync(path.join(tmpdir(), "reflection-cli-output-cap-test-"));
+      const cliPath = path.join(workDir, "fake-openclaw.mjs");
+      const previousCliBin = process.env.OPENCLAW_CLI_BIN;
+
+      try {
+        writeFileSync(
+          cliPath,
+          [
+            "#!/usr/bin/env node",
+            `process.stdout.write("x".repeat(${MAX_REFLECTION_CLI_OUTPUT_CHARS + 1}));`,
+          ].join("\n"),
+          "utf-8"
+        );
+        chmodSync(cliPath, 0o755);
+        process.env.OPENCLAW_CLI_BIN = cliPath;
+
+        await assert.rejects(
+          runReflectionViaCli({
+            prompt: "Reflect on this conversation.",
+            agentId: "reflection",
+            workspaceDir: workDir,
+            timeoutMs: 1000,
+            thinkLevel: "low",
+          }),
+          new RegExp(`stdout exceeded ${MAX_REFLECTION_CLI_OUTPUT_CHARS} characters`)
+        );
+      } finally {
+        if (previousCliBin === undefined) delete process.env.OPENCLAW_CLI_BIN;
+        else process.env.OPENCLAW_CLI_BIN = previousCliBin;
+        rmSync(workDir, { recursive: true, force: true });
+      }
     });
   });
 

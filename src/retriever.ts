@@ -79,6 +79,7 @@ export class MemoryRetriever {
   private tierManager: TierManager | null = null;
   private _statsCollector: RetrievalStatsCollector | null = null;
   private recencyEngine: RecencyEngine | null = null;
+  private readonly backgroundMetadataWrites = new Set<Promise<void>>();
 
   constructor(
     private store: MemoryStore,
@@ -90,6 +91,26 @@ export class MemoryRetriever {
 
   setAccessTracker(tracker: AccessTracker): void {
     this.accessTracker = tracker;
+  }
+
+  async flushAccessTrackers(): Promise<void> {
+    await this.flushBackgroundMetadataWrites();
+    await this.accessTracker?.close();
+    await this.fallbackAccessTracker?.close();
+    this.fallbackAccessTracker = null;
+  }
+
+  private trackBackgroundMetadataWrite(promise: Promise<void>): void {
+    this.backgroundMetadataWrites.add(promise);
+    promise.finally(() => {
+      this.backgroundMetadataWrites.delete(promise);
+    });
+  }
+
+  private async flushBackgroundMetadataWrites(): Promise<void> {
+    while (this.backgroundMetadataWrites.size > 0) {
+      await Promise.allSettled([...this.backgroundMetadataWrites]);
+    }
   }
 
   private queueAccessRetry(id: string): void {
@@ -123,6 +144,10 @@ export class MemoryRetriever {
   /** Get the stats collector (if set). */
   getStatsCollector(): RetrievalStatsCollector | null {
     return this._statsCollector;
+  }
+
+  async flushStatsCollector(): Promise<void> {
+    await this._statsCollector?.flushRecordHooks();
   }
 
   /**
@@ -668,8 +693,30 @@ export class MemoryRetriever {
       }
     };
     const hasSoftDegraded = () => softDegradeAt !== undefined && Date.now() >= softDegradeAt;
-    const softDegradeDelay = <T>(value: T, remainingMs: number): Promise<T> =>
-      new Promise((resolve) => setTimeout(() => resolve(value), Math.max(0, remainingMs)));
+    const raceWithSoftDegrade = async <T>(
+      work: Promise<T>,
+      degradeValue: T,
+      remainingMs: number,
+      abortSignal?: AbortSignal,
+    ): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await resolveUnlessAborted(
+          Promise.race([
+            work,
+            new Promise<T>((resolve) => {
+              timer = setTimeout(() => {
+                timer = undefined;
+                resolve(degradeValue);
+              }, Math.max(0, remainingMs));
+            }),
+          ]),
+          abortSignal,
+        );
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
 
     try {
       const candidatePoolSize = candidatePoolSizeOverride
@@ -759,11 +806,10 @@ export class MemoryRetriever {
         const remainingMs = softDegradeAt - Date.now();
         const searchPhase = remainingMs <= 0
           ? "degrade"
-          : await resolveUnlessAborted(
-              Promise.race([
-                allSearchSettledPromise.then(() => "all" as const),
-                softDegradeDelay("degrade" as const, remainingMs),
-              ]),
+          : await raceWithSoftDegrade(
+              allSearchSettledPromise.then(() => "all" as const),
+              "degrade" as const,
+              remainingMs,
               cancelSearchOnAbort ? signal : undefined,
             );
 
@@ -929,11 +975,13 @@ export class MemoryRetriever {
                 markDegraded("skip_rerank_after_degrade");
                 return candidates;
               }
-              const rerankOutcome = await resolveUnlessAborted(
-                Promise.race([
-                  rerankPromise.then((value) => ({ kind: "reranked" as const, value })),
-                  softDegradeDelay({ kind: "degrade" as const }, remainingMs),
-                ]),
+              type RerankOutcome =
+                | { kind: "reranked"; value: RetrievalResult[] }
+                | { kind: "degrade" };
+              const rerankOutcome = await raceWithSoftDegrade<RerankOutcome>(
+                rerankPromise.then((value) => ({ kind: "reranked" as const, value })),
+                { kind: "degrade" as const },
+                remainingMs,
                 signal,
               );
               if (rerankOutcome.kind === "degrade") {
@@ -1080,13 +1128,17 @@ export class MemoryRetriever {
 
       try {
         // Audit #7: fire-and-forget to avoid blocking the recall hot path
-        // with a synchronous store.update(). queueAccessRetry handles retries.
-        void this.store.update(r.entry.id, {
+        // with a synchronous store.update(). Shutdown drains tracked writes.
+        const write = this.store.update(r.entry.id, {
           metadata: stringifySmartMetadata(meta),
-        }).catch((err) => {
-          this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);
-          this.queueAccessRetry(r.entry.id);
-        });
+        }).then(
+          () => undefined,
+          (err) => {
+            this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);
+            this.queueAccessRetry(r.entry.id);
+          },
+        );
+        this.trackBackgroundMetadataWrite(write);
       } catch (err) {
         this.logger.debug(`[Retriever] tier metadata update failed for ${r.entry.id}: ${err}`);
         this.queueAccessRetry(r.entry.id);

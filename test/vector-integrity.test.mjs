@@ -90,7 +90,7 @@ describe("readPersistedEmbeddingDimension (audit #6)", () => {
     dir = mkdtempSync(join(tmpdir(), "embed-dim-write-"));
     const store = new MemoryStore({ dbPath: dir, vectorDim: 4 });
     // Trigger initialization by writing a row.
-    await store.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.5, metadata: "{}" });
+    await store.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.5, metadata: "{}" });
     const dim = await store.readPersistedEmbeddingDimension();
     assert.strictEqual(dim, 4);
   });
@@ -98,7 +98,7 @@ describe("readPersistedEmbeddingDimension (audit #6)", () => {
   it("refuses bad vectors on update as well as create", async () => {
     const d = mkdtempSync(join(tmpdir(), "embed-update-guard-"));
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
-    const created = await store.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.5, metadata: "{}" });
+    const created = await store.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.5, metadata: "{}" });
 
     await assert.rejects(
       () => store.update(created.id, { vector: [] }),
@@ -119,7 +119,7 @@ describe("readPersistedEmbeddingDimension (audit #6)", () => {
   it("reads back the persisted dimension on a fresh store instance", async () => {
     const d = mkdtempSync(join(tmpdir(), "embed-dim-persist-"));
     const s1 = new MemoryStore({ dbPath: d, vectorDim: 8 });
-    await s1.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.5, metadata: "{}" });
+    await s1.store({ text: "warmup", vector: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.5, metadata: "{}" });
     // New instance, same dbPath: should read 8 from disk.
     const s2 = new MemoryStore({ dbPath: d, vectorDim: 8 });
     const dim = await s2.readPersistedEmbeddingDimension();
@@ -150,7 +150,7 @@ describe("readPersistedEmbeddingDimension (audit #6)", () => {
     );
     // New instance claiming dimension 768 — write should be a no-op.
     const s = new MemoryStore({ dbPath: d, vectorDim: 768 });
-    await s.store({ text: "x", vector: new Array(768).fill(0), category: "fact", scope: "global", importance: 0.5, metadata: "{}" });
+    await s.store({ text: "x", vector: new Array(768).fill(0), category: "cases", scope: "global", importance: 0.5, metadata: "{}" });
     const file = join(d, ".mymem-embedding-dimension.json");
     assert.ok(existsSync(file));
     const parsed = JSON.parse(readFileSync(file, "utf8"));

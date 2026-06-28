@@ -52,6 +52,7 @@ export class RetrievalStatsCollector {
   private _count = 0;  // number of valid records
   private readonly _maxRecords: number;
   private _recordHook: RetrievalRecordHook | null = null;
+  private readonly _pendingRecordHooks = new Set<Promise<void>>();
 
   constructor(maxRecords = 1000) {
     this._maxRecords = maxRecords;
@@ -70,12 +71,23 @@ export class RetrievalStatsCollector {
       this._count++;
     }
     if (this._recordHook) {
-      void Promise.resolve(this._recordHook(trace, source)).catch(() => {});
+      const hookPromise = Promise.resolve(this._recordHook(trace, source))
+        .catch(() => {});
+      this._pendingRecordHooks.add(hookPromise);
+      void hookPromise.finally(() => {
+        this._pendingRecordHooks.delete(hookPromise);
+      });
     }
   }
 
   setRecordHook(hook: RetrievalRecordHook | null): void {
     this._recordHook = hook;
+  }
+
+  async flushRecordHooks(): Promise<void> {
+    while (this._pendingRecordHooks.size > 0) {
+      await Promise.allSettled([...this._pendingRecordHooks]);
+    }
   }
 
   /** Return records in insertion order (oldest → newest). Used by getStats(). */

@@ -490,6 +490,70 @@ describe("hook enhancement registration", () => {
     assert.equal(Object.hasOwn(store.patches[0].patch, "suppressed_until_turn"), false);
   });
 
+  it("tracks agent_end background metadata writes for service-stop draining", async () => {
+    const { api, eventHandlers } = createApiHarness();
+    const backgroundTasks = new Set();
+    let releasePatch;
+    let patchStarted;
+    const patchStartedPromise = new Promise((resolve) => {
+      patchStarted = resolve;
+    });
+    const mem = makeMemoryEntry({
+      id: "mem-1",
+      text: "old memory",
+      category: "decision",
+      memoryCategory: "patterns",
+    });
+    const store = createStore({ byId: { "mem-1": mem } });
+    store.patchMetadataBatch = async (batch) => {
+      patchStarted();
+      await new Promise((resolve) => {
+        releasePatch = resolve;
+      });
+      for (const { id, patch } of batch) {
+        store.patches.push({ id, patch });
+      }
+      return batch.length;
+    };
+    const state = createHookEnhancementState();
+
+    registerHookEnhancements({
+      api,
+      config: baseConfig({ hookEnhancements: { badRecallFeedback: true } }),
+      store,
+      embedder: { embedQuery: async () => [0.1], embedPassage: async () => [0.1] },
+      scopeManager: createScopeManager(),
+      state,
+      backgroundTasks,
+    });
+    recordInjectedMemoriesForEnhancements({
+      state,
+      sessionKey: "agent:main:cli:background-drain",
+      source: "session-primer",
+      memories: [{ id: "mem-1", text: "old memory", scope: "global", category: "decision" }],
+    });
+
+    const agentEndHooks = eventHandlers.get("agent_end") || [];
+    agentEndHooks[0].handler({
+      success: true,
+      messages: [{ role: "user", content: "you misremembered that, bad recall" }],
+    }, { sessionKey: "agent:main:cli:background-drain", agentId: "main" });
+
+    await patchStartedPromise;
+    assert.equal(backgroundTasks.size, 1);
+    let drained = false;
+    const drainPromise = Promise.allSettled([...backgroundTasks]).then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    assert.equal(drained, false);
+
+    releasePatch();
+    await drainPromise;
+    assert.equal(backgroundTasks.size, 0);
+    assert.equal(store.patches[0].id, "mem-1");
+  });
+
   it("suppresses auto-recalled memories only after repeated negative feedback", async () => {
     const { api, eventHandlers } = createApiHarness();
     const mem = makeMemoryEntry({

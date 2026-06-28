@@ -15,12 +15,12 @@ const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createRetriever } = jiti("../src/retriever.ts");
 const { rerankResults } = jiti("../src/reranker.ts");
 
-function buildResult(id = "memory-1", text = "test result") {
+function buildResult(id = "memory-1", text = "test result", vector = [0.1, 0.2, 0.3]) {
   return {
     entry: {
       id,
       text,
-      vector: [0.1, 0.2, 0.3],
+      vector,
       category: "other",
       scope: "global",
       importance: 0.7,
@@ -28,6 +28,10 @@ function buildResult(id = "memory-1", text = "test result") {
       metadata: "{}",
     },
     score: 0.9,
+    sources: {
+      bm25: { score: 0.9, rank: 1 },
+      fused: { score: 0.9 },
+    },
   };
 }
 
@@ -74,6 +78,35 @@ function createRetrieverHarness(
   );
 
   return { retriever };
+}
+
+function createAbortHarness() {
+  const listeners = new Set();
+  const signal = {
+    aborted: false,
+    reason: undefined,
+    addEventListener(type, listener) {
+      if (type === "abort") listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === "abort") listeners.delete(listener);
+    },
+  };
+
+  return {
+    signal,
+    get listenerCount() {
+      return listeners.size;
+    },
+    abort(reason) {
+      signal.aborted = true;
+      signal.reason = reason;
+      for (const listener of [...listeners]) {
+        if (typeof listener === "function") listener();
+        else listener?.handleEvent?.({ type: "abort" });
+      }
+    },
+  };
 }
 
 describe("Retriever Rerank Fallback", () => {
@@ -400,5 +433,138 @@ describe("Retriever Rerank Fallback", () => {
       diagnostics.stageCounts.rerankInput > 0,
       "Should have rerank input count",
     );
+  });
+
+  it("falls back after rerank timeout even when fetch ignores AbortSignal", async () => {
+    globalThis.fetch = async () => new Promise(() => {});
+    const abortHarness = createAbortHarness();
+    const warnings = [];
+    const start = Date.now();
+
+    const results = await rerankResults(
+      "test query",
+      [0.1, 0.2, 0.3],
+      [buildResult()],
+      {
+        rerank: "cross-encoder",
+        rerankApiKey: "test-key",
+        rerankModel: "jina-reranker-v3",
+        rerankEndpoint: "http://127.0.0.1/rerank",
+        rerankTimeoutMs: 25,
+        vectorWeight: 0.7,
+        bm25Weight: 0.3,
+      },
+      async () => new Set(["memory-1"]),
+      { debug() {}, warn: (...args) => warnings.push(args.join(" ")) },
+      abortHarness.signal,
+    );
+
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 200, `rerank timeout should not wait for fetch to settle, got ${elapsed}ms`);
+    assert.equal(abortHarness.listenerCount, 0);
+    assert.ok(results.length > 0, "Should return cosine fallback results after timeout");
+    assert.match(warnings.join("\n"), /timed out/);
+  });
+
+  it("falls back after rerank timeout when successful response JSON stalls", async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return await new Promise(() => {});
+      },
+    });
+    const warnings = [];
+    const start = Date.now();
+
+    const results = await rerankResults(
+      "test query",
+      [0.1, 0.2, 0.3],
+      [buildResult()],
+      {
+        rerank: "cross-encoder",
+        rerankApiKey: "test-key",
+        rerankModel: "jina-reranker-v3",
+        rerankEndpoint: "http://127.0.0.1/rerank",
+        rerankTimeoutMs: 25,
+        vectorWeight: 0.7,
+        bm25Weight: 0.3,
+      },
+      async () => new Set(["memory-1"]),
+      { debug() {}, warn: (...args) => warnings.push(args.join(" ")) },
+    );
+
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 200, `rerank body timeout should not wait for json(), got ${elapsed}ms`);
+    assert.ok(results.length > 0, "Should return cosine fallback results after body timeout");
+    assert.match(warnings.join("\n"), /timed out/);
+  });
+
+  it("falls back after rerank timeout when error response text stalls", async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 503,
+      async text() {
+        return await new Promise(() => {});
+      },
+    });
+    const warnings = [];
+    const start = Date.now();
+
+    const results = await rerankResults(
+      "test query",
+      [0.1, 0.2, 0.3],
+      [buildResult()],
+      {
+        rerank: "cross-encoder",
+        rerankApiKey: "test-key",
+        rerankModel: "jina-reranker-v3",
+        rerankEndpoint: "http://127.0.0.1/rerank",
+        rerankTimeoutMs: 25,
+        vectorWeight: 0.7,
+        bm25Weight: 0.3,
+      },
+      async () => new Set(["memory-1"]),
+      { debug() {}, warn: (...args) => warnings.push(args.join(" ")) },
+    );
+
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 200, `rerank error body timeout should not wait for text(), got ${elapsed}ms`);
+    assert.ok(results.length > 0, "Should return cosine fallback results after error body timeout");
+    assert.match(warnings.join("\n"), /timed out/);
+  });
+
+  it("falls back promptly on external abort even when fetch ignores AbortSignal", async () => {
+    globalThis.fetch = async () => new Promise(() => {});
+    const abortHarness = createAbortHarness();
+    const warnings = [];
+
+    const rerankPromise = rerankResults(
+      "test query",
+      [0.1, 0.2, 0.3],
+      [buildResult()],
+      {
+        rerank: "cross-encoder",
+        rerankApiKey: "test-key",
+        rerankModel: "jina-reranker-v3",
+        rerankEndpoint: "http://127.0.0.1/rerank",
+        rerankTimeoutMs: 1000,
+        vectorWeight: 0.7,
+        bm25Weight: 0.3,
+      },
+      async () => new Set(["memory-1"]),
+      { debug() {}, warn: (...args) => warnings.push(args.join(" ")) },
+      abortHarness.signal,
+    );
+
+    assert.equal(abortHarness.listenerCount, 1);
+    const start = Date.now();
+    abortHarness.abort(new Error("auto-recall timeout"));
+
+    const results = await rerankPromise;
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 100, `external abort should not wait for fetch to settle, got ${elapsed}ms`);
+    assert.equal(abortHarness.listenerCount, 0);
+    assert.ok(results.length > 0, "Should return cosine fallback results after external abort");
+    assert.equal(warnings.length, 0);
   });
 });

@@ -233,6 +233,7 @@ export async function rerankResults(
   // Try cross-encoder rerank via configured provider API
   const provider = config.rerankProvider || "jina";
   const hasApiKey = !!config.rerankApiKey;
+  const rerankTimeoutMs = config.rerankTimeoutMs ?? 5000;
 
   if (config.rerank === "cross-encoder" && hasApiKey && config.rerankModel && config.rerankEndpoint) {
     try {
@@ -256,99 +257,140 @@ export async function rerankResults(
       // so the catch block can distinguish "local timeout" from "caller cancelled".
       const timeoutCtrl = new AbortController();
       const externalCtrl = new AbortController();
-      const timeout = setTimeout(() => timeoutCtrl.abort("rerank-timeout"), config.rerankTimeoutMs ?? 5000);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       let unsubscribe: (() => void) | undefined;
+      const cleanupAbortRace = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
+        unsubscribe?.();
+        unsubscribe = undefined;
+      };
       if (signal) {
         if (signal.aborted) {
-          clearTimeout(timeout);
           throw new DOMException("Rerank aborted (signal already aborted)", "AbortError");
         }
-        const handler = () => { externalCtrl.abort("rerank-external"); clearTimeout(timeout); };
-        signal.addEventListener("abort", handler, { once: true });
-        unsubscribe = () => signal.removeEventListener("abort", handler);
       }
       const combinedSignal = AbortSignal.any([timeoutCtrl.signal, externalCtrl.signal]);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          timeoutCtrl.abort("rerank-timeout");
+          cleanupAbortRace();
+          reject(new DOMException("Rerank timed out", "AbortError"));
+        }, rerankTimeoutMs);
+      });
+      let externalAbortPromise: Promise<never> | undefined;
+      if (signal) {
+        externalAbortPromise = new Promise<never>((_, reject) => {
+          const handler = () => {
+            externalCtrl.abort("rerank-external");
+            cleanupAbortRace();
+            reject(new DOMException("Rerank aborted by caller", "AbortError"));
+          };
+          signal.addEventListener("abort", handler, { once: true });
+          unsubscribe = () => signal.removeEventListener("abort", handler);
+        });
+      }
+      const raceWithAbort = async <T>(work: Promise<T>): Promise<T> => await Promise.race(
+        externalAbortPromise
+          ? [work, timeoutPromise, externalAbortPromise]
+          : [work, timeoutPromise],
+      );
 
       let response: Response;
       try {
-        response = await fetch(endpoint, {
+        const fetchPromise = fetch(endpoint, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
           signal: combinedSignal,
         });
-      } finally {
-        clearTimeout(timeout);
-        unsubscribe?.();
-      }
+        response = await raceWithAbort(fetchPromise);
 
-      if (response.ok) {
-        const data: unknown = await response.json();
+        if (response.ok) {
+          const data: unknown = await raceWithAbort(response.json() as Promise<unknown>);
 
-        // Parse provider-specific response into unified format
-        const parsed = parseRerankResponse(provider, data);
+          // Parse provider-specific response into unified format
+          const parsed = parseRerankResponse(provider, data);
 
-        if (!parsed) {
-          logger.warn(
-            "Rerank API: invalid response shape, falling back to cosine",
-          );
+          if (!parsed) {
+            logger.warn(
+              "Rerank API: invalid response shape, falling back to cosine",
+            );
+          } else {
+            // Build a Set of returned indices to identify unreturned candidates
+            const returnedIndices = new Set(parsed.map((r) => r.index));
+
+            const reranked = parsed
+              .filter((item) => item.index >= 0 && item.index < results.length)
+              .map((item) => {
+                const original = results[item.index];
+                const floor = getRerankPreservationFloor(original, false);
+                // Blend: 60% cross-encoder score + 40% original fused score
+                const blendedScore = clamp01WithFloor(
+                  item.score * 0.6 + original.score * 0.4,
+                  floor,
+                );
+                return {
+                  ...original,
+                  score: blendedScore,
+                  sources: {
+                    ...original.sources,
+                    reranked: { score: item.score },
+                  },
+                };
+              });
+
+            // Keep unreturned candidates with their original scores (slightly penalized)
+            const unreturned = results
+              .filter((_, idx) => !returnedIndices.has(idx))
+              .map(r => ({
+                ...r,
+                score: clamp01WithFloor(
+                  r.score * 0.8,
+                  getRerankPreservationFloor(r, true),
+                ),
+              }));
+
+            return [...reranked, ...unreturned].sort(
+              (a, b) => b.score - a.score,
+            );
+          }
         } else {
-          // Build a Set of returned indices to identify unreturned candidates
-          const returnedIndices = new Set(parsed.map((r) => r.index));
-
-          const reranked = parsed
-            .filter((item) => item.index >= 0 && item.index < results.length)
-            .map((item) => {
-              const original = results[item.index];
-              const floor = getRerankPreservationFloor(original, false);
-              // Blend: 60% cross-encoder score + 40% original fused score
-              const blendedScore = clamp01WithFloor(
-                item.score * 0.6 + original.score * 0.4,
-                floor,
-              );
-              return {
-                ...original,
-                score: blendedScore,
-                sources: {
-                  ...original.sources,
-                  reranked: { score: item.score },
-                },
-              };
-            });
-
-          // Keep unreturned candidates with their original scores (slightly penalized)
-          const unreturned = results
-            .filter((_, idx) => !returnedIndices.has(idx))
-            .map(r => ({
-              ...r,
-              score: clamp01WithFloor(
-                r.score * 0.8,
-                getRerankPreservationFloor(r, true),
-              ),
-            }));
-
-          return [...reranked, ...unreturned].sort(
-            (a, b) => b.score - a.score,
+          let errText = "";
+          try {
+            errText = await raceWithAbort(response.text());
+          } catch (bodyError) {
+            const bodyErrorName =
+              bodyError && typeof bodyError === "object" && "name" in bodyError
+                ? String((bodyError as { name?: unknown }).name)
+                : undefined;
+            if (signal?.aborted === true || bodyErrorName === "AbortError") {
+              throw bodyError;
+            }
+          }
+          logger.warn(
+            `Rerank API returned ${response.status}: ${errText.slice(0, 200)}, falling back to cosine`,
           );
         }
-      } else {
-        const errText = await response.text().catch(() => "");
-        logger.warn(
-          `Rerank API returned ${response.status}: ${errText.slice(0, 200)}, falling back to cosine`,
-        );
+      } finally {
+        cleanupAbortRace();
       }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
+      const wasExternalAbort = signal?.aborted === true;
+      const errorName =
+        error && typeof error === "object" && "name" in error
+          ? String((error as { name?: unknown }).name)
+          : undefined;
+      if (wasExternalAbort) {
+        // Auto-recall timeouts intentionally abort in-flight rerank calls.
+        // Retrieval falls back to cosine, so avoid noisy startup/runtime logs.
+      } else if (errorName === "AbortError") {
         // Distinguish between external signal abort (e.g. auto-recall timeout)
         // and the rerank's own timeout by checking if the external signal was
         // already aborted when the error occurred.
-        const wasExternalAbort = signal?.aborted === true;
-        if (wasExternalAbort) {
-          // Auto-recall timeouts intentionally abort in-flight rerank calls.
-          // Retrieval falls back to cosine, so avoid noisy startup/runtime logs.
-        } else {
-          logger.warn(`Rerank API timed out (${config.rerankTimeoutMs ?? 5000}ms), falling back to cosine`);
-        }
+        logger.warn(`Rerank API timed out (${rerankTimeoutMs}ms), falling back to cosine`);
       } else {
         logger.warn("Rerank API failed, falling back to cosine:", error);
       }

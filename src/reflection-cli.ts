@@ -17,6 +17,10 @@ import { runWithReflectionTransientRetryOnce } from "./reflection-retry.js";
 import { INTERNAL_REFLECTION_ENV_FLAG } from "./plugin-constants.js";
 import type { EmbeddedPiRunner, ReflectionThinkLevel, ReflectionErrorSignal } from "./plugin-types.js";
 
+export const MAX_REFLECTION_CLI_OUTPUT_CHARS = 1_000_000;
+
+const REFLECTION_CLI_FORCE_KILL_DELAY_MS = 1500;
+
 /**
  * Runs reflection via CLI using openclaw agent command.
  */
@@ -58,38 +62,69 @@ export async function runReflectionViaCli(params: {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    let timedOut = false;
+    let failureError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+        forceKillTimer = undefined;
+      }
+    };
+
+    const requestChildTermination = (error: Error) => {
+      failureError ??= error;
+      child.kill("SIGTERM");
+      if (!forceKillTimer) {
+        forceKillTimer = setTimeout(() => {
+          if (!settled) child.kill("SIGKILL");
+        }, REFLECTION_CLI_FORCE_KILL_DELAY_MS);
+        forceKillTimer.unref?.();
+      }
+    };
+
+    const appendOutput = (streamName: "stdout" | "stderr", chunk: string) => {
+      if (failureError) return;
+      const current = streamName === "stdout" ? stdout : stderr;
+      if (current.length + chunk.length > MAX_REFLECTION_CLI_OUTPUT_CHARS) {
+        requestChildTermination(
+          new Error(`${cliBin} ${streamName} exceeded ${MAX_REFLECTION_CLI_OUTPUT_CHARS} characters`)
+        );
+        return;
+      }
+      if (streamName === "stdout") stdout += chunk;
+      else stderr += chunk;
+    };
 
     const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 1500).unref();
+      requestChildTermination(new Error(`${cliBin} timed out after ${outerTimeoutMs}ms`));
     }, outerTimeoutMs);
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      appendOutput("stdout", chunk);
     });
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      appendOutput("stderr", chunk);
     });
 
     child.once("error", (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      reject(new Error(`spawn ${cliBin} failed: ${err.message}`));
+      clearTimers();
+      reject(failureError ?? new Error(`spawn ${cliBin} failed: ${err.message}`));
     });
 
     child.once("close", (code, signal) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      clearTimers();
 
-      if (timedOut) {
-        reject(new Error(`${cliBin} timed out after ${outerTimeoutMs}ms`));
+      if (failureError) {
+        reject(failureError);
         return;
       }
       if (signal) {
@@ -165,7 +200,7 @@ export async function generateReflectionText(params: {
           const embeddedTimeoutMs = Math.max(params.timeoutMs + 5000, 15000);
 
           return await withTimeout(
-            runEmbeddedPiAgent({
+            async (signal) => await runEmbeddedPiAgent({
               sessionId: `reflection-${Date.now()}`,
               sessionKey: "temp:memory-reflection",
               agentId: params.agentId,
@@ -181,6 +216,7 @@ export async function generateReflectionText(params: {
               thinkLevel: params.thinkLevel,
               provider,
               model,
+              signal,
             }),
             embeddedTimeoutMs,
             "embedded reflection run"

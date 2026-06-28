@@ -25,7 +25,7 @@ export function makeMemoryEntry(i = 1, overrides = {}) {
   return {
     text: `memory-${i}`,
     vector: [0.1 * i, 0.2 * i, 0.3 * i],
-    category: "fact",
+    category: "cases",
     scope: "global",
     importance: 0.5,
     metadata: "{}",

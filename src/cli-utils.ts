@@ -15,23 +15,42 @@ export function asNonEmptyString(value: unknown): string | undefined {
   return trimmed.length ? trimmed : undefined;
 }
 
+type TimeoutWork<T> = Promise<T> | ((signal: AbortSignal) => Promise<T>);
+
 /**
- * Wraps a promise with a timeout.
+ * Wraps a promise or cancellable work function with a timeout.
  */
-export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+export function withTimeout<T>(work: TimeoutWork<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    const controller = typeof work === "function" ? new AbortController() : undefined;
+    let settled = false;
     const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      controller?.abort(error);
+      finish(() => reject(error));
     }, timeoutMs);
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
+    let promise: Promise<T>;
+    try {
+      promise = typeof work === "function" ? work(controller!.signal) : work;
+    } catch (err) {
+      finish(() => reject(err));
+      return;
+    }
 
     promise.then(
       (value) => {
-        clearTimeout(timer);
-        resolve(value);
+        finish(() => resolve(value));
       },
       (err) => {
-        clearTimeout(timer);
-        reject(err);
+        finish(() => reject(err));
       }
     );
   });

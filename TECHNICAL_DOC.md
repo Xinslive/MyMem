@@ -518,9 +518,9 @@ final_score = semantic_score
 ```typescript
 // 意图规则按特异性排序，首匹配优先
 const INTENT_RULES: IntentRule[] = [
-  { label: "preference", patterns: [...], categories: ["preference", "decision"],
+  { label: "preference", patterns: [...], categories: ["preferences", "events"],
     depth: "l0", memoryType: "knowledge" },
-  { label: "event-timeline", patterns: [...], categories: ["entity", "decision"],
+  { label: "event-timeline", patterns: [...], categories: ["entities", "events"],
     depth: "full", memoryType: "experience" },
   // ... 更多规则
 ];
@@ -1091,7 +1091,7 @@ openclaw mymem reindex-fts        # 重建全文索引
 openclaw mymem repair-summaries   # 修复摘要
 openclaw mymem compact            # 触发手动压缩
 openclaw mymem doctor             # 诊断记忆健康状态
-openclaw mymem dashboard          # 启动可视化管理台
+openclaw mymem dashboard          # 启动本机可视化管理台；日志会打印 token 文件路径和解锁 URL
 ```
 
 ### 18.2 测试框架

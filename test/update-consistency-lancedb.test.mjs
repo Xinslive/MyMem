@@ -39,7 +39,7 @@ describe("MemoryStore update rollback (real LanceDB backend)", () => {
     const entry = await store.store({
       text: "original memory",
       vector: [0, 0, 0, 0],
-      category: "fact",
+      category: "cases",
       scope: "global",
       importance: 0.7,
       metadata: "{}",

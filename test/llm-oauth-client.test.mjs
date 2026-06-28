@@ -256,6 +256,114 @@ describe("LLM OAuth client", () => {
     assert.ok(typeof persisted.updated_at === "string" && persisted.updated_at.length > 0);
   });
 
+  it("aborts stalled OAuth refresh success bodies when timeoutMs elapses", async () => {
+    const expiredAccessToken = makeJwt({
+      exp: Math.floor((Date.now() - 60_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_old",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: expiredAccessToken,
+        refresh_token: "refresh-old",
+      }),
+      "utf8",
+    );
+
+    const logs = [];
+    let refreshRequests = 0;
+    let backendRequests = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/oauth/token")) {
+        refreshRequests++;
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return await new Promise(() => {});
+          },
+        };
+      }
+      backendRequests++;
+      return new Response("unexpected backend request", { status: 500 });
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 20,
+      log: (message) => logs.push(message),
+    });
+
+    const start = Date.now();
+    assert.equal(await llm.completeJson("refresh body timeout", "oauth-refresh-body-timeout"), null);
+    const elapsed = Date.now() - start;
+
+    assert.equal(refreshRequests, 1);
+    assert.equal(backendRequests, 0);
+    assert.ok(elapsed < 250, `expected OAuth refresh body read to abort quickly, got ${elapsed}ms`);
+    assert.ok(logs.some((message) => message.includes("OAuth request failed")));
+  });
+
+  it("aborts stalled OAuth refresh error bodies when timeoutMs elapses", async () => {
+    const expiredAccessToken = makeJwt({
+      exp: Math.floor((Date.now() - 60_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_old",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: expiredAccessToken,
+        refresh_token: "refresh-old",
+      }),
+      "utf8",
+    );
+
+    const logs = [];
+    let refreshRequests = 0;
+    let backendRequests = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/oauth/token")) {
+        refreshRequests++;
+        return {
+          ok: false,
+          status: 503,
+          async text() {
+            return await new Promise(() => {});
+          },
+        };
+      }
+      backendRequests++;
+      return new Response("unexpected backend request", { status: 500 });
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 20,
+      log: (message) => logs.push(message),
+    });
+
+    const start = Date.now();
+    assert.equal(await llm.completeJson("refresh error body timeout", "oauth-refresh-error-body-timeout"), null);
+    const elapsed = Date.now() - start;
+
+    assert.equal(refreshRequests, 1);
+    assert.equal(backendRequests, 0);
+    assert.ok(elapsed < 250, `expected OAuth refresh error body read to abort quickly, got ${elapsed}ms`);
+    assert.ok(logs.some((message) => message.includes("OAuth request failed")));
+  });
+
   it("reloads the OAuth file after a refresh failure", async () => {
     const expiredAccessToken = makeJwt({
       exp: Math.floor((Date.now() - 60_000) / 1000),
@@ -387,6 +495,52 @@ describe("LLM OAuth client", () => {
     assert.ok(logs.some((message) => message.includes("transient request failure")));
   });
 
+  it("does not retry OAuth backend failures after timeout aborts the retry delay", async () => {
+    const accessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_retry_abort",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        access_token: accessToken,
+        refresh_token: "refresh-token",
+      }),
+      "utf8",
+    );
+
+    let backendRequests = 0;
+    const logs = [];
+    globalThis.fetch = async () => {
+      backendRequests++;
+      return new Response("temporary outage", { status: 503, statusText: "Service Unavailable" });
+    };
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 50,
+      log: (message) => logs.push(message),
+    });
+
+    const start = Date.now();
+    const result = await llm.completeJson("retry me", "oauth-retry-abort");
+    const elapsed = Date.now() - start;
+
+    assert.equal(result, null);
+    assert.equal(backendRequests, 1);
+    assert.ok(
+      elapsed < 250,
+      `expected OAuth retry delay to abort quickly, got ${elapsed}ms`,
+    );
+    assert.ok(logs.some((message) => message.includes("transient request failure")));
+  });
+
   it("rejects OAuth JSON that does not match the requested schema", async () => {
     const accessToken = makeJwt({
       exp: Math.floor((Date.now() + 3_600_000) / 1000),
@@ -483,6 +637,98 @@ describe("LLM OAuth client", () => {
 
     assert.equal(await llm.completeJson("timeout"), null);
     assert.equal(aborted, true);
+    assert.ok(logs.some((message) => message.includes("OAuth request failed")));
+  });
+
+  it("aborts stalled OAuth success response bodies when timeoutMs elapses", async () => {
+    const accessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_body_timeout",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        tokens: {
+          access_token: accessToken,
+          refresh_token: "refresh-token",
+        },
+      }),
+      "utf8",
+    );
+
+    const logs = [];
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/event-stream" }),
+      async text() {
+        return await new Promise(() => {});
+      },
+    });
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 20,
+      log: (message) => logs.push(message),
+    });
+
+    const start = Date.now();
+    assert.equal(await llm.completeJson("timeout body", "oauth-body-timeout"), null);
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed < 250, `expected OAuth body read to abort quickly, got ${elapsed}ms`);
+    assert.ok(logs.some((message) => message.includes("OAuth request failed")));
+  });
+
+  it("aborts stalled OAuth error response bodies when timeoutMs elapses", async () => {
+    const accessToken = makeJwt({
+      exp: Math.floor((Date.now() + 3_600_000) / 1000),
+      [ACCOUNT_ID_CLAIM]: {
+        chatgpt_account_id: "acct_error_body_timeout",
+      },
+    });
+
+    const authPath = path.join(tempDir, "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        tokens: {
+          access_token: accessToken,
+          refresh_token: "refresh-token",
+        },
+      }),
+      "utf8",
+    );
+
+    const logs = [];
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      async text() {
+        return await new Promise(() => {});
+      },
+    });
+
+    const llm = createLlmClient({
+      auth: "oauth",
+      model: "openai/gpt-5.4",
+      oauthPath: authPath,
+      timeoutMs: 20,
+      log: (message) => logs.push(message),
+    });
+
+    const start = Date.now();
+    assert.equal(await llm.completeJson("timeout error body", "oauth-error-body-timeout"), null);
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed < 250, `expected OAuth error body read to abort quickly, got ${elapsed}ms`);
     assert.ok(logs.some((message) => message.includes("OAuth request failed")));
   });
 });

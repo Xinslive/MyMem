@@ -27,7 +27,7 @@ function buildResult(id, text = "test result") {
       id,
       text,
       vector: [0.1, 0.2, 0.3],
-      category: "other",
+      category: "patterns",
       scope: "global",
       importance: 0.7,
       timestamp: 1700000000000,
@@ -136,6 +136,74 @@ test("pre-aborted signal: Embedder.withTimeout rejects before embedSingle runs",
 
   assert.ok(!embedSingleCalled, "embedSingle should NOT be called for a pre-aborted signal — withTimeout should reject immediately");
   assert.ok(errorCaught !== undefined, "embedQuery should throw for pre-aborted signal");
+});
+
+test("Embedder.withTimeout rejects on caller abort even when provider ignores AbortSignal", async () => {
+  const { Embedder } = jiti("../src/embedder.ts");
+  const embedder = new Embedder({
+    provider: "openai-compatible",
+    apiKey: "test-key",
+    model: "text-embedding-3-small",
+  });
+  const controller = new AbortController();
+  let sawSignal = false;
+
+  embedder.embedSingle = async (_text, _task, _depth, signal) => {
+    sawSignal = signal instanceof AbortSignal;
+    return await new Promise(() => {});
+  };
+
+  setTimeout(() => controller.abort(new Error("auto-recall timeout")), 50);
+
+  const start = Date.now();
+  await assert.rejects(
+    embedder.embedQuery("provider ignores abort", controller.signal),
+    /auto-recall timeout/,
+  );
+  const elapsed = Date.now() - start;
+
+  assert.equal(sawSignal, true);
+  assert.ok(
+    elapsed < 500,
+    `Expected withTimeout to reject on caller abort even if provider ignores signal, got ${elapsed}ms`,
+  );
+});
+
+test("Embedder retry backoff wakes immediately when caller aborts during sleep", async () => {
+  const { Embedder } = jiti("../src/embedder.ts");
+  const embedder = new Embedder({
+    provider: "openai-compatible",
+    apiKey: "test-key",
+    model: "text-embedding-3-small",
+  });
+  const controller = new AbortController();
+  const originalError = new Error("temporary network failure");
+  let retryCalls = 0;
+
+  setTimeout(() => controller.abort(new Error("auto-recall timeout")), 50);
+
+  const start = Date.now();
+  let errorCaught;
+  try {
+    await embedder.retryWithBackoff(
+      async () => {
+        retryCalls += 1;
+        throw new Error("should not retry after abort");
+      },
+      controller.signal,
+      originalError,
+    );
+  } catch (error) {
+    errorCaught = error;
+  }
+  const elapsed = Date.now() - start;
+
+  assert.equal(retryCalls, 0);
+  assert.equal(errorCaught, originalError);
+  assert.ok(
+    elapsed < 500,
+    `Expected abort to interrupt embedding retry backoff quickly, got ${elapsed}ms`,
+  );
 });
 
 test("auto-recall aborts while fusion validates BM25-only hits", async () => {

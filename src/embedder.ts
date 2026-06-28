@@ -299,6 +299,30 @@ export class Embedder {
     }
   }
 
+  private async readNativeFetchBody<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) return await work();
+    if (signal.aborted) throw signal.reason ?? new Error("aborted");
+
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        fn();
+      };
+      const onAbort = () => {
+        finish(() => reject(signal.reason ?? new Error("aborted")));
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+      work().then(
+        (value) => finish(() => resolve(value)),
+        (error) => finish(() => reject(error)),
+      );
+    });
+  }
+
   /**
    * Call embeddings.create using native fetch (bypasses OpenAI SDK).
    * Used exclusively for Ollama endpoints where AbortController must work
@@ -345,13 +369,13 @@ export class Embedder {
       );
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
+        const body = await this.readNativeFetchBody(() => response.text(), signal).catch(() => "");
         throw new Error(
           `Ollama batch embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
         );
       }
 
-      const data = await response.json();
+      const data = await this.readNativeFetchBody(() => response.json(), signal);
 
       // Validate response count and non-empty embeddings
       if (
@@ -388,13 +412,13 @@ export class Embedder {
     );
 
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
+      const body = await this.readNativeFetchBody(() => response.text(), signal).catch(() => "");
       throw new Error(
         `Ollama embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
       );
     }
 
-    const data = await response.json();
+    const data = await this.readNativeFetchBody(() => response.json(), signal);
 
     // Ollama /api/embeddings returns { embedding: number[] },
     // convert to OpenAI-compatible shape { data: [{ embedding: number[] }] }
@@ -521,7 +545,7 @@ export class Embedder {
         `[mymem] Retrying embedding after ${sleepMs}ms (attempt ${retry + 1}/${maxRetries}): ${originalError instanceof Error ? originalError.message : String(originalError)}`
       );
 
-      await new Promise<void>((resolve) => setTimeout(resolve, sleepMs));
+      await this.delayUnlessAborted(sleepMs, signal, originalError);
 
       // Don't retry if externally cancelled during sleep
       if (signal?.aborted) {
@@ -550,6 +574,24 @@ export class Embedder {
     throw originalError instanceof Error ? originalError : new Error(String(originalError));
   }
 
+  private delayUnlessAborted(ms: number, signal: AbortSignal | undefined, originalError: unknown): Promise<void> {
+    if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+    if (signal.aborted) {
+      return Promise.reject(originalError instanceof Error ? originalError : new Error(String(originalError)));
+    }
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(originalError instanceof Error ? originalError : new Error(String(originalError)));
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
   /** Number of API keys in the rotation pool. */
   get keyCount(): number {
     return this.clients.length;
@@ -558,27 +600,55 @@ export class Embedder {
   /** Wrap a single embedding operation with a global timeout via AbortSignal. */
   private withTimeout<T>(promiseFactory: (signal: AbortSignal) => Promise<T>, _label: string, externalSignal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), EMBED_TIMEOUT_MS);
 
     // If caller passes an external signal, merge it with the internal timeout controller.
     // Either signal aborting will cancel the promise.
     let unsubscribe: (() => void) | undefined;
     if (externalSignal) {
       if (externalSignal.aborted) {
-        clearTimeout(timeoutId);
         return Promise.reject(externalSignal.reason ?? new Error("aborted"));
       }
-      const handler = () => {
-        controller.abort();
-        clearTimeout(timeoutId);
-      };
-      externalSignal.addEventListener("abort", handler, { once: true });
-      unsubscribe = () => externalSignal.removeEventListener("abort", handler);
     }
 
-    return promiseFactory(controller.signal).finally(() => {
-      clearTimeout(timeoutId);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
       unsubscribe?.();
+      unsubscribe = undefined;
+    };
+
+    return new Promise<T>((resolve, reject) => {
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn();
+      };
+
+      timeoutId = setTimeout(() => {
+        const error = new Error(`Embedding request timed out after ${EMBED_TIMEOUT_MS}ms`);
+        controller.abort(error);
+        finish(() => reject(error));
+      }, EMBED_TIMEOUT_MS);
+
+      if (externalSignal) {
+        const handler = () => {
+          const error = externalSignal.reason ?? new Error("aborted");
+          controller.abort(error);
+          finish(() => reject(error));
+        };
+        externalSignal.addEventListener("abort", handler, { once: true });
+        unsubscribe = () => externalSignal.removeEventListener("abort", handler);
+      }
+
+      promiseFactory(controller.signal).then(
+        (value) => finish(() => resolve(value)),
+        (error) => finish(() => reject(error)),
+      );
     });
   }
 

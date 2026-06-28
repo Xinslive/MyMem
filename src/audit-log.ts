@@ -47,11 +47,7 @@ export class AuditLogger {
 
   /** Enable logging and ensure the parent directory exists. */
   async enable(): Promise<void> {
-    if (this.enabled) return;
-    this.filePath = this.configuredFilePath ?? join(this.dbPath, "audit.jsonl");
-    this.initPromise = mkdir(dirname(this.filePath), { recursive: true }).then(() => undefined).catch(() => undefined);
-    await this.initPromise;
-    this.enabled = true;
+    await this.ensureInitialized();
   }
 
   /** Is this logger ready to write? */
@@ -64,16 +60,35 @@ export class AuditLogger {
    * mutation must succeed regardless of audit-log health.
    */
   log(entry: AuditEntry): void {
-    if (!this.enabled || !this.filePath) return;
+    const filePath = this.configuredFilePath ?? join(this.dbPath, "audit.jsonl");
+    const initPromise = this.ensureInitialized();
     const line = JSON.stringify(entry) + "\n";
     // Queue writes in order without blocking the primary mutation path.
     this.writeTail = this.writeTail
-      .then(() => appendFile(this.filePath!, line, { encoding: "utf8", mode: 0o600 }))
+      .then(() => initPromise)
+      .then(() => appendFile(filePath, line, { encoding: "utf8", mode: 0o600 }))
       .catch(() => undefined);
   }
 
   /** Drain queued writes for tests and shutdown paths that need best-effort completeness. */
   async flush(): Promise<void> {
-    await this.writeTail;
+    while (true) {
+      const tail = this.writeTail;
+      await tail;
+      if (this.writeTail === tail) return;
+    }
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.filePath = this.configuredFilePath ?? join(this.dbPath, "audit.jsonl");
+      this.initPromise = mkdir(dirname(this.filePath), { recursive: true })
+        .then(() => undefined)
+        .catch(() => undefined)
+        .finally(() => {
+          this.enabled = true;
+        });
+    }
+    await this.initPromise;
   }
 }

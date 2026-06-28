@@ -307,3 +307,107 @@ test("native Ollama fetch uses a bounded keep-alive connection pool", async () =
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("single request aborts while native Ollama response body is stalled", async () => {
+  const ABORT_AFTER_MS = 50;
+  const SLOW_BODY_MS = 2_000;
+
+  const server = makeOllamaMock(async (req, res, route) => {
+    assert.equal(route, "api");
+    await readJson(req);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write("{");
+    const timer = setTimeout(() => {
+      if (!res.writableEnded) res.end(`"embedding":${JSON.stringify(dims())}}`);
+    }, SLOW_BODY_MS);
+    req.on("aborted", () => clearTimeout(timer));
+  });
+
+  const port = await startMockServer(server);
+  const baseURL = `http://127.0.0.1:${port}/v1`;
+
+  try {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "mxbai-embed-large",
+      baseURL,
+      dimensions: DIMS,
+    });
+
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(new Error("embedding body timeout")), ABORT_AFTER_MS);
+    const start = Date.now();
+
+    await assert.rejects(
+      embedder.embedWithNativeFetch(
+        { model: "mxbai-embed-large", input: "body stall probe" },
+        controller.signal,
+      ),
+      /embedding body timeout|aborted|AbortError/i,
+    );
+
+    clearTimeout(abortTimer);
+    const elapsed = Date.now() - start;
+    assert.ok(
+      elapsed < SLOW_BODY_MS * 0.75,
+      `expected body abort near ${ABORT_AFTER_MS}ms, got ${elapsed}ms`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("batch request aborts while native Ollama response body is stalled", async () => {
+  const ABORT_AFTER_MS = 50;
+  const SLOW_BODY_MS = 2_000;
+
+  const server = makeOllamaMock(async (req, res, route) => {
+    assert.equal(route, "v1");
+    await readJson(req);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write("{");
+    const timer = setTimeout(() => {
+      if (!res.writableEnded) {
+        res.end(JSON.stringify({
+          data: [
+            { embedding: dims(), index: 0 },
+            { embedding: dims(), index: 1 },
+          ],
+        }).slice(1));
+      }
+    }, SLOW_BODY_MS);
+    req.on("aborted", () => clearTimeout(timer));
+  });
+
+  const port = await startMockServer(server);
+  const baseURL = `http://127.0.0.1:${port}/v1`;
+
+  try {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "mxbai-embed-large",
+      baseURL,
+      dimensions: DIMS,
+    });
+
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(new Error("embedding body timeout")), ABORT_AFTER_MS);
+    const start = Date.now();
+
+    await assert.rejects(
+      embedder.embedBatchPassage(["first", "second"], controller.signal),
+      /embedding body timeout|aborted|AbortError/i,
+    );
+
+    clearTimeout(abortTimer);
+    const elapsed = Date.now() - start;
+    assert.ok(
+      elapsed < SLOW_BODY_MS * 0.75,
+      `expected batch body abort near ${ABORT_AFTER_MS}ms, got ${elapsed}ms`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

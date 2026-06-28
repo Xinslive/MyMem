@@ -57,18 +57,26 @@ export async function resolveUnlessAborted<T>(promise: Promise<T>, signal?: Abor
   throwIfAborted(signal);
 
   return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      fn();
+    };
     const onAbort = () => {
       try {
         throwIfAborted(signal);
       } catch (error) {
-        reject(error);
+        finish(() => reject(error));
       }
     };
 
     signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", onAbort);
-    });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
   });
 }
 

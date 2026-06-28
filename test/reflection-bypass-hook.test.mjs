@@ -90,7 +90,11 @@ function makePluginConfig(workDir) {
 }
 
 async function seedReflection(dbPath, agentId, runAt = Date.now() - 2 * DAY_MS) {
-  const store = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
+  const store = new MemoryStore({
+    dbPath,
+    vectorDim: EMBEDDING_DIMENSIONS,
+    allowReflectionCategory: true,
+  });
   await storeReflectionToLanceDB({
     reflectionText: [
       "## Invariants",

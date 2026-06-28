@@ -4,6 +4,7 @@
 
 import type { Command } from "commander";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadLanceDB, type MemoryEntry, type MemoryStore } from "./src/store.js";
 import {
   buildSmartMetadata,
@@ -20,7 +21,10 @@ import {
   explainMemoryRetrieval,
   formatRetrievalExplainText,
 } from "./src/retrieval-explain.js";
-import { startMemoryDashboardServer } from "./src/dashboard-server.js";
+import {
+  formatDashboardUnlockUrl,
+  startMemoryDashboardServer,
+} from "./src/dashboard-server.js";
 import {
   normalizeCategory,
   type MemoryCategory,
@@ -46,14 +50,12 @@ function buildSafeMetadata(
   entry: { text: string; category: MemoryEntry["category"]; importance: number },
 ): string {
   const parsed = parseSmartMetadata(raw, entry);
-  if (parsed.memory_category) return raw; // already new format
-  return stringifySmartMetadata(
-    buildSmartMetadata(entry, {
-      memory_category: reverseMapLegacyCategory(entry.category, entry.text),
-      source: "manual",
-      state: "confirmed",
-    }),
-  );
+  return stringifySmartMetadata({
+    ...parsed,
+    memory_category: reverseMapLegacyCategory(entry.category, entry.text),
+    source: parsed.source === "legacy" ? "manual" : parsed.source,
+    state: parsed.state ?? "confirmed",
+  });
 }
 
 // ============================================================================
@@ -563,9 +565,14 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         const server = await startMemoryDashboardServer(context, {
           host: options.host || "127.0.0.1",
           port,
+          authTokenFile: join(context.store.dbPath, ".dashboard-token"),
         });
 
         console.log(`MyMem dashboard running at ${server.url}`);
+        if (server.authTokenFile) {
+          console.log(`Dashboard token file: ${server.authTokenFile}`);
+          console.log(`Open ${formatDashboardUnlockUrl(server.url, server.authTokenFile)} to unlock the dashboard.`);
+        }
         console.log("Press Ctrl+C to stop.");
 
         const shutdown = async () => {
@@ -979,15 +986,27 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
               }
             }
 
+            const category = reverseMapLegacyCategory(
+              typeof row.category === "string" ? row.category : undefined,
+              String(row.text),
+            );
+            const metadata = buildSafeMetadata(
+              typeof row.metadata === "string" ? row.metadata : "{}",
+              {
+                text: String(row.text),
+                category,
+                importance: (row.importance != null) ? Number(row.importance) : 0.7,
+              },
+            );
             const entry: MemoryEntry = {
               id,
               text: String(row.text),
               vector,
-              category: (row.category as any) || "other",
+              category,
               scope: (row.scope as string | undefined) || "global",
               importance: (row.importance != null) ? Number(row.importance) : 0.7,
               timestamp: (row.timestamp != null) ? Number(row.timestamp) : Date.now(),
-              metadata: typeof row.metadata === "string" ? row.metadata : "{}",
+              metadata,
             };
 
             await context.store.importEntry(entry);

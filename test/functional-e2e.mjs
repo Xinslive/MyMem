@@ -114,7 +114,7 @@ async function runFunctionalE2E() {
       {
         id: "11111111-1111-4111-8111-111111111111",
         text: "用户偏好是乌龙茶，不喜欢冰美式咖啡。",
-        category: "preference",
+        category: "preferences",
         scope: "agent:e2e",
         importance: 0.9,
         timestamp: Date.now(),
@@ -123,7 +123,7 @@ async function runFunctionalE2E() {
       {
         id: "22222222-2222-4222-8222-222222222222",
         text: "当前项目统一使用 TypeScript 编写插件逻辑。",
-        category: "decision",
+        category: "events",
         scope: "agent:e2e",
         importance: 0.85,
         timestamp: Date.now(),

@@ -304,7 +304,28 @@ export class AccessTracker {
   }
 
   /**
-   * Tear down the tracker — cancel timers and flush pending state.
+   * Drain pending writes and clear internal retry state.
+   *
+   * Use this from shutdown paths that can await cleanup.
+   */
+  async close(): Promise<void> {
+    this.clearTimer();
+    try {
+      for (let attempt = 0; attempt <= this._maxRetries && this.pending.size > 0; attempt++) {
+        await this.flush();
+      }
+    } finally {
+      if (this.pending.size > 0) {
+        this.logger.error?.(
+          `access-tracker: close dropping ${this.pending.size} pending writes after shutdown retries`,
+        );
+      }
+      this.clearState();
+    }
+  }
+
+  /**
+   * Tear down the tracker — cancel timers and best-effort flush pending state.
    */
   destroy(): void {
     this.clearTimer();
@@ -324,15 +345,17 @@ export class AccessTracker {
           this.logger.warn(`access-tracker: final flush failed during destroy: ${err instanceof Error ? err.message : String(err)}`);
         })
         .finally(() => {
-          this.pending.clear();
-          this._retryCount.clear();
-          this._retryFirstFailureAt.clear();
+          this.clearState();
         });
     } else {
-      this.pending.clear();
-      this._retryCount.clear();
-      this._retryFirstFailureAt.clear();
+      this.clearState();
     }
+  }
+
+  private clearState(): void {
+    this.pending.clear();
+    this._retryCount.clear();
+    this._retryFirstFailureAt.clear();
   }
 
   // --------------------------------------------------------------------------
@@ -410,10 +433,7 @@ export class AccessTracker {
           continue;
         }
         const updatedMeta = buildUpdatedMetadata(current.metadata, delta);
-        // Audit #7: fire-and-forget to avoid blocking the access-tracker flush path
-        void this.store.update(id, { metadata: updatedMeta }).catch((err) => {
-          this.handleSingleFailure(id, delta, err);
-        });
+        await this.store.update(id, { metadata: updatedMeta });
         this._retryCount.delete(id);
         this._retryFirstFailureAt.delete(id);
       } catch (err) {

@@ -59,6 +59,7 @@ export function registerAutoCaptureHook(params: {
   autoCaptureRecentTexts: Map<string, string[]>;
   mdMirror?: (entry: any, opts: any) => Promise<void>;
   isCliMode: () => boolean;
+  backgroundTasks?: Set<Promise<void>>;
 }): void {
   const { api, config, smartExtractor, extractionRateLimiter, scopeManager } = params;
 
@@ -70,10 +71,12 @@ export function registerAutoCaptureHook(params: {
     const previous = sessionRuns.get(sessionKey) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(run);
     sessionRuns.set(sessionKey, next);
+    params.backgroundTasks?.add(next);
     void next.finally(() => {
       if (sessionRuns.get(sessionKey) === next) {
         sessionRuns.delete(sessionKey);
       }
+      params.backgroundTasks?.delete(next);
     });
     return next;
   };

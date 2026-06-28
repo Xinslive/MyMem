@@ -129,12 +129,12 @@ async function runTests() {
     const oldEntry = await store.store({
       text: oldText,
       vector: makeVector(1),
-      category: "preference",
+      category: "preferences",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: oldText, category: "preference", importance: 0.8 },
+          { text: oldText, category: "preferences", importance: 0.8 },
           {
             summary: oldText,
             content: oldText,
@@ -184,12 +184,12 @@ async function runTests() {
     const prefEntry = await store.store({
       text: "编辑器偏好：VS Code",
       vector: makeVector(3),
-      category: "preference",
+      category: "preferences",
       scope: "test",
       importance: 0.5,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: "编辑器偏好：VS Code", category: "preference", importance: 0.5 },
+          { text: "编辑器偏好：VS Code", category: "preferences", importance: 0.5 },
           {
             summary: "编辑器偏好：VS Code",
             content: "编辑器偏好：VS Code",
@@ -223,12 +223,12 @@ async function runTests() {
     const eventEntry = await store.store({
       text: "参加了2026年技术大会",
       vector: makeVector(4),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.6,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: "参加了2026年技术大会", category: "fact", importance: 0.6 },
+          { text: "参加了2026年技术大会", category: "cases", importance: 0.6 },
           {
             summary: "参加了2026年技术大会",
             content: "参加了2026年技术大会",
@@ -261,12 +261,12 @@ async function runTests() {
     const entityEntry = await store.store({
       text: "Project Alpha: status active",
       vector: makeVector(6),
-      category: "entity",
+      category: "entities",
       scope: "test",
       importance: 0.7,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: "Project Alpha: status active", category: "entity", importance: 0.7 },
+          { text: "Project Alpha: status active", category: "entities", importance: 0.7 },
           {
             summary: "Project Alpha: status active",
             content: "Project Alpha: status active",

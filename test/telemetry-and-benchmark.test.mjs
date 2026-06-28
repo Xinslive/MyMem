@@ -8,6 +8,7 @@ import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const {
   TelemetryStore,
+  flushJsonlWrites,
   normalizeTelemetryConfig,
   trimJsonlFile,
 } = jiti("../src/telemetry.ts");
@@ -104,6 +105,45 @@ describe("telemetry persistence", () => {
         ["new"],
       );
       assert.deepEqual(readdirSync(dir), ["retrieval.jsonl"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flushes pending fire-and-forget telemetry writes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-telemetry-flush-"));
+    try {
+      const store = new TelemetryStore(
+        normalizeTelemetryConfig({ persist: true, maxRecords: 10, sampleRate: 1 }),
+        dir,
+      );
+
+      void store.recordRetrieval(makeTrace("queued", 12, 1), "manual");
+      await store.flush();
+
+      const summary = await store.getPersistentSummary();
+      assert.equal(summary.retrieval?.totalQueries, 1);
+      assert.equal(summary.retrieval?.avgLatencyMs, 12);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flushes telemetry writes queued before the flush call", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-telemetry-file-flush-"));
+    try {
+      const store = new TelemetryStore(
+        normalizeTelemetryConfig({ persist: true, maxRecords: 10, sampleRate: 1 }),
+        dir,
+      );
+
+      const writePromise = store.recordRetrieval(makeTrace("queued-file", 14, 1), "manual");
+      await flushJsonlWrites([store.filePaths.retrieval]);
+      await writePromise;
+
+      const summary = await store.getPersistentSummary();
+      assert.equal(summary.retrieval?.totalQueries, 1);
+      assert.equal(summary.retrieval?.avgLatencyMs, 14);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

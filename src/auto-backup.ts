@@ -22,8 +22,10 @@ const MAX_BACKUPS = 7;
 export function createAutoBackup(params: AutoBackupParams) {
   const { api, store, resolvedDbPath } = params;
   let backupTimer: ReturnType<typeof setInterval> | null = null;
+  let initialBackupTimer: ReturnType<typeof setTimeout> | null = null;
+  const activeBackups = new Set<Promise<void>>();
 
-  async function runBackup() {
+  async function runBackupOnce() {
     try {
       if (!resolvedDbPath) {
         api.logger.debug("mymem: backup skipped (no dbPath)");
@@ -71,17 +73,41 @@ export function createAutoBackup(params: AutoBackupParams) {
     }
   }
 
+  async function runBackup() {
+    const task = runBackupOnce();
+    activeBackups.add(task);
+    try {
+      await task;
+    } finally {
+      activeBackups.delete(task);
+    }
+  }
+
+  async function drainActiveBackups() {
+    while (activeBackups.size > 0) {
+      await Promise.allSettled([...activeBackups]);
+    }
+  }
+
   return {
     runBackup,
     start() {
-      setTimeout(() => void runBackup(), 60_000); // 1 min after start
+      initialBackupTimer = setTimeout(() => {
+        initialBackupTimer = null;
+        void runBackup();
+      }, 60_000); // 1 min after start
       backupTimer = setInterval(() => void runBackup(), BACKUP_INTERVAL_MS);
     },
     stop() {
+      if (initialBackupTimer) {
+        clearTimeout(initialBackupTimer);
+        initialBackupTimer = null;
+      }
       if (backupTimer) {
         clearInterval(backupTimer);
         backupTimer = null;
       }
+      return drainActiveBackups();
     },
   };
 }

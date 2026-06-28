@@ -7,8 +7,45 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { createAdmissionRejectionAuditWriter } = jiti("../src/workspace-utils.ts");
+const { AdmissionController, normalizeAdmissionControlConfig } = jiti("../src/admission-control.ts");
 
 describe("admission rejection audit redaction", () => {
+  it("redacts secrets from admission decision debug logs", async () => {
+    const debugLogs = [];
+    const controller = new AdmissionController(
+      {
+        async vectorSearch() {
+          return [];
+        },
+      },
+      {
+        async completeJson() {
+          return { utility: 0.9, reason: "worth keeping" };
+        },
+      },
+      normalizeAdmissionControlConfig({
+        enabled: true,
+        utilityMode: "off",
+      }),
+      (message) => debugLogs.push(String(message)),
+    );
+
+    await controller.evaluate({
+      candidate: {
+        category: "patterns",
+        abstract: "Use password:hunter2-please-rotate-q1-2026 for the temporary database",
+        content: "temporary database credentials",
+      },
+      candidateVector: [0.1, 0.2, 0.3],
+      conversationText: "conversation",
+      scopeFilter: ["global"],
+    });
+
+    const serialized = debugLogs.join("\n");
+    assert.doesNotMatch(serialized, /hunter2-please-rotate-q1-2026/);
+    assert.match(serialized, /\[REDACTED\]/);
+  });
+
   it("redacts secrets from persisted rejected candidates and excerpts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mymem-admission-audit-"));
     const auditPath = join(dir, "rejections.jsonl");

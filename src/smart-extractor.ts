@@ -196,6 +196,19 @@ export class SmartExtractor {
     return this.admissionController;
   }
 
+  private async notifyExtractionComplete(payload: {
+    sessionKey: string;
+    scope: string;
+    stats: ExtractionStats;
+  }): Promise<void> {
+    if (!this.onExtractionComplete) return;
+    try {
+      await this.onExtractionComplete(payload);
+    } catch (err) {
+      this.debugLog(`mymem：智能提取 telemetry 写入失败：${String(err)}`);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Main entry point
   // --------------------------------------------------------------------------
@@ -249,13 +262,11 @@ export class SmartExtractor {
     if (candidates.length === 0) {
       this.log("mymem：智能提取未提取到可存储记忆");
       attachTelemetry();
-      if (this.onExtractionComplete) {
-        await this.onExtractionComplete({
-          sessionKey,
-          scope: targetScope,
-          stats,
-        });
-      }
+      await this.notifyExtractionComplete({
+        sessionKey,
+        scope: targetScope,
+        stats,
+      });
       return stats;
     }
 
@@ -283,7 +294,7 @@ export class SmartExtractor {
         stats.skipped += 1;
         stats.boundarySkipped = (stats.boundarySkipped ?? 0) + 1;
         this.log(
-          `mymem：智能提取跳过 USER.md 专属记忆 [${c.category}] ${c.abstract.slice(0, 60)}`,
+          `mymem：智能提取跳过 USER.md 专属记忆 [${c.category}] ${redactedPreview(c.abstract, 60)}`,
         );
         continue;
       }
@@ -418,13 +429,11 @@ export class SmartExtractor {
     this.debugLog(
       `mymem：智能提取耗时统计 总耗时=${telemetry.totalMs}ms 候选=${candidateCount} 可处理=${processableCandidateCount} 新建=${stats.created} 合并=${stats.merged} 跳过=${stats.skipped} 拒绝=${stats.rejected ?? 0}`,
     );
-    if (this.onExtractionComplete) {
-      await this.onExtractionComplete({
-        sessionKey,
-        scope: targetScope,
-        stats,
-      });
-    }
+    await this.notifyExtractionComplete({
+      sessionKey,
+      scope: targetScope,
+      stats,
+    });
     return stats;
   }
 

@@ -7,6 +7,7 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const { MemoryStore } = jiti("../src/store.ts");
+const { AuditLogger } = jiti("../src/audit-log.ts");
 
 function makeStore() {
   const dir = mkdtempSync(join(tmpdir(), "mymem-audit-log-"));
@@ -20,7 +21,7 @@ function makeEntry(text = "audited memory") {
   return {
     text,
     vector: [1, 0, 0, 0],
-    category: "fact",
+    category: "cases",
     scope: "global",
     importance: 0.6,
     metadata: "{}",
@@ -74,6 +75,58 @@ describe("MemoryStore audit log", () => {
       await store.delete(entry.id);
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.equal(existsSync(join(dir, "audit.jsonl")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("queues audit entries logged while initialization is still pending", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-audit-log-init-race-"));
+    try {
+      const logger = new AuditLogger(dir);
+      const enablePromise = logger.enable();
+
+      logger.log({
+        at: new Date(0).toISOString(),
+        op: "store",
+        id: "init-race",
+        detail: "queued-before-enable",
+      });
+
+      await enablePromise;
+      await logger.flush();
+
+      const entries = await readAuditEntries(join(dir, "audit.jsonl"));
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].id, "init-race");
+      assert.equal(entries[0].detail, "queued-before-enable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flush waits for audit entries queued while flushing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mymem-audit-log-flush-race-"));
+    try {
+      const logger = new AuditLogger(dir);
+      logger.log({
+        at: new Date(0).toISOString(),
+        op: "store",
+        id: "first",
+        detail: "before-flush",
+      });
+
+      const flushPromise = logger.flush();
+      logger.log({
+        at: new Date(1).toISOString(),
+        op: "update",
+        id: "second",
+        detail: "during-flush",
+      });
+      await flushPromise;
+
+      const entries = await readAuditEntries(join(dir, "audit.jsonl"), 2);
+      assert.deepEqual(entries.map((entry) => entry.id), ["first", "second"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

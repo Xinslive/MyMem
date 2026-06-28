@@ -138,6 +138,74 @@ describe("auto-capture cleanup", () => {
     );
   });
 
+  it("tracks background extraction runs for service-stop draining", async () => {
+    const { api, eventHandlers } = createAutoCaptureHarness();
+    const backgroundTasks = new Set();
+    let releaseExtraction;
+    let extractionStarted;
+    const extractionStartedPromise = new Promise((resolve) => {
+      extractionStarted = resolve;
+    });
+
+    registerAutoCaptureHook({
+      api,
+      config: {
+        captureAssistantAgents: ["main"],
+        scopes: { default: "global" },
+      },
+      store: {},
+      embedder: {},
+      smartExtractor: {
+        async extractAndPersist() {
+          extractionStarted();
+          await new Promise((resolve) => {
+            releaseExtraction = resolve;
+          });
+          return { created: 1, merged: 0, skipped: 0, boundarySkipped: 0 };
+        },
+      },
+      extractionRateLimiter: {
+        isRateLimited() { return false; },
+        getRecentCount() { return 0; },
+        recordExtraction() {},
+      },
+      scopeManager: {
+        getAccessibleScopes() { return ["global"]; },
+        getDefaultScope() { return "global"; },
+      },
+      autoCaptureSeenTextCount: new Map(),
+      autoCapturePendingIngressTexts: new Map(),
+      autoCaptureRecentTexts: new Map(),
+      mdMirror: null,
+      isCliMode: () => false,
+      backgroundTasks,
+    });
+
+    const [{ handler: agentEndHook }] = eventHandlers.get("agent_end") || [];
+    agentEndHook(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "Remember that shutdown should drain extraction." },
+          { role: "assistant", content: "I will capture that." },
+        ],
+      },
+      { agentId: "main", sessionKey: "agent:main:drain-capture" },
+    );
+
+    await extractionStartedPromise;
+    assert.equal(backgroundTasks.size, 1);
+    let drained = false;
+    const drainPromise = Promise.allSettled([...backgroundTasks]).then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    assert.equal(drained, false);
+    releaseExtraction();
+    await drainPromise;
+    assert.equal(backgroundTasks.size, 0);
+  });
+
   it("serializes overlapping auto-capture runs for the same session", async () => {
     const { api, eventHandlers } = createAutoCaptureHarness();
     const capturedConversationTexts = [];

@@ -280,6 +280,8 @@ export class FeedbackLoop {
   private lastAdaptiveTypePriors: AdmissionTypePriors | null = null;
   private drainTimer: ReturnType<typeof setInterval> | null = null;
   private adaptationTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly activeTasks = new Set<Promise<void>>();
+  private readonly rejectionAuditWrites = new Set<Promise<void>>();
   private disposed = false;
 
   constructor(opts: {
@@ -315,17 +317,19 @@ export class FeedbackLoop {
       this.lessonStore
     ) {
       this.drainTimer = setInterval(
-        () => void this.runFeedbackDrainCycle().catch((err) => {
-          this.debugLog(`feedback-loop: drain cycle failed: ${err instanceof Error ? err.message : String(err)}`);
-        }),
+        () => this.trackActiveTask(
+          this.runFeedbackDrainCycle(),
+          "drain cycle",
+        ),
         FEEDBACK_DRAIN_INTERVAL_MS,
       );
     }
     if (this.config.priorAdaptation.enabled && this.admissionController) {
       this.adaptationTimer = setInterval(
-        () => void this.runPriorAdaptationCycle().catch((err) => {
-          this.debugLog(`feedback-loop: adaptation cycle failed: ${err instanceof Error ? err.message : String(err)}`);
-        }),
+        () => this.trackActiveTask(
+          this.runPriorAdaptationCycle(),
+          "adaptation cycle",
+        ),
         this.config.priorAdaptation.adaptationIntervalMs,
       );
     }
@@ -338,6 +342,46 @@ export class FeedbackLoop {
     if (this.drainTimer) { clearInterval(this.drainTimer); this.drainTimer = null; }
     if (this.adaptationTimer) { clearInterval(this.adaptationTimer); this.adaptationTimer = null; }
     this.debugLog("feedback-loop: disposed");
+  }
+
+  async close(): Promise<void> {
+    this.dispose();
+    await this.drainActiveTasks();
+    await this.drainRejectionAuditWrites();
+    const { dbPath, admissionConfig } = this.runtimeContext;
+    if (dbPath && admissionConfig) {
+      const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
+      await this.flushRejectionMemoryBufferToFile(filePath);
+    }
+  }
+
+  private trackActiveTask(promise: Promise<void>, label: string): void {
+    const task = promise.catch((err) => {
+      this.debugLog(`feedback-loop: ${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    this.activeTasks.add(task);
+    void task.finally(() => {
+      this.activeTasks.delete(task);
+    });
+  }
+
+  private async drainActiveTasks(): Promise<void> {
+    while (this.activeTasks.size > 0) {
+      await Promise.allSettled([...this.activeTasks]);
+    }
+  }
+
+  private trackRejectionAuditWrite(promise: Promise<void>): void {
+    this.rejectionAuditWrites.add(promise);
+    void promise.finally(() => {
+      this.rejectionAuditWrites.delete(promise);
+    });
+  }
+
+  private async drainRejectionAuditWrites(): Promise<void> {
+    while (this.rejectionAuditWrites.size > 0) {
+      await Promise.allSettled([...this.rejectionAuditWrites]);
+    }
   }
 
   setRuntimeContext(context: FeedbackLoopRuntimeContext): void {
@@ -398,10 +442,11 @@ export class FeedbackLoop {
     const { dbPath, admissionConfig } = this.runtimeContext;
     if (dbPath && admissionConfig) {
       const filePath = resolveRejectedAuditFilePath(dbPath, admissionConfig);
-      this.writeRejectionAuditEntry(filePath, entry).catch((err) => {
+      const write = this.writeRejectionAuditEntry(filePath, entry).catch((err) => {
         this.debugLog(`feedback-loop: rejection audit write failed, buffering in memory: ${err instanceof Error ? err.message : String(err)}`);
         this.bufferRejectionInMemory(entry);
       });
+      this.trackRejectionAuditWrite(write);
       return;
     }
     this.bufferRejectionInMemory(entry);

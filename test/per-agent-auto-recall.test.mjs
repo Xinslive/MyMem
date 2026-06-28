@@ -270,6 +270,70 @@ describe("auto-recall metadata write-behind", () => {
     assert.equal(Object.hasOwn(patches[0][0].patch, "suppressed_until_turn"), false);
   });
 
+  it("waits for an in-flight scheduled metadata flush", async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const timers = [];
+    let releasePatch;
+    let patchStarted;
+    const patchStartedPromise = new Promise((resolve) => {
+      patchStarted = resolve;
+    });
+    const accumulator = new AutoRecallMetadataAccumulator({
+      store: {
+        async patchMetadataBatch() {
+          patchStarted();
+          await new Promise((resolve) => {
+            releasePatch = resolve;
+          });
+          return 1;
+        },
+      },
+      logger: { warn() {} },
+      debounceMs: 10,
+    });
+
+    try {
+      globalThis.setTimeout = (fn, delay = 0, ...args) => {
+        const handle = {
+          fn,
+          delay: Number(delay),
+          args,
+          unref() {},
+        };
+        timers.push(handle);
+        return handle;
+      };
+      globalThis.clearTimeout = () => {};
+
+      accumulator.enqueue(
+        [{ id: "memory-1", meta: { injected_count: 0, access_count: 0 } }],
+        { injectedAt: 1_000, scopeFilter: ["global"] },
+      );
+      assert.equal(timers.length, 1);
+      timers[0].fn(...timers[0].args);
+      await patchStartedPromise;
+
+      let flushed = false;
+      const flushPromise = accumulator.flushNow().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      assert.equal(
+        flushed,
+        false,
+        "flushNow should wait for the scheduled metadata write already in progress",
+      );
+
+      releasePatch();
+      await flushPromise;
+      assert.equal(flushed, true);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
   it("session_end flushes pending auto-recall metadata", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-session-end-flush-"));
     const patches = [];
@@ -357,6 +421,207 @@ describe("auto-recall metadata write-behind", () => {
       assert.equal(patches[0].batch[0].id, "session-end-memory");
       assert.equal(patches[0].batch[0].patch.injected_count, 1);
       assert.equal(patches[0].batch[0].patch.access_count, 1);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("registers metadata accumulator for service-stop flushing", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-stop-flush-"));
+    const patches = [];
+    const metadataAccumulators = new Set();
+    const memoryResult = {
+      entry: {
+        id: "service-stop-memory",
+        text: "service stop should flush metadata",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          summary: "service stop should flush metadata",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          injected_count: 0,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {
+          async patchMetadataBatch(batch, scopeFilter) {
+            patches.push({ batch, scopeFilter });
+            return batch.length;
+          },
+        },
+        retriever: {
+          async retrieve() {
+            return [memoryResult];
+          },
+          getLastDiagnostics() {
+            return null;
+          },
+        },
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+        metadataAccumulators,
+      });
+
+      assert.equal(metadataAccumulators.size, 1);
+      const [{ handler: autoRecallHook }] = harness.eventHandlers.get("before_prompt_build") || [];
+      await autoRecallHook(
+        { prompt: "Please recall the service stop metadata.", sessionKey: "agent:main:session:stop-flush" },
+        { sessionKey: "agent:main:session:stop-flush", agentId: "main" },
+      );
+
+      assert.equal(patches.length, 0);
+      await Promise.all([...metadataAccumulators].map((accumulator) => accumulator.flushNow()));
+
+      assert.equal(patches.length, 1);
+      assert.equal(patches[0].batch[0].id, "service-stop-memory");
+      assert.equal(patches[0].batch[0].patch.injected_count, 1);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("tracks background tier maintenance for service-stop draining", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-tier-drain-"));
+    const backgroundTasks = new Set();
+    let releasePatch;
+    let patchStarted;
+    const patchStartedPromise = new Promise((resolve) => {
+      patchStarted = resolve;
+    });
+    const memoryResult = {
+      entry: {
+        id: "tier-maintenance-memory",
+        text: "tier maintenance should be drained on stop",
+        category: "fact",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: JSON.stringify({
+          summary: "tier maintenance should be drained on stop",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "working",
+          source: "manual",
+          tier: "core",
+          injected_count: 0,
+          access_count: 0,
+        }),
+      },
+      score: 0.9,
+    };
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {
+          async patchMetadataBatch() {
+            patchStarted();
+            await new Promise((resolve) => {
+              releasePatch = resolve;
+            });
+            return 1;
+          },
+        },
+        retriever: {
+          async retrieve() {
+            return [memoryResult];
+          },
+          getLastDiagnostics() {
+            return null;
+          },
+        },
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+        decayEngine: {
+          scoreAll() {
+            return new Map([["tier-maintenance-memory", 0.1]]);
+          },
+        },
+        tierManager: {
+          evaluateAll() {
+            return [{
+              memoryId: "tier-maintenance-memory",
+              fromTier: "core",
+              toTier: "working",
+              reason: "test demotion",
+            }];
+          },
+        },
+        backgroundTasks,
+      });
+
+      const [{ handler: autoRecallHook }] = harness.eventHandlers.get("before_prompt_build") || [];
+      await autoRecallHook(
+        { prompt: "Please recall the tier metadata.", sessionKey: "agent:main:session:tier-drain" },
+        { sessionKey: "agent:main:session:tier-drain", agentId: "main" },
+      );
+
+      await patchStartedPromise;
+      assert.equal(backgroundTasks.size, 1);
+      let drained = false;
+      const drainPromise = Promise.allSettled([...backgroundTasks]).then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      assert.equal(drained, false);
+      releasePatch();
+      await drainPromise;
+      assert.equal(backgroundTasks.size, 0);
     } finally {
       rmSync(workspaceDir, { recursive: true, force: true });
     }
@@ -783,6 +1048,105 @@ describe("real before_prompt_build hook", () => {
     }
   });
 
+  it("stops processing reasoning-strategy results after auto-recall timeout", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-timeout-strategy-"));
+    const warnLogs = [];
+    let retrieveCalls = 0;
+    let strategyMetadataReads = 0;
+
+    const strategyEntry = {
+      id: "strategy-timeout",
+      text: "Use rollout checklists",
+      vector: [0.1, 0.2, 0.3],
+      category: "patterns",
+      scope: "global",
+      importance: 0.8,
+      timestamp: 1700000000000,
+    };
+    Object.defineProperty(strategyEntry, "metadata", {
+      enumerable: true,
+      get() {
+        strategyMetadataReads += 1;
+        return JSON.stringify({
+          memory_type: "knowledge",
+          source: "reflection",
+          state: "confirmed",
+          memory_layer: "semantic",
+          strategy_kind: "checklist",
+          outcome: "success",
+          strategy_title: "Rollout checklist",
+        });
+      },
+    });
+
+    const retriever = {
+      async retrieve() {
+        retrieveCalls += 1;
+        if (retrieveCalls === 1) {
+          return [];
+        }
+        await new Promise((resolve) => setTimeout(resolve, 45));
+        return [{ entry: strategyEntry, score: 0.99 }];
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      warnLogs,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallTimeoutMs: 25,
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {},
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: autoRecallHook }] = hooks;
+      const output = await autoRecallHook(
+        { prompt: "Help me plan the API rollout with prior preferences.", sessionKey: "agent:main:session:test-strategy-timeout" },
+        { sessionId: "test-strategy-timeout", sessionKey: "agent:main:session:test-strategy-timeout" },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      assert.equal(output, undefined);
+      assert.equal(retrieveCalls, 2);
+      assert.equal(strategyMetadataReads, 0);
+      assert.ok(
+        warnLogs.some((line) => line.includes("自动召回超过 25ms")),
+        "expected auto-recall timeout warning",
+      );
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes the auto-recall candidate pool cap to retrieval", async () => {
     const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-candidate-pool-"));
     const retrieveParams = [];
@@ -965,6 +1329,76 @@ describe("real before_prompt_build hook", () => {
       );
 
       assert.equal(retrieveCalls, 3);
+    } finally {
+      retrieverModuleForMock.createRetriever = origCreateRetriever;
+      embedderModuleForMock.createEmbedder = origCreateEmbedder;
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not retry auto-recall after timeout aborts the retry delay", async () => {
+    const workspaceDir = mkdtempSync(path.join(tmpdir(), "auto-recall-retry-abort-"));
+    const warnLogs = [];
+    let retrieveCalls = 0;
+
+    const retriever = {
+      async retrieve() {
+        retrieveCalls += 1;
+        throw new Error("temporary retrieval failure");
+      },
+      getLastDiagnostics() {
+        return null;
+      },
+    };
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      warnLogs,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key", baseURL: "https://embedding.example/v1", model: "Embedding" },
+        sessionStrategy: "none",
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallTimeoutMs: 25,
+      },
+    });
+
+    try {
+      registerAutoRecallHook({
+        api: harness.api,
+        config: parsePluginConfig(harness.api.pluginConfig),
+        store: {},
+        retriever,
+        scopeManager: {
+          getAccessibleScopes() { return ["global"]; },
+          getDefaultScope() { return "global"; },
+          isAccessible() { return true; },
+          validateScope() { return true; },
+          getAllScopes() { return ["global"]; },
+          getScopeDefinition() { return undefined; },
+        },
+        turnCounter: new Map(),
+        recallHistory: new Map(),
+        lastRawUserMessage: new Map(),
+      });
+
+      const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+      const [{ handler: autoRecallHook }] = hooks;
+      const output = await autoRecallHook(
+        { prompt: "Help me plan the API rollout with prior preferences.", sessionKey: "agent:main:session:test-retry-abort" },
+        { sessionId: "test-retry-abort", sessionKey: "agent:main:session:test-retry-abort" },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 260));
+
+      assert.equal(output, undefined);
+      assert.equal(retrieveCalls, 1);
+      assert.ok(
+        warnLogs.some((line) => line.includes("自动召回超过 25ms")),
+        "expected auto-recall timeout warning",
+      );
     } finally {
       retrieverModuleForMock.createRetriever = origCreateRetriever;
       embedderModuleForMock.createEmbedder = origCreateEmbedder;

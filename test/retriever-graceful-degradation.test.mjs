@@ -167,6 +167,52 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
     fallbackTracker.destroy();
   });
 
+  it("flushAccessTrackers waits for in-flight lifecycle metadata writes", async () => {
+    const result = buildResult("slow-access");
+    let updateFinished = false;
+    let releaseUpdate;
+    const store = {
+      hasFtsSupport: true,
+      async vectorSearch() {
+        return [result];
+      },
+      async bm25Search() {
+        return [];
+      },
+      async hasIds(ids) {
+        return new Set(ids);
+      },
+      async update() {
+        await new Promise((resolve) => {
+          releaseUpdate = resolve;
+        });
+        updateFinished = true;
+        return result.entry;
+      },
+    };
+    const retriever = createRetriever(
+      store,
+      { async embedQuery() { return [0.1, 0.2, 0.3]; } },
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      { decayEngine: createDecayEngine(DEFAULT_DECAY_CONFIG) },
+    );
+
+    await retriever.retrieve({
+      query: "test",
+      limit: 1,
+      source: "manual",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const flushPromise = retriever.flushAccessTrackers();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(updateFinished, false, "flushAccessTrackers should wait for store.update()");
+
+    releaseUpdate();
+    await flushPromise;
+    assert.equal(updateFinished, true);
+  });
+
   it("throws when both vector and BM25 search reject", async () => {
     const { retriever } = createRetrieverHarness(
       {},
@@ -542,6 +588,103 @@ describe("Retriever Graceful Degradation (Promise.allSettled)", () => {
       assert.equal(diagnostics?.bm25ResultCount, 1);
     } finally {
       releaseVector();
+    }
+  });
+
+  it("clears soft-degrade timers when auto-recall search finishes before the threshold", async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const scheduledTimers = new Set();
+    let clearedTimers = 0;
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      {
+        async vectorSearch() {
+          return [buildResult("vector-fast")];
+        },
+        async bm25Search() {
+          return [buildResult("bm25-fast")];
+        },
+      },
+    );
+
+    try {
+      globalThis.setTimeout = (fn, delay = 0, ...args) => {
+        const handle = originalSetTimeout(fn, delay, ...args);
+        scheduledTimers.add(handle);
+        return handle;
+      };
+      globalThis.clearTimeout = (handle) => {
+        if (scheduledTimers.delete(handle)) clearedTimers++;
+        return originalClearTimeout(handle);
+      };
+
+      const results = await retriever.retrieve({
+        query: "test",
+        limit: 2,
+        source: "auto-recall",
+        degradeAfterMs: 10_000,
+      });
+
+      assert.ok(results.length > 0);
+      assert.equal(clearedTimers, 1);
+      assert.equal(scheduledTimers.size, 0);
+    } finally {
+      for (const timer of scheduledTimers) originalClearTimeout(timer);
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  it("clears soft-degrade timers when auto-recall is aborted before the threshold", async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const scheduledTimers = new Set();
+    let clearedTimers = 0;
+    const controller = new AbortController();
+    const never = new Promise(() => {});
+    const { retriever } = createRetrieverHarness(
+      { minScore: 0, hardMinScore: 0, filterNoise: false, rerank: "none" },
+      {
+        async vectorSearch() {
+          await never;
+          return [];
+        },
+        async bm25Search() {
+          await never;
+          return [];
+        },
+      },
+    );
+
+    try {
+      globalThis.setTimeout = (fn, delay = 0, ...args) => {
+        const handle = originalSetTimeout(fn, delay, ...args);
+        scheduledTimers.add(handle);
+        return handle;
+      };
+      globalThis.clearTimeout = (handle) => {
+        if (scheduledTimers.delete(handle)) clearedTimers++;
+        return originalClearTimeout(handle);
+      };
+
+      const retrieval = retriever.retrieve({
+        query: "test",
+        limit: 2,
+        source: "auto-recall",
+        degradeAfterMs: 10_000,
+        signal: controller.signal,
+      });
+      await new Promise((resolve) => originalSetTimeout(resolve, 0));
+      controller.abort(new Error("auto-recall timeout"));
+
+      await assert.rejects(retrieval, /auto-recall timeout/);
+      assert.equal(clearedTimers, 1);
+      assert.equal(scheduledTimers.size, 0);
+    } finally {
+      for (const timer of scheduledTimers) originalClearTimeout(timer);
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
     }
   });
 

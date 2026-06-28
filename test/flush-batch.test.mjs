@@ -24,9 +24,9 @@ describe("MemoryStore flush-batch", () => {
     const store = new MemoryStore({ dbPath: dir, vectorDim: 4 });
 
     store.startBatch();
-    const e1 = await store.store({ text: "Alpha", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
-    const e2 = await store.store({ text: "Beta", vector: [0.2, 0.2, 0.2, 0.2], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
-    const e3 = await store.store({ text: "Gamma", vector: [0.3, 0.3, 0.3, 0.3], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    const e1 = await store.store({ text: "Alpha", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
+    const e2 = await store.store({ text: "Beta", vector: [0.2, 0.2, 0.2, 0.2], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
+    const e3 = await store.store({ text: "Gamma", vector: [0.3, 0.3, 0.3, 0.3], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
 
     assert.ok(e1.id);
     assert.ok(e2.id);
@@ -60,7 +60,7 @@ describe("MemoryStore flush-batch", () => {
     const d = mkdtempSync(join(tmpdir(), "flush-immediate-"));
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
 
-    await store.store({ text: "Direct", vector: [0.5, 0.5, 0.5, 0.5], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Direct", vector: [0.5, 0.5, 0.5, 0.5], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
 
     const count = await store.count();
     assert.strictEqual(count, 1);
@@ -73,10 +73,10 @@ describe("MemoryStore flush-batch", () => {
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
 
     store.startBatch();
-    await store.store({ text: "Batched", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Batched", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
     await store.flushBatch();
 
-    await store.store({ text: "Immediate", vector: [0.2, 0.2, 0.2, 0.2], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Immediate", vector: [0.2, 0.2, 0.2, 0.2], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
 
     const count = await store.count();
     assert.strictEqual(count, 2);
@@ -87,10 +87,10 @@ describe("MemoryStore flush-batch", () => {
   it("flushBatch preserves metadata and all fields", async () => {
     const d = mkdtempSync(join(tmpdir(), "flush-fields-"));
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
-    const meta = JSON.stringify({ summary: "test", memory_category: "fact" });
+    const meta = JSON.stringify({ summary: "test", memory_category: "cases" });
 
     store.startBatch();
-    await store.store({ text: "Meta", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "agent:bot", importance: 0.9, metadata: meta });
+    await store.store({ text: "Meta", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "agent:bot", importance: 0.9, metadata: meta });
     const written = await store.flushBatch();
 
     assert.strictEqual(written[0].scope, "agent:bot");
@@ -110,13 +110,13 @@ describe("MemoryStore flush-batch", () => {
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
 
     store.startBatch();
-    await store.store({ text: "Cycle1-A", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
-    await store.store({ text: "Cycle1-B", vector: [0.2, 0.2, 0.2, 0.2], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Cycle1-A", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Cycle1-B", vector: [0.2, 0.2, 0.2, 0.2], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
     const c1 = await store.flushBatch();
     assert.strictEqual(c1.length, 2);
 
     store.startBatch();
-    await store.store({ text: "Cycle2-A", vector: [0.3, 0.3, 0.3, 0.3], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    await store.store({ text: "Cycle2-A", vector: [0.3, 0.3, 0.3, 0.3], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
     const c2 = await store.flushBatch();
     assert.strictEqual(c2.length, 1);
 
@@ -131,8 +131,8 @@ describe("MemoryStore flush-batch", () => {
     const store = new MemoryStore({ dbPath: d, vectorDim: 4 });
 
     store.startBatch();
-    const batched = store.store({ text: "Batched", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
-    const direct = store.store({ text: "Direct", vector: [0.2, 0.2, 0.2, 0.2], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+    const batched = store.store({ text: "Batched", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
+    const direct = store.store({ text: "Direct", vector: [0.2, 0.2, 0.2, 0.2], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
 
     const [bEntry, dEntry] = await Promise.all([batched, direct]);
 
@@ -158,8 +158,8 @@ describe("MemoryStore flush-batch", () => {
     let capturedEntries = null;
     try {
       await store.runBatch(async () => {
-        await store.store({ text: "to-be-lost-1", vector: [0.1, 0.1, 0.1, 0.1], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
-        await store.store({ text: "to-be-lost-2", vector: [0.2, 0.2, 0.2, 0.2], category: "fact", scope: "global", importance: 0.7, metadata: "{}" });
+        await store.store({ text: "to-be-lost-1", vector: [0.1, 0.1, 0.1, 0.1], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
+        await store.store({ text: "to-be-lost-2", vector: [0.2, 0.2, 0.2, 0.2], category: "cases", scope: "global", importance: 0.7, metadata: "{}" });
         // Force a flushBatch failure by calling cancelBatch inside the runBatch
         // boundary, which is the path smart-extractor used to take — verify
         // that even with explicit cancel, cancelBatch returns the discarded

@@ -166,12 +166,12 @@ async function runTests() {
     const entry1 = await store.store({
       text: origText,
       vector: makeVector(1),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.6,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText, category: "fact", importance: 0.6 },
+          { text: origText, category: "cases", importance: 0.6 },
           {
             summary: origText,
             content: origText,
@@ -208,12 +208,12 @@ async function runTests() {
     const entry2 = await store.store({
       text: origText2,
       vector: makeVector(3),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.7,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText2, category: "fact", importance: 0.7 },
+          { text: origText2, category: "cases", importance: 0.7 },
           {
             summary: origText2,
             content: origText2,
@@ -259,12 +259,12 @@ async function runTests() {
     const entry3 = await store.store({
       text: origText3,
       vector: makeVector(5),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.5,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText3, category: "fact", importance: 0.5 },
+          { text: origText3, category: "cases", importance: 0.5 },
           {
             summary: origText3,
             content: origText3,
@@ -310,12 +310,12 @@ async function runTests() {
     const entry4 = await store.store({
       text: origText4,
       vector: makeVector(7),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.5,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText4, category: "fact", importance: 0.5 },
+          { text: origText4, category: "cases", importance: 0.5 },
           {
             summary: origText4,
             content: origText4,
@@ -358,12 +358,12 @@ async function runTests() {
     const entry5 = await store.store({
       text: origText5,
       vector: makeVector(8),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.6,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText5, category: "fact", importance: 0.6 },
+          { text: origText5, category: "cases", importance: 0.6 },
           {
             summary: origText5,
             content: origText5,
@@ -377,12 +377,12 @@ async function runTests() {
 
     // Update only category (no text, no importance)
     const result5 = await simulateMemoryUpdate(
-      store, entry5.id, undefined, undefined, undefined, "decision", scopeFilter,
+      store, entry5.id, undefined, undefined, undefined, "events", scopeFilter,
     );
 
     assert.equal(result5.action, "updated");
     const after5 = await store.getById(entry5.id, scopeFilter);
-    assert.equal(after5.category, "events", "category should be updated and normalized");
+    assert.equal(after5.category, "events", "category should be updated");
     const meta5 = parseSmartMetadata(after5.metadata, after5);
     // summary/content should be unchanged since text was not modified
     assert.equal(meta5.summary, origText5, "summary should be preserved");
@@ -400,12 +400,12 @@ async function runTests() {
     const entry6 = await store.store({
       text: origText6,
       vector: makeVector(9),
-      category: "preference",
+      category: "preferences",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: origText6, category: "preference", importance: 0.8 },
+          { text: origText6, category: "preferences", importance: 0.8 },
           {
             summary: origText6,
             content: origText6,

@@ -256,6 +256,9 @@ export class MemoryStore {
     if (entries.length === 0) return [];
 
     await this.ensureInitialized();
+    for (const entry of entries) {
+      this.assertWritableEntryCategory(entry, "flushBatch");
+    }
     const normalizedEntries = entries.map((entry) => this.normalizeEntryForWrite(entry));
     const written = await this.runWithFileLock(async () => {
       try {
@@ -327,6 +330,14 @@ export class MemoryStore {
     }
   }
 
+  async flushWrites(): Promise<void> {
+    while (true) {
+      const tail = this._serialChain;
+      await tail;
+      if (this._serialChain === tail) return;
+    }
+  }
+
   private async countRowsWithFilter(whereClause?: string): Promise<number> {
     if (!this.table) return 0;
     return whereClause ? this.table.countRows(whereClause) : this.table.countRows();
@@ -337,6 +348,23 @@ export class MemoryStore {
       ...entry,
       category: normalizeStoredCategory(entry.category, entry.text),
     };
+  }
+
+  private assertWritableEntryCategory(entry: MemoryEntry, operation: string): void {
+    const category = (entry as { category?: unknown }).category;
+    if (typeof category === "string" && (MEMORY_CATEGORIES as readonly string[]).includes(category)) {
+      return;
+    }
+    if (category === "reflection" && this.config.allowReflectionCategory === true) return;
+    if (category !== "reflection") {
+      throw new Error(
+        `${operation} cannot write category "${String(category)}"; use one of: ${MEMORY_CATEGORIES.join(", ")}.`,
+      );
+    }
+    throw new Error(
+      `${operation} cannot write top-level category "reflection" to the main memory store; ` +
+      "use the dedicated reflection store instead.",
+    );
   }
 
   private async countByWhereSuffix(
@@ -1125,6 +1153,7 @@ export class MemoryStore {
       timestamp: Date.now(),
       metadata: entry.metadata || "{}",
     };
+    this.assertWritableEntryCategory(fullEntry, "store");
     const normalizedEntry = this.normalizeEntryForWrite(fullEntry);
 
     // Async-context batch mode: only the owning flow buffers its own writes.
@@ -1185,6 +1214,7 @@ export class MemoryStore {
         : Date.now(),
       metadata: entry.metadata || "{}",
     };
+    this.assertWritableEntryCategory(full, "importEntry");
     const normalized = this.normalizeEntryForWrite(full);
 
     const imported = await this.runWithFileLock(async () => {
@@ -1701,6 +1731,7 @@ export class MemoryStore {
         timestamp: original.timestamp, // preserve original
         metadata: updates.metadata ?? original.metadata,
       };
+      this.assertWritableEntryCategory(updated, "update");
       const normalizedUpdated = this.normalizeEntryForWrite(updated);
       assertValidVector(normalizedUpdated.vector, this.config.vectorDim, "update");
 

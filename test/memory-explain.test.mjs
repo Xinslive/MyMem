@@ -30,7 +30,7 @@ function createContext(overrides = {}) {
   const entry = {
     id: "memory_1",
     text: "The user prefers concise answers.",
-    category: "preference",
+    category: "preferences",
     scope: "global",
     importance: 0.9,
     timestamp: Date.now(),

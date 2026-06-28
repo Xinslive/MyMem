@@ -48,6 +48,7 @@ interface ReflectionHookSingletonState {
   reflectionDerivedBySession: Map<string, { updatedAt: number; derived: string[] }>;
   reflectionByAgentCache: Map<string, { updatedAt: number; invariants: string[]; derived: string[] }>;
   feedbackLoop: FeedbackLoop | null;
+  reflectionBackgroundTasks?: Set<Promise<void>>;
 }
 
 export interface ReflectionHookParams {
@@ -167,6 +168,13 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
     reflectionDerivedBySession,
     reflectionByAgentCache,
   } = singletonState;
+
+  const trackReflectionBackgroundTask = (promise: Promise<void>): void => {
+    singletonState.reflectionBackgroundTasks?.add(promise);
+    void promise.finally(() => {
+      singletonState.reflectionBackgroundTasks?.delete(promise);
+    });
+  };
 
   if (config.sessionStrategy !== "memoryReflection") return;
 
@@ -461,12 +469,16 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
             signatureHash: signal.signatureHash,
           });
         }
-        singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch((err) => {
-          api.logger.debug?.(`mymem: drainPreventiveLessonBuffer failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
-        singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch((err) => {
-          api.logger.debug?.(`mymem: forceAdaptationCycle failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        trackReflectionBackgroundTask(
+          singletonState.feedbackLoop.drainPreventiveLessonBuffer().catch((err) => {
+            api.logger.debug?.(`mymem: drainPreventiveLessonBuffer failed: ${err instanceof Error ? err.message : String(err)}`);
+          }),
+        );
+        trackReflectionBackgroundTask(
+          singletonState.feedbackLoop.forceAdaptationCycle(resolvedDbPath, normalizeAdmissionControlConfig(config.admissionControl)).catch((err) => {
+            api.logger.debug?.(`mymem: forceAdaptationCycle failed: ${err instanceof Error ? err.message : String(err)}`);
+          }),
+        );
       }
 
       const reflectionEventId = createReflectionEventId({ runAt: nowTs, sessionKey, sessionId: currentSessionId || "unknown", agentId: sourceAgentId, command: String(event.action || "unknown") });

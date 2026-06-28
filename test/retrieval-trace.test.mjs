@@ -386,6 +386,45 @@ describe("RetrievalStatsCollector", () => {
     assert.equal(collector.getStats().totalQueries, 0);
   });
 
+  it("flushRecordHooks waits for in-flight async record hooks", async () => {
+    const collector = new RetrievalStatsCollector();
+    let releaseHook;
+    let hookStarted;
+    const hookStartedPromise = new Promise((resolve) => {
+      hookStarted = resolve;
+    });
+    collector.setRecordHook(async () => {
+      hookStarted();
+      await new Promise((resolve) => {
+        releaseHook = resolve;
+      });
+    });
+
+    collector.recordQuery(
+      {
+        query: "q",
+        mode: "vector",
+        startedAt: Date.now(),
+        stages: [],
+        finalCount: 1,
+        totalMs: 50,
+      },
+      "manual",
+    );
+
+    await hookStartedPromise;
+    let flushed = false;
+    const flushPromise = collector.flushRecordHooks().then(() => {
+      flushed = true;
+    });
+    await Promise.resolve();
+    assert.equal(flushed, false);
+
+    releaseHook();
+    await flushPromise;
+    assert.equal(flushed, true);
+  });
+
   it("evicts oldest records when over capacity", () => {
     const collector = new RetrievalStatsCollector(3);
 

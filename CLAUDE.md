@@ -93,5 +93,5 @@ Recent history uses conventional commits: `fix:`, `feat:`, `refactor:`, `perf:`,
 
 ## Known issues and ongoing audits
 
-- `docs/audit-2026-06-28.md` — design audit covering reliability, performance, security, and maintainability (38 ranked issues, P0–P3). Update this file when fixing items so it doubles as a fix log. Items currently in flight: **#3 (redactSecrets in extract path)**, **#16 (feedback-loop onAdmissionRejected stub)**.
-- Before adding new security-sensitive code paths (anything that touches the LLM prompt, stores memory text, or accepts inbound network), re-read the P0/P1 sections of the audit to avoid reintroducing fixed issues.
+- `docs/code-review-2026-06-28.md` — current design audit and fix log covering reliability, performance, security, maintainability, category migration, and reflection/main-store isolation. Update this file when fixing audit-related items so it doubles as a fix log.
+- Before adding new security-sensitive code paths (anything that touches the LLM prompt, stores memory text, accepts inbound network, or crosses the main-memory/reflection boundary), re-read the P0/P1 sections of the audit to avoid reintroducing fixed issues.

@@ -126,7 +126,8 @@ describe("MemoryStore index status and list pagination", () => {
   it("migrates legacy top-level categories and stats report six-category counts", async () => {
     const { dir, store } = makeStore();
     try {
-      await store.importEntry({
+      await store.count();
+      await store.table.add([{
         id: "20000000-0000-4000-8000-000000000001",
         text: "legacy preference row",
         vector: [1, 0, 0, 0],
@@ -135,8 +136,8 @@ describe("MemoryStore index status and list pagination", () => {
         importance: 0.8,
         timestamp: Date.now(),
         metadata: "{}",
-      });
-      await store.importEntry({
+      }]);
+      await store.table.add([{
         id: "20000000-0000-4000-8000-000000000002",
         text: "legacy fact row",
         vector: [1, 0, 0, 0],
@@ -145,7 +146,7 @@ describe("MemoryStore index status and list pagination", () => {
         importance: 0.6,
         timestamp: Date.now(),
         metadata: "{}",
-      });
+      }]);
 
       store.close();
       const reopened = new MemoryStore({ dbPath: dir, vectorDim: 4, logger: nullLogger });

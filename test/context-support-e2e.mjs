@@ -136,10 +136,10 @@ async function runTest() {
         const seedText = "饮品偏好：乌龙茶";
         const seedVector = await embedder.embedPassage(seedText);
         await store.store({
-            text: seedText, vector: seedVector, category: "preference",
+            text: seedText, vector: seedVector, category: "preferences",
             scope: "test", importance: 0.8,
             metadata: stringifySmartMetadata(
-                buildSmartMetadata({ text: seedText, category: "preference", importance: 0.8 }, {
+                buildSmartMetadata({ text: seedText, category: "preferences", importance: 0.8 }, {
                     summary: seedText,
                     content: "用户喜欢乌龙茶。",
                     memory_category: "preferences", tier: "working", confidence: 0.8,

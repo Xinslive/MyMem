@@ -33,6 +33,7 @@ import { summarizeTextPreview, summarizeMessageContent } from "./src/capture-det
 import { createLlmClient } from "./src/llm-client.js";
 import { createMemoryUpgrader } from "./src/memory-upgrader.js";
 import {
+  formatDashboardUnlockUrl,
   startMemoryDashboardServer,
   type RunningMemoryDashboardServer,
 } from "./src/dashboard-server.js";
@@ -128,6 +129,12 @@ const myMemPlugin = {
       autoCaptureSeenTextCount,
       autoCapturePendingIngressTexts,
       autoCaptureRecentTexts,
+      sessionPruneInterval,
+      autoRecallMetadataAccumulators,
+      autoRecallBackgroundTasks,
+      autoCaptureBackgroundTasks,
+      hookEnhancementBackgroundTasks,
+      reflectionBackgroundTasks,
     } = getSingletonState()!;
 
     const resolveGovernanceCommandContext = async (event: any): Promise<{
@@ -336,6 +343,8 @@ const myMemPlugin = {
       hookEnhancementState,
       decayEngine,
       tierManager,
+      metadataAccumulators: autoRecallMetadataAccumulators,
+      backgroundTasks: autoRecallBackgroundTasks,
     });
 
     registerHookEnhancements({
@@ -347,6 +356,7 @@ const myMemPlugin = {
       scopeManager,
       feedbackLoop,
       state: hookEnhancementState,
+      backgroundTasks: hookEnhancementBackgroundTasks,
       isCliMode,
     });
 
@@ -363,6 +373,7 @@ const myMemPlugin = {
       autoCapturePendingIngressTexts,
       autoCaptureRecentTexts,
       mdMirror: mdMirror ?? undefined,
+      backgroundTasks: autoCaptureBackgroundTasks,
       isCliMode,
     });
 
@@ -417,6 +428,43 @@ const myMemPlugin = {
 
     const autoBackup = createAutoBackup({ api, store, resolvedDbPath });
     let dashboardServer: RunningMemoryDashboardServer | null = null;
+    const deferredStartupTimers = new Set<ReturnType<typeof setTimeout>>();
+    const activeDeferredStartupTasks = new Set<Promise<void>>();
+    let serviceStopping = false;
+
+    const scheduleDeferredStartupTask = (
+      fn: () => void | Promise<void>,
+      delayMs: number,
+    ) => {
+      const timer = setTimeout(() => {
+        deferredStartupTimers.delete(timer);
+        if (serviceStopping) return;
+        const task = Promise.resolve()
+          .then(fn)
+          .catch((error) => {
+            api.logger.warn(`mymem：延迟启动任务失败：${String(error)}`);
+          });
+        activeDeferredStartupTasks.add(task);
+        void task.finally(() => {
+          activeDeferredStartupTasks.delete(task);
+        });
+      }, delayMs);
+      deferredStartupTimers.add(timer);
+      if (typeof timer === "object" && "unref" in timer) timer.unref();
+    };
+
+    const clearDeferredStartupTasks = () => {
+      for (const timer of deferredStartupTimers) {
+        clearTimeout(timer);
+      }
+      deferredStartupTimers.clear();
+    };
+
+    const drainDeferredStartupTasks = async () => {
+      while (activeDeferredStartupTasks.size > 0) {
+        await Promise.allSettled([...activeDeferredStartupTasks]);
+      }
+    };
 
     const startDashboard = async () => {
       if (dashboardServer || isCliMode()) return;
@@ -428,13 +476,17 @@ const myMemPlugin = {
             scopeManager,
             embedder,
             feedbackLoop,
+            dbPath: resolvedDbPath,
           },
           {
             host: "127.0.0.1",
             port: 1314,
           },
         );
-        api.logger.info(`mymem：控制台已启动：${dashboardServer.url}`);
+        const dashboardUrl = dashboardServer.authTokenFile
+          ? formatDashboardUnlockUrl(dashboardServer.url, dashboardServer.authTokenFile)
+          : dashboardServer.url;
+        api.logger.info(`mymem：控制台已启动：${dashboardUrl}`);
       } catch (error) {
         api.logger.warn(`mymem：控制台自动启动已跳过：${String(error)}`);
       }
@@ -451,6 +503,78 @@ const myMemPlugin = {
       }
     };
 
+    const closeStores = async () => {
+      const stores = [store, reflectionStore];
+      const seen = new Set<object>();
+      for (const memoryStore of stores) {
+        if (seen.has(memoryStore)) continue;
+        seen.add(memoryStore);
+        const closeableStore = memoryStore as {
+          flushWrites?: () => Promise<void>;
+          flushAuditLog?: () => Promise<void>;
+          close?: () => void;
+        };
+        try {
+          await closeableStore.flushWrites?.();
+        } catch (error) {
+          api.logger.warn(`mymem：存储写入队列 flush 失败：${String(error)}`);
+        }
+        try {
+          await closeableStore.flushAuditLog?.();
+        } catch (error) {
+          api.logger.warn(`mymem：审计日志 flush 失败：${String(error)}`);
+        }
+        closeableStore.close?.();
+      }
+    };
+
+    const flushTelemetry = async () => {
+      try {
+        await retriever.flushStatsCollector?.();
+        await telemetryStore?.flush();
+      } catch (error) {
+        api.logger.warn(`mymem：telemetry flush 失败：${String(error)}`);
+      }
+    };
+
+    const stopSessionPruneInterval = () => {
+      if (sessionPruneInterval) clearInterval(sessionPruneInterval);
+    };
+
+    const flushAutoRecallMetadata = async () => {
+      for (const accumulator of autoRecallMetadataAccumulators) {
+        try {
+          await accumulator.flushNow();
+        } catch (error) {
+          api.logger.warn(`mymem：自动召回 metadata flush 失败：${String(error)}`);
+        }
+      }
+    };
+
+    const drainAutoRecallBackgroundTasks = async () => {
+      while (autoRecallBackgroundTasks.size > 0) {
+        await Promise.allSettled([...autoRecallBackgroundTasks]);
+      }
+    };
+
+    const drainAutoCaptureBackgroundTasks = async () => {
+      while (autoCaptureBackgroundTasks.size > 0) {
+        await Promise.allSettled([...autoCaptureBackgroundTasks]);
+      }
+    };
+
+    const drainHookEnhancementBackgroundTasks = async () => {
+      while (hookEnhancementBackgroundTasks.size > 0) {
+        await Promise.allSettled([...hookEnhancementBackgroundTasks]);
+      }
+    };
+
+    const drainReflectionBackgroundTasks = async () => {
+      while (reflectionBackgroundTasks.size > 0) {
+        await Promise.allSettled([...reflectionBackgroundTasks]);
+      }
+    };
+
     // ========================================================================
     // Service Registration
     // ========================================================================
@@ -458,6 +582,7 @@ const myMemPlugin = {
     api.registerService?.({
       id: "mymem",
       start: async () => {
+        serviceStopping = false;
         // Fail fast on local store corruption before starting dashboard,
         // hooks, or background work. External embedder/retriever probes remain
         // deferred below so network providers cannot block gateway startup.
@@ -581,10 +706,10 @@ const myMemPlugin = {
 
         // Fire-and-forget: allow gateway to start serving immediately, then
         // defer health probing so startup I/O does not contend with host init.
-        setTimeout(() => void runStartupChecks(), STARTUP_HEALTH_CHECK_DELAY_MS);
+        scheduleDeferredStartupTask(runStartupChecks, STARTUP_HEALTH_CHECK_DELAY_MS);
 
         // Check for legacy memories that could be upgraded
-        setTimeout(async () => {
+        scheduleDeferredStartupTask(async () => {
           try {
             const upgrader = createMemoryUpgrader(store, null);
             const counts = await upgrader.countLegacy();
@@ -606,9 +731,21 @@ const myMemPlugin = {
         if (feedbackLoop) feedbackLoop.start();
       },
       stop: async () => {
+        serviceStopping = true;
+        clearDeferredStartupTasks();
+        await drainDeferredStartupTasks();
+        await retriever.flushAccessTrackers();
+        await drainAutoRecallBackgroundTasks();
+        await flushAutoRecallMetadata();
+        await drainHookEnhancementBackgroundTasks();
+        await drainAutoCaptureBackgroundTasks();
+        await drainReflectionBackgroundTasks();
+        await flushTelemetry();
         await stopDashboard();
-        autoBackup.stop();
-        if (feedbackLoop) feedbackLoop.dispose();
+        await autoBackup.stop();
+        if (feedbackLoop) await feedbackLoop.close();
+        stopSessionPruneInterval();
+        await closeStores();
         api.logger.info("mymem：已停止");
       },
     });

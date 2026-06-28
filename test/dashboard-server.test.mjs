@@ -1,10 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { interopDefault: true });
-const { startMemoryDashboardServer } = await jiti("../src/dashboard-server.ts");
+const {
+  formatDashboardUnlockUrl,
+  startMemoryDashboardServer,
+} = await jiti("../src/dashboard-server.ts");
 
 function requestJson(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -52,6 +58,34 @@ function requestText(url) {
         });
       });
     }).on("error", reject);
+  });
+}
+
+function requestRaw(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method: options.method || "GET",
+        headers: options.headers,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          resolve({
+            statusCode: res.statusCode,
+            headers: res.headers,
+            body,
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
   });
 }
 
@@ -257,6 +291,7 @@ test("dashboard server serves page and read-only APIs", async () => {
     const page = await requestText(server.url + "/");
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /MyMem 记忆管理台/);
+    assert.equal(page.body.includes(authToken), false);
     assert.match(page.body, /召回实验台/);
     assert.match(page.body, /记忆瀑布流/);
     assert.match(page.body, /masonry-list/);
@@ -287,6 +322,21 @@ test("dashboard server serves page and read-only APIs", async () => {
     const unauthorized = await requestJson(server.url + "/api/summary");
     assert.equal(unauthorized.statusCode, 401);
     assert.equal(unauthorized.body.error, "unauthorized");
+
+    const tokenLanding = await requestRaw(server.url + "/?token=" + encodeURIComponent(authToken));
+    assert.equal(tokenLanding.statusCode, 302);
+    assert.equal(tokenLanding.headers.location, "/");
+    assert.equal(tokenLanding.body, "");
+    const cookie = tokenLanding.headers["set-cookie"]?.[0];
+    assert.match(cookie || "", /mymem_dashboard_token=/);
+    assert.match(cookie || "", /HttpOnly/);
+    assert.match(cookie || "", /SameSite=Strict/);
+
+    const cookieSummary = await requestJson(server.url + "/api/summary", {
+      headers: { cookie: cookie?.split(";")[0] || "" },
+    });
+    assert.equal(cookieSummary.statusCode, 200);
+    assert.equal(cookieSummary.body.memory.totalCount, 3);
 
     const summary = await requestJson(server.url + "/api/summary", { headers: authHeaders });
     assert.equal(summary.statusCode, 200);
@@ -363,4 +413,84 @@ test("dashboard server serves page and read-only APIs", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("dashboard generated token is persisted privately and not printed", async () => {
+  const dbPath = mkdtempSync(join(tmpdir(), "mymem-dashboard-token-"));
+  const warnings = [];
+  const originalWarn = console.warn;
+  let server;
+
+  try {
+    console.warn = (...args) => {
+      warnings.push(args.join(" "));
+    };
+    server = await startMemoryDashboardServer(
+      { ...createContext(), dbPath },
+      { host: "127.0.0.1", port: 0 },
+    );
+
+    const tokenFile = join(dbPath, ".dashboard-token");
+    const token = readFileSync(tokenFile, "utf8");
+    const warning = warnings.join("\n");
+
+    assert.equal(token, server.authToken);
+    assert.equal(server.authTokenFile, tokenFile);
+    assert.ok(server.authToken.length >= 16);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
+    }
+    assert.match(warning, /dashboard auth token written/);
+    assert.ok(warning.includes(tokenFile));
+    assert.ok(warning.includes(formatDashboardUnlockUrl(server.url, tokenFile)));
+    assert.equal(warning.includes(server.authToken), false);
+    assert.doesNotMatch(warning, new RegExp(`\\?token=${server.authToken}`));
+
+    const page = await requestText(server.url + "/");
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /MyMem 记忆管理台/);
+    assert.equal(page.body.includes(server.authToken), false);
+  } finally {
+    console.warn = originalWarn;
+    await server?.close();
+    rmSync(dbPath, { recursive: true, force: true });
+  }
+});
+
+test("dashboard existing token file still prints unlock instructions without the token", async () => {
+  const dbPath = mkdtempSync(join(tmpdir(), "mymem-dashboard-existing-token-"));
+  const tokenFile = join(dbPath, ".dashboard-token");
+  const existingToken = "existing-dashboard-token-value";
+  writeFileSync(tokenFile, existingToken, { mode: 0o600 });
+  const warnings = [];
+  const originalWarn = console.warn;
+  let server;
+
+  try {
+    console.warn = (...args) => {
+      warnings.push(args.join(" "));
+    };
+    server = await startMemoryDashboardServer(
+      { ...createContext(), dbPath },
+      { host: "127.0.0.1", port: 0 },
+    );
+
+    const warning = warnings.join("\n");
+    assert.equal(server.authToken, existingToken);
+    assert.match(warning, /dashboard auth token loaded from/);
+    assert.ok(warning.includes(tokenFile));
+    assert.ok(warning.includes(formatDashboardUnlockUrl(server.url, tokenFile)));
+    assert.equal(warning.includes(existingToken), false);
+  } finally {
+    console.warn = originalWarn;
+    await server?.close();
+    rmSync(dbPath, { recursive: true, force: true });
+  }
+});
+
+test("dashboard unlock URL shell-quotes token file paths", () => {
+  assert.equal(
+    formatDashboardUnlockUrl("http://127.0.0.1:1314", "/tmp/mymem user's/.dashboard-token"),
+    "http://127.0.0.1:1314/?token=$(cat '/tmp/mymem user'\\''s/.dashboard-token')",
+  );
 });

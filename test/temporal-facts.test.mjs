@@ -140,12 +140,12 @@ async function runTest() {
     const oldEntry = await store.store({
       text: oldText,
       vector: await embedder.embedPassage(oldText),
-      category: "preference",
+      category: "preferences",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: oldText, category: "preference", importance: 0.8 },
+          { text: oldText, category: "preferences", importance: 0.8 },
           {
             summary: oldText,
             content: "用户喜欢乌龙茶。",
@@ -230,12 +230,12 @@ async function runTest() {
       await store.store({
         text: `饮品偏好：历史版本${i}`,
         vector: activeVector, // same vector — crowds the active fact
-        category: "preference",
+        category: "preferences",
         scope: "test",
         importance: 0.8,
         metadata: stringifySmartMetadata(
           buildSmartMetadata(
-            { text: `饮品偏好：历史版本${i}`, category: "preference", importance: 0.8 },
+            { text: `饮品偏好：历史版本${i}`, category: "preferences", importance: 0.8 },
             {
               summary: `饮品偏好：历史版本${i}`,
               content: `历史版本${i}`,

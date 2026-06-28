@@ -143,7 +143,7 @@ async function runTest() {
   console.log("\nTest 4: parseSmartMetadata/buildSmartMetadata handle temporal fields...");
 
   const meta = buildSmartMetadata(
-    { text: "today meeting", category: "fact", importance: 0.7 },
+    { text: "today meeting", category: "cases", importance: 0.7 },
     { memory_temporal_type: "dynamic", valid_until: now + DAY },
   );
   assert.equal(meta.memory_temporal_type, "dynamic");
@@ -188,12 +188,12 @@ async function runTest() {
     await store.store({
       text: expiredText,
       vector: await embedder.embedPassage(expiredText),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: expiredText, category: "fact", importance: 0.8 },
+          { text: expiredText, category: "cases", importance: 0.8 },
           {
             summary: expiredText,
             memory_temporal_type: "dynamic",
@@ -208,12 +208,12 @@ async function runTest() {
     const futureEntry = await store.store({
       text: futureText,
       vector: await embedder.embedPassage(futureText),
-      category: "fact",
+      category: "cases",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: futureText, category: "fact", importance: 0.8 },
+          { text: futureText, category: "cases", importance: 0.8 },
           {
             summary: futureText,
             memory_temporal_type: "dynamic",
@@ -228,12 +228,12 @@ async function runTest() {
     const permanentEntry = await store.store({
       text: permanentText,
       vector: await embedder.embedPassage(permanentText),
-      category: "preference",
+      category: "preferences",
       scope: "test",
       importance: 0.8,
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: permanentText, category: "preference", importance: 0.8 },
+          { text: permanentText, category: "preferences", importance: 0.8 },
           {
             summary: permanentText,
             memory_temporal_type: "static",

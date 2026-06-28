@@ -106,6 +106,10 @@ export function sanitizeAdmissionRejectionAuditEntry(
   };
 }
 
+function redactedPreview(value: string, maxChars: number): string {
+  return sanitizeMemoryWriteText(value).slice(0, maxChars);
+}
+
 export interface ConfidenceSupportBreakdown {
   score: number;
   bestSupport: number;
@@ -789,7 +793,7 @@ export class AdmissionController {
     };
 
     this.debugLog(
-      `mymem: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(params.candidate.abstract.slice(0, 80))}`,
+      `mymem: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(redactedPreview(params.candidate.abstract, 80))}`,
     );
 
     return { decision, hint, audit };

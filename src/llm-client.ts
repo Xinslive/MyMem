@@ -210,8 +210,47 @@ function isRetryableLlmError(error: unknown): boolean {
   );
 }
 
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return;
+  }
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function readResponseTextUnlessAborted(response: Response, signal?: AbortSignal): Promise<string> {
+  if (!signal) return await response.text();
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+
+  return await new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const onAbort = () => {
+      finish(() => reject(signal.reason ?? new Error("aborted")));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    response.text().then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
 }
 
 function schemaValidationError(schema: TSchema | undefined, value: unknown): string | null {
@@ -281,6 +320,7 @@ async function withLlmRetries<T>(
     label: string;
     model: string;
     log: (msg: string) => void;
+    signal?: AbortSignal;
   },
 ): Promise<T> {
   let lastError: unknown;
@@ -297,7 +337,7 @@ async function withLlmRetries<T>(
       params.log(
         `mymem: llm-client [${params.label}] transient request failure for model ${params.model}; retrying in ${delayMs}ms (attempt ${attempt + 1}/${LLM_MAX_ATTEMPTS}): ${errorMessage(error)}`,
       );
-      await delay(delayMs);
+      await delay(delayMs, params.signal);
     }
   }
 
@@ -468,15 +508,15 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
               });
 
               if (!response.ok) {
-                const detail = await response.text().catch(() => "");
+                const detail = await readResponseTextUnlessAborted(response, signal).catch(() => "");
                 throw new Error(`HTTP ${response.status} ${response.statusText}: ${detail.slice(0, 500)}`);
               }
               return response;
             },
-            { label, model: config.model, log },
+            { label, model: config.model, log, signal },
           );
 
-          const bodyText = await response.text();
+          const bodyText = await readResponseTextUnlessAborted(response, signal);
           const raw = (
             response.headers.get("content-type")?.includes("text/event-stream") ||
             looksLikeSseResponse(bodyText)

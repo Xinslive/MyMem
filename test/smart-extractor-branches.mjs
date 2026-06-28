@@ -162,12 +162,12 @@ async function seedPreference(dbPath) {
   await store.store({
     text: seedText,
     vector,
-    category: "preference",
+    category: "preferences",
     scope: "agent:life",
     importance: 0.8,
     metadata: stringifySmartMetadata(
       buildSmartMetadata(
-        { text: seedText, category: "preference", importance: 0.8 },
+        { text: seedText, category: "preferences", importance: 0.8 },
         {
           summary: seedText,
           content: "用户长期喜欢乌龙茶。",

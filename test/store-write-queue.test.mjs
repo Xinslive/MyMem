@@ -65,6 +65,86 @@ describe("MemoryStore write queue", () => {
     }
   });
 
+  it("flushWrites waits for an in-flight serialized write", async () => {
+    const { store, dir } = makeStore();
+    try {
+      let releaseWrite;
+      let writeStarted;
+      const writeStartedPromise = new Promise((resolve) => {
+        writeStarted = resolve;
+      });
+      const writePromise = store.runSerializedUpdate(async () => {
+        writeStarted();
+        await new Promise((resolve) => {
+          releaseWrite = resolve;
+        });
+      });
+
+      await writeStartedPromise;
+      let flushed = false;
+      const flushPromise = store.flushWrites().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      assert.equal(flushed, false, "flushWrites should wait for the active serialized write");
+
+      releaseWrite();
+      await writePromise;
+      await flushPromise;
+      assert.equal(flushed, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flushWrites waits for serialized writes queued while flushing", async () => {
+    const { store, dir } = makeStore();
+    try {
+      let releaseFirst;
+      let firstStarted;
+      const firstStartedPromise = new Promise((resolve) => {
+        firstStarted = resolve;
+      });
+      const firstPromise = store.runSerializedUpdate(async () => {
+        firstStarted();
+        await new Promise((resolve) => {
+          releaseFirst = resolve;
+        });
+      });
+
+      await firstStartedPromise;
+      let flushed = false;
+      const flushPromise = store.flushWrites().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      assert.equal(flushed, false, "flushWrites should wait for the first active write");
+
+      let releaseSecond;
+      let secondStarted;
+      const secondStartedPromise = new Promise((resolve) => {
+        secondStarted = resolve;
+      });
+      const secondPromise = store.runSerializedUpdate(async () => {
+        secondStarted();
+        await new Promise((resolve) => {
+          releaseSecond = resolve;
+        });
+      });
+
+      releaseFirst();
+      await secondStartedPromise;
+      await Promise.resolve();
+      assert.equal(flushed, false, "flushWrites should also wait for writes appended while flushing");
+
+      releaseSecond();
+      await Promise.all([firstPromise, secondPromise, flushPromise]);
+      assert.equal(flushed, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("serializes mixed store/update/delete operations in one instance", async () => {
     const { store, dir } = makeStore();
     try {

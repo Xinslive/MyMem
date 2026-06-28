@@ -46,7 +46,7 @@ describe("memory governance tools", () => {
       {
         id: "11111111-1111-4111-8111-111111111111",
         text: "remember coffee preference",
-        category: "fact",
+        category: "cases",
         scope: "global",
         importance: 0.7,
         timestamp: Date.now(),
@@ -124,7 +124,7 @@ describe("memory governance tools", () => {
       {
         id: "a1111111-1111-4111-8111-111111111111",
         text: "Use tavily first",
-        category: "fact",
+        category: "cases",
         scope: "global",
         importance: 0.7,
         timestamp: now,
@@ -133,7 +133,7 @@ describe("memory governance tools", () => {
       {
         id: "b2222222-2222-4222-8222-222222222222",
         text: "Use tavily first",
-        category: "fact",
+        category: "cases",
         scope: "global",
         importance: 0.6,
         timestamp: now - 1000,
@@ -193,7 +193,7 @@ describe("memory governance tools", () => {
       {
         id: "p1111111-1111-4111-8111-111111111111",
         text: "Prefer concise answers",
-        category: "preference",
+        category: "preferences",
         scope: "global",
         importance: 0.8,
         timestamp: Date.now(),
@@ -202,7 +202,7 @@ describe("memory governance tools", () => {
       {
         id: "c2222222-2222-4222-8222-222222222222",
         text: "Debugged the cache issue",
-        category: "fact",
+        category: "cases",
         scope: "global",
         importance: 0.7,
         timestamp: Date.now() - 1000,
@@ -244,13 +244,13 @@ describe("memory governance tools", () => {
       id: "11111111-2222-4333-8444-555555555555",
       text: "Use tavily first",
       vector: [0.1, 0.2, 0.3],
-      category: "fact",
+      category: "cases",
       scope: "global",
       importance: 0.7,
       timestamp: Date.now(),
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: "Use tavily first", category: "fact", importance: 0.7 },
+          { text: "Use tavily first", category: "cases", importance: 0.7 },
           {
             summary: "Use tavily first",
             content: "Use tavily first",
@@ -299,13 +299,13 @@ describe("memory governance tools", () => {
       id: "c1111111-1111-4111-8111-111111111111",
       text: "Old safe memory",
       vector: [0.1, 0.2, 0.3],
-      category: "fact",
+      category: "cases",
       scope: "global",
       importance: 0.7,
       timestamp: Date.now(),
       metadata: stringifySmartMetadata(
         buildSmartMetadata(
-          { text: "Old safe memory", category: "fact", importance: 0.7 },
+          { text: "Old safe memory", category: "cases", importance: 0.7 },
           {
             summary: "Old safe memory",
             content: "Old safe memory",

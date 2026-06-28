@@ -81,7 +81,7 @@ export function registerMemoryStoreTool(
                   text: "Skipped: text is purely envelope metadata with no extractable memory content.",
                 },
               ],
-              details: { action: "envelope_metadata_rejected", text: text.slice(0, 60) },
+              details: { action: "envelope_metadata_rejected", text: sanitizeMemoryWriteText(text).slice(0, 60) },
             };
           }
 

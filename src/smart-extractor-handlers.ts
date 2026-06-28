@@ -105,6 +105,10 @@ function redactCandidate(candidate: CandidateMemory): { abstract: string; conten
   };
 }
 
+function redactedPreview(value: string, maxChars: number): string {
+  return redactSecrets(value).slice(0, maxChars);
+}
+
 /**
  * Store a candidate memory as a new entry with summary/content metadata.
  */
@@ -162,7 +166,7 @@ export async function storeCandidate(
   });
 
   ctx.log.info(
-    `mymem：智能提取新建记忆 [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+    `mymem：智能提取新建记忆 [${candidate.category}] ${redactedPreview(candidate.abstract, 60)}`,
   );
 }
 
@@ -196,7 +200,7 @@ export async function handleProfileMerge(
     });
     if (profileAdmission.decision === "reject") {
       ctx.log.warn(
-        `mymem：智能提取准入拒绝 profile [${candidate.abstract.slice(0, 60)}]，原因：${profileAdmission.audit.reason}`,
+        `mymem：智能提取准入拒绝 profile [${redactedPreview(candidate.abstract, 60)}]，原因：${profileAdmission.audit.reason}`,
       );
       await ctx.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
       return "rejected";

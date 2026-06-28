@@ -79,6 +79,7 @@ async function runCliSmoke() {
     migrator: {},
     embedder: {
       embedPassage: async () => [0, 0, 0, 0],
+      embedBatchPassage: async (texts) => texts.map(() => [0, 0, 0, 0]),
     },
   };
 
@@ -100,6 +101,22 @@ async function runCliSmoke() {
     "--dry-run",
   ]);
 
+  await program.parseAsync([
+    "node",
+    "openclaw",
+    "mymem",
+    "reembed",
+    "--source-db",
+    sourceDbPath,
+    "--limit",
+    "1",
+    "--batch-size",
+    "1",
+  ]);
+  const reembedded = await store.getById("test_smoke_1");
+  assert.equal(reembedded?.category, "patterns");
+  assert.equal(JSON.parse(reembedded?.metadata || "{}").memory_category, "patterns");
+
   const importId = "smoke_import_id_1";
   const importPhrase = `smoke-import-${Date.now()}`;
   const importFile = path.join(workDir, "import-test.json");
@@ -116,7 +133,7 @@ async function runCliSmoke() {
           {
             id: importId,
             text: `Import smoke test. UniquePhrase=${importPhrase}.`,
-            category: "other",
+            category: "patterns",
             scope: "global",
             importance: 0.3,
             timestamp: Date.now(),
@@ -186,7 +203,7 @@ async function runCliSmoke() {
     id: "search_regression_1",
     text: "Jige profile memory",
     vector: [1, 0],
-    category: "fact",
+    category: "cases",
     scope: "global",
     importance: 0.9,
     timestamp: Date.now(),
@@ -297,7 +314,7 @@ async function runCliSmoke() {
     id: "bm25_zh_1",
     text: "用户测试饮料偏好是乌龙茶，不喜欢美式咖啡。",
     vector: [0, 0, 0, 0],
-    category: "preference",
+    category: "preferences",
     scope: "global",
     importance: 0.95,
     timestamp: Date.now(),
@@ -314,7 +331,7 @@ async function runCliSmoke() {
     id: "33333333-3333-4333-8333-333333333333",
     text: "用户现在偏好热乌龙茶。",
     vector: [0, 0, 0, 0],
-    category: "preference",
+    category: "preferences",
     scope: "agent:smoke",
     importance: 0.9,
     timestamp: Date.now(),

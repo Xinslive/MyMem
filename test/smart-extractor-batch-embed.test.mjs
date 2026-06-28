@@ -144,6 +144,31 @@ describe("SmartExtractor batch embedding paths", () => {
     assert.equal(batchCalls, 0);
   });
 
+  it("does not fail extraction when extraction telemetry persistence fails", async () => {
+    const debugLogs = [];
+    const { embedder } = makeCountingEmbedder();
+    const llm = makeLlm([]);
+    const store = makeStore();
+    const extractor = makeExtractor(embedder, llm, store, {
+      debugLog(message) {
+        debugLogs.push(String(message));
+      },
+      async onExtractionComplete() {
+        throw new Error("telemetry disk full");
+      },
+    });
+
+    const stats = await extractor.extractAndPersist(
+      "User says the billing migration plan needs a dry run before production.",
+      "s-telemetry-failure",
+    );
+
+    assert.equal(stats.created, 0);
+    assert.equal(stats.skipped, 0);
+    assert.ok(stats.telemetry);
+    assert.match(debugLogs.join("\n"), /telemetry 写入失败/);
+  });
+
   // --------------------------------------------------------------------------
   // Test 1: Step 1b batchDedup uses embedBatch (not N×embed)
   // --------------------------------------------------------------------------

@@ -66,6 +66,13 @@ export interface StoreConfig {
   vectorDim: number;
   /** Optional logger instance. If not provided, uses default console-based logger. */
   logger?: Logger;
+  /**
+   * Allow writes whose top-level category is `reflection`.
+   *
+   * The main memory store leaves this unset so reflection/session data cannot
+   * leak into normal recall. The dedicated reflection store enables it.
+   */
+  allowReflectionCategory?: boolean;
   /** Enable append-only mutation audit log. Defaults to true. */
   auditLogEnabled?: boolean;
   /** Optional audit JSONL path. Defaults to `<dbPath>/audit.jsonl`. */

@@ -360,6 +360,52 @@ function createTimeoutSignal(timeoutMs?: number): { signal: AbortSignal; dispose
   };
 }
 
+async function readTextUnlessAborted(response: Response, signal: AbortSignal): Promise<string> {
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+
+  return await new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const onAbort = () => {
+      finish(() => reject(signal.reason ?? new Error("aborted")));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    response.text().then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
+async function readJsonUnlessAborted<T>(response: Response, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const onAbort = () => {
+      finish(() => reject(signal.reason ?? new Error("aborted")));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    response.json().then(
+      (value) => finish(() => resolve(value as T)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
 export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: number): Promise<OAuthSession> {
   if (!session.refreshToken) {
     throw new Error(
@@ -383,11 +429,11 @@ export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: num
     });
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
+      const detail = await readTextUnlessAborted(response, signal).catch(() => "");
       throw new Error(`OAuth refresh failed (${response.status}): ${detail.slice(0, 500)}`);
     }
 
-    const payload = await response.json() as TokenRefreshResponse;
+    const payload = await readJsonUnlessAborted<TokenRefreshResponse>(response, signal);
     if (!payload.access_token) {
       throw new Error("OAuth refresh returned no access token");
     }
@@ -420,9 +466,8 @@ export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: num
 async function exchangeAuthorizationCode(code: string, verifier: string, providerId?: string): Promise<OAuthSession> {
   const resolvedProviderId = normalizeOAuthProviderId(providerId);
   const { signal, dispose } = createTimeoutSignal();
-  let response: Response;
   try {
-    response = await fetch(resolveOauthTokenUrl(resolvedProviderId), {
+    const response = await fetch(resolveOauthTokenUrl(resolvedProviderId), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -436,36 +481,36 @@ async function exchangeAuthorizationCode(code: string, verifier: string, provide
       }),
       signal,
     });
+
+    if (!response.ok) {
+      const detail = await readTextUnlessAborted(response, signal).catch(() => "");
+      throw new Error(`OAuth token exchange failed (${response.status}): ${detail.slice(0, 500)}`);
+    }
+
+    const payload = await readJsonUnlessAborted<TokenRefreshResponse>(response, signal);
+    if (!payload.access_token) {
+      throw new Error("OAuth token exchange returned no access token");
+    }
+
+    const accountId = getJwtAccountId(payload.access_token, resolvedProviderId);
+    if (!accountId) {
+      throw new Error("OAuth token exchange returned a token without a ChatGPT account id");
+    }
+
+    return {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token,
+      expiresAt:
+        typeof payload.expires_in === "number"
+          ? Date.now() + payload.expires_in * 1000
+          : getJwtExpiry(payload.access_token),
+      accountId,
+      providerId: resolvedProviderId,
+      authPath: "",
+    };
   } finally {
     dispose();
   }
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`OAuth token exchange failed (${response.status}): ${detail.slice(0, 500)}`);
-  }
-
-  const payload = await response.json() as TokenRefreshResponse;
-  if (!payload.access_token) {
-    throw new Error("OAuth token exchange returned no access token");
-  }
-
-  const accountId = getJwtAccountId(payload.access_token, resolvedProviderId);
-  if (!accountId) {
-    throw new Error("OAuth token exchange returned a token without a ChatGPT account id");
-  }
-
-  return {
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token,
-    expiresAt:
-      typeof payload.expires_in === "number"
-        ? Date.now() + payload.expires_in * 1000
-        : getJwtExpiry(payload.access_token),
-    accountId,
-    providerId: resolvedProviderId,
-    authPath: "",
-  };
 }
 
 export async function saveOAuthSession(authPath: string, session: OAuthSession): Promise<void> {

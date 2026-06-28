@@ -267,6 +267,35 @@ describe("import-markdown CLI", () => {
       assert.strictEqual(imported, 1);
       assert.strictEqual(mockStore.storedRecords.length, 0); // No actual write
     });
+
+    it("redacts secrets in dry-run console previews", async () => {
+      const wsDir = await setupWorkspace("dryrun-redaction-test");
+      await writeFile(
+        join(wsDir, "MEMORY.md"),
+        "- Temporary database password:hunter2-please-rotate-q1-2026 should not appear in logs\n",
+        "utf-8",
+      );
+
+      const logs = [];
+      const originalLog = console.log;
+      try {
+        console.log = (...args) => logs.push(args.join(" "));
+        const ctx = { embedder: mockEmbedder, store: mockStore };
+        const { imported } = await runImportMarkdown(ctx, {
+          openclawHome: testWorkspaceDir,
+          workspaceGlob: "dryrun-redaction-test",
+          dryRun: true,
+        });
+
+        assert.strictEqual(imported, 1);
+      } finally {
+        console.log = originalLog;
+      }
+
+      const serialized = logs.join("\n");
+      assert.doesNotMatch(serialized, /hunter2-please-rotate-q1-2026/);
+      assert.match(serialized, /\[REDACTED\]/);
+    });
   });
 
   describe("continue on error", () => {

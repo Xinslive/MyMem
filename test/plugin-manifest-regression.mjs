@@ -114,10 +114,18 @@ function createMockApi(pluginConfig, options = {}) {
     hooks: {},
     toolFactories: {},
     logger: {
-      info() {},
-      warn() {},
-      error() {},
-      debug() {},
+      info(...args) {
+        options.logs?.info?.push(args.join(" "));
+      },
+      warn(...args) {
+        options.logs?.warn?.push(args.join(" "));
+      },
+      error(...args) {
+        options.logs?.error?.push(args.join(" "));
+      },
+      debug(...args) {
+        options.logs?.debug?.push(args.join(" "));
+      },
     },
     resolvePath(value) {
       return value;
@@ -359,15 +367,83 @@ try {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
   const scheduledTimeouts = [];
+  const scheduledTimeoutHandles = [];
+  const clearedTimeoutHandles = [];
+  const scheduledIntervalHandles = [];
+  const clearedIntervalHandles = [];
   let statsCalled = 0;
+  let retrieverFlushCalls = 0;
+  let retrieverStatsFlushCalls = 0;
+  let telemetryFlushCalls = 0;
+  let storeFlushWriteCalls = 0;
+  let storeFlushAuditCalls = 0;
+  let storeCloseCalls = 0;
+  let feedbackLoopCloseCalls = 0;
+  let autoRecallMetadataFlushCalls = 0;
+  let releaseAutoRecallBackgroundTask;
+  let autoRecallBackgroundTaskDrained = false;
+  const autoRecallBackgroundTasks = new Set();
+  let releaseHookEnhancementBackgroundTask;
+  let hookEnhancementBackgroundTaskDrained = false;
+  const hookEnhancementBackgroundTasks = new Set();
+  let releaseAutoCaptureBackgroundTask;
+  let autoCaptureBackgroundTaskDrained = false;
+  const autoCaptureBackgroundTasks = new Set();
+  let releaseReflectionBackgroundTask;
+  let reflectionBackgroundTaskDrained = false;
+  const reflectionBackgroundTasks = new Set();
+  let releaseStoreFlushWrites;
+  let markStoreFlushWritesStarted;
+  const storeFlushWritesStarted = new Promise((resolve) => {
+    markStoreFlushWritesStarted = resolve;
+  });
+  let sessionPruneIntervalHandle;
+  const autoRecallBackgroundTask = new Promise((resolve) => {
+    releaseAutoRecallBackgroundTask = resolve;
+  }).then(() => {
+    autoRecallBackgroundTaskDrained = true;
+    autoRecallBackgroundTasks.delete(autoRecallBackgroundTask);
+  });
+  autoRecallBackgroundTasks.add(autoRecallBackgroundTask);
+  const hookEnhancementBackgroundTask = new Promise((resolve) => {
+    releaseHookEnhancementBackgroundTask = resolve;
+  }).then(() => {
+    hookEnhancementBackgroundTaskDrained = true;
+    hookEnhancementBackgroundTasks.delete(hookEnhancementBackgroundTask);
+  });
+  hookEnhancementBackgroundTasks.add(hookEnhancementBackgroundTask);
+  const autoCaptureBackgroundTask = new Promise((resolve) => {
+    releaseAutoCaptureBackgroundTask = resolve;
+  }).then(() => {
+    autoCaptureBackgroundTaskDrained = true;
+    autoCaptureBackgroundTasks.delete(autoCaptureBackgroundTask);
+  });
+  autoCaptureBackgroundTasks.add(autoCaptureBackgroundTask);
+  const reflectionBackgroundTask = new Promise((resolve) => {
+    releaseReflectionBackgroundTask = resolve;
+  }).then(() => {
+    reflectionBackgroundTaskDrained = true;
+    reflectionBackgroundTasks.delete(reflectionBackgroundTask);
+  });
+  reflectionBackgroundTasks.add(reflectionBackgroundTask);
   try {
     globalThis.setTimeout = (fn, delay = 0, ...args) => {
+      const handle = { fn, delay: Number(delay), args };
       scheduledTimeouts.push(Number(delay));
-      return { fn, delay, args };
+      scheduledTimeoutHandles.push(handle);
+      return handle;
     };
-    globalThis.clearTimeout = () => {};
-    globalThis.setInterval = (fn, delay = 0, ...args) => ({ fn, delay, args });
-    globalThis.clearInterval = () => {};
+    globalThis.clearTimeout = (handle) => {
+      clearedTimeoutHandles.push(handle);
+    };
+    globalThis.setInterval = (fn, delay = 0, ...args) => {
+      const handle = { fn, delay: Number(delay), args };
+      scheduledIntervalHandles.push(handle);
+      return handle;
+    };
+    globalThis.clearInterval = (handle) => {
+      clearedIntervalHandles.push(handle);
+    };
     __setPluginStateFactoryForTesting__((factoryApi) =>
       createPluginStateForTest(factoryApi, {
         store: {
@@ -388,10 +464,63 @@ try {
           list: async () => [],
           getById: async () => null,
           update: async () => null,
+          flushWrites: async () => {
+            storeFlushWriteCalls += 1;
+            markStoreFlushWritesStarted();
+            await new Promise((resolve) => {
+              releaseStoreFlushWrites = resolve;
+            });
+          },
+          flushAuditLog: async () => {
+            storeFlushAuditCalls += 1;
+          },
+          close: () => {
+            storeCloseCalls += 1;
+          },
         },
+        retriever: {
+          async flushAccessTrackers() {
+            retrieverFlushCalls += 1;
+          },
+          async flushStatsCollector() {
+            retrieverStatsFlushCalls += 1;
+          },
+        },
+        telemetryStore: {
+          enabled: false,
+          recordRetrieval: () => {},
+          recordExtraction: () => {},
+          flush: async () => {
+            telemetryFlushCalls += 1;
+          },
+          getPersistentSummary: async () => ({ retrieval: null, extraction: null }),
+        },
+        feedbackLoop: {
+          start() {},
+          async close() {
+            feedbackLoopCloseCalls += 1;
+          },
+          dispose() {
+            throw new Error("service stop should use feedbackLoop.close()");
+          },
+        },
+        sessionPruneInterval: sessionPruneIntervalHandle,
+        autoRecallMetadataAccumulators: new Set([
+          {
+            async flushNow() {
+              autoRecallMetadataFlushCalls += 1;
+            },
+          },
+        ]),
+        autoRecallBackgroundTasks,
+        hookEnhancementBackgroundTasks,
+        autoCaptureBackgroundTasks,
+        reflectionBackgroundTasks,
       }),
     );
+    sessionPruneIntervalHandle = { fn: () => {}, delay: 5 * 60_000, args: [] };
     const fastServices = [];
+    const fastLogs = { info: [], warn: [], error: [], debug: [] };
     const fastApi = createMockApi(
       {
         dbPath: path.join(workDir, "db-fast-start"),
@@ -412,7 +541,7 @@ try {
           dimensions: 1536,
         },
       },
-      { services: fastServices },
+      { services: fastServices, logs: fastLogs },
     );
     plugin.register(fastApi);
     await assert.doesNotReject(
@@ -428,9 +557,118 @@ try {
       !scheduledTimeouts.includes(0),
       "service start should no longer trigger startup health checks immediately",
     );
+    const dashboardLog = fastLogs.info.find((line) => line.includes("控制台已启动"));
+    assert.ok(dashboardLog, "service start should log the dashboard URL");
+    assert.match(
+      dashboardLog,
+      /控制台已启动：http:\/\/127\.0\.0\.1:1314\/\?token=\$\(cat '.+\.dashboard-token'\)/,
+      "dashboard startup log should give an unlock URL that reads the token file",
+    );
+    const fastDashboardToken = readFileSync(
+      path.join(workDir, "db-fast-start", ".dashboard-token"),
+      "utf8",
+    );
+    assert.equal(
+      dashboardLog.includes(fastDashboardToken),
+      false,
+      "dashboard startup log should not expose the raw auth token",
+    );
+    let stopResolved = false;
+    const stopPromise = fastServices[0].stop().then(() => {
+      stopResolved = true;
+    });
+    await Promise.resolve();
+    assert.equal(
+      stopResolved,
+      false,
+      "service stop should wait for pending auto-recall background tasks",
+    );
+    releaseAutoRecallBackgroundTask();
+    await Promise.resolve();
+    assert.equal(
+      stopResolved,
+      false,
+      "service stop should also wait for pending hook-enhancement background tasks",
+    );
+    releaseHookEnhancementBackgroundTask();
+    await Promise.resolve();
+    assert.equal(
+      stopResolved,
+      false,
+      "service stop should also wait for pending auto-capture background tasks",
+    );
+    releaseAutoCaptureBackgroundTask();
+    await Promise.resolve();
+    assert.equal(
+      stopResolved,
+      false,
+      "service stop should also wait for pending reflection background tasks",
+    );
+    releaseReflectionBackgroundTask();
+    await storeFlushWritesStarted;
+    assert.equal(
+      stopResolved,
+      false,
+      "service stop should wait for the store write queue before closing stores",
+    );
+    releaseStoreFlushWrites();
     await assert.doesNotReject(
-      fastServices[0].stop(),
+      stopPromise,
       "service stop should tolerate deferred startup work handles",
+    );
+    assert.equal(autoRecallBackgroundTaskDrained, true);
+    assert.equal(hookEnhancementBackgroundTaskDrained, true);
+    assert.equal(autoCaptureBackgroundTaskDrained, true);
+    assert.equal(reflectionBackgroundTaskDrained, true);
+    assert.equal(
+      retrieverFlushCalls,
+      1,
+      "service stop should drain pending retriever access-tracker writes",
+    );
+    assert.equal(
+      retrieverStatsFlushCalls,
+      1,
+      "service stop should drain pending retriever telemetry hooks",
+    );
+    assert.equal(
+      telemetryFlushCalls,
+      1,
+      "service stop should drain pending telemetry writes",
+    );
+    assert.equal(
+      autoRecallMetadataFlushCalls,
+      1,
+      "service stop should flush pending auto-recall metadata writes",
+    );
+    assert.equal(
+      storeFlushWriteCalls,
+      1,
+      "service stop should drain pending store writes",
+    );
+    assert.equal(
+      storeFlushAuditCalls,
+      1,
+      "service stop should flush the store audit log",
+    );
+    assert.equal(
+      feedbackLoopCloseCalls,
+      1,
+      "service stop should close and drain the feedback loop",
+    );
+    assert.equal(
+      storeCloseCalls,
+      1,
+      "service stop should close the store handles once",
+    );
+    assert.deepEqual(
+      clearedTimeoutHandles.map((handle) => handle?.delay).sort((left, right) => left - right),
+      [5_000, 15_000, 60_000],
+      "service stop should cancel deferred startup checks and the initial backup timer",
+    );
+    assert.deepEqual(
+      clearedIntervalHandles.map((handle) => handle?.delay),
+      [24 * 60 * 60 * 1000, 5 * 60_000],
+      "service stop should cancel recurring auto-backup and session-prune timers",
     );
   } finally {
     __setPluginStateFactoryForTesting__(null);
@@ -438,6 +676,245 @@ try {
     globalThis.clearTimeout = originalClearTimeout;
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
+  }
+  {
+    const originalSetTimeoutForDrain = globalThis.setTimeout;
+    const originalClearTimeoutForDrain = globalThis.clearTimeout;
+    const originalSetIntervalForDrain = globalThis.setInterval;
+    const originalClearIntervalForDrain = globalThis.clearInterval;
+    const triggeredTimeoutHandles = [];
+    let storeClosedDuringDrain = false;
+    let markEmbedTestStarted;
+    let releaseEmbedTest;
+    const embedTestStarted = new Promise((resolve) => {
+      markEmbedTestStarted = resolve;
+    });
+    try {
+      globalThis.setTimeout = (fn, delay = 0, ...args) => {
+        const handle = { fn, delay: Number(delay), args };
+        triggeredTimeoutHandles.push(handle);
+        return handle;
+      };
+      globalThis.clearTimeout = () => {};
+      globalThis.setInterval = (fn, delay = 0, ...args) => ({ fn, delay: Number(delay), args });
+      globalThis.clearInterval = () => {};
+
+      __setPluginStateFactoryForTesting__((factoryApi) =>
+        createPluginStateForTest(factoryApi, {
+          store: {
+            hasFtsSupport: true,
+            lastFtsError: null,
+            stats: async () => ({
+              totalCount: 0,
+              scopeCounts: {},
+              categoryCounts: {},
+              memoryCategoryCounts: {},
+              recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
+              tierDistribution: {},
+              healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+            }),
+            list: async () => [],
+            getById: async () => null,
+            update: async () => null,
+            flushAuditLog: async () => {},
+            close: () => {
+              storeClosedDuringDrain = true;
+            },
+          },
+          embedder: {
+            test: async () => {
+              markEmbedTestStarted();
+              await new Promise((resolve) => {
+                releaseEmbedTest = resolve;
+              });
+              return { success: true };
+            },
+            embedQuery: async () => [],
+            embedPassage: async () => [],
+          },
+          retriever: {
+            getConfig: () => ({ mode: "hybrid" }),
+            async flushAccessTrackers() {},
+          },
+        }),
+      );
+
+      const drainServices = [];
+      const drainApi = createMockApi(
+        {
+          dbPath: path.join(workDir, "db-drain-startup-task"),
+          autoCapture: false,
+          autoRecall: false,
+          smartExtraction: false,
+          memoryReflection: { enabled: false },
+          sessionStrategy: "none",
+          memoryCompaction: { enabled: false },
+          lifecycleMaintenance: { enabled: false },
+          preferenceDistiller: { enabled: false },
+          learningMemory: { enabled: false },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: "http://127.0.0.1:9/v1",
+            dimensions: 1536,
+          },
+        },
+        { services: drainServices, logs: { info: [], warn: [], error: [], debug: [] } },
+      );
+      plugin.register(drainApi);
+      await drainServices[0].start();
+      const healthCheckTimer = triggeredTimeoutHandles.find((handle) => handle.delay === 15_000);
+      assert.ok(healthCheckTimer, "service start should schedule a delayed startup health check");
+      healthCheckTimer.fn(...healthCheckTimer.args);
+      await embedTestStarted;
+
+      let stopResolved = false;
+      const stopPromise = drainServices[0].stop().then(() => {
+        stopResolved = true;
+      });
+      await Promise.resolve();
+      assert.equal(
+        stopResolved,
+        false,
+        "service stop should wait for an already-triggered startup task",
+      );
+      assert.equal(
+        storeClosedDuringDrain,
+        false,
+        "service stop should not close stores before startup tasks drain",
+      );
+      releaseEmbedTest();
+      await stopPromise;
+      assert.equal(
+        storeClosedDuringDrain,
+        true,
+        "service stop should close stores after startup tasks drain",
+      );
+    } finally {
+      __setPluginStateFactoryForTesting__(null);
+      globalThis.setTimeout = originalSetTimeoutForDrain;
+      globalThis.clearTimeout = originalClearTimeoutForDrain;
+      globalThis.setInterval = originalSetIntervalForDrain;
+      globalThis.clearInterval = originalClearIntervalForDrain;
+    }
+  }
+  {
+    const originalSetTimeoutForBackupDrain = globalThis.setTimeout;
+    const originalClearTimeoutForBackupDrain = globalThis.clearTimeout;
+    const originalSetIntervalForBackupDrain = globalThis.setInterval;
+    const originalClearIntervalForBackupDrain = globalThis.clearInterval;
+    const backupTimeoutHandles = [];
+    let markBackupStarted;
+    let releaseBackup;
+    let storeClosedBeforeBackupFinished = false;
+    let backupFinished = false;
+    const backupStarted = new Promise((resolve) => {
+      markBackupStarted = resolve;
+    });
+    try {
+      globalThis.setTimeout = (fn, delay = 0, ...args) => {
+        const handle = { fn, delay: Number(delay), args };
+        backupTimeoutHandles.push(handle);
+        return handle;
+      };
+      globalThis.clearTimeout = () => {};
+      globalThis.setInterval = (fn, delay = 0, ...args) => ({ fn, delay: Number(delay), args });
+      globalThis.clearInterval = () => {};
+
+      __setPluginStateFactoryForTesting__((factoryApi) =>
+        createPluginStateForTest(factoryApi, {
+          store: {
+            hasFtsSupport: true,
+            lastFtsError: null,
+            stats: async () => ({
+              totalCount: 0,
+              scopeCounts: {},
+              categoryCounts: {},
+              memoryCategoryCounts: {},
+              recentActivity: { last24h: 0, last7d: 0, last30d: 0 },
+              tierDistribution: {},
+              healthSignals: { badRecall: 0, suppressed: 0, lowConfidence: 0 },
+            }),
+            list: async () => {
+              markBackupStarted();
+              await new Promise((resolve) => {
+                releaseBackup = resolve;
+              });
+              backupFinished = true;
+              return [];
+            },
+            getById: async () => null,
+            update: async () => null,
+            flushAuditLog: async () => {},
+            close: () => {
+              storeClosedBeforeBackupFinished = !backupFinished;
+            },
+          },
+          retriever: {
+            getConfig: () => ({ mode: "hybrid" }),
+            async flushAccessTrackers() {},
+          },
+        }),
+      );
+
+      const backupDrainServices = [];
+      const backupDrainApi = createMockApi(
+        {
+          dbPath: path.join(workDir, "db-drain-backup"),
+          autoCapture: false,
+          autoRecall: false,
+          smartExtraction: false,
+          memoryReflection: { enabled: false },
+          sessionStrategy: "none",
+          memoryCompaction: { enabled: false },
+          lifecycleMaintenance: { enabled: false },
+          preferenceDistiller: { enabled: false },
+          learningMemory: { enabled: false },
+          embedding: {
+            provider: "openai-compatible",
+            apiKey: "dummy",
+            model: "text-embedding-3-small",
+            baseURL: "http://127.0.0.1:9/v1",
+            dimensions: 1536,
+          },
+        },
+        { services: backupDrainServices, logs: { info: [], warn: [], error: [], debug: [] } },
+      );
+      plugin.register(backupDrainApi);
+      await backupDrainServices[0].start();
+      const initialBackupTimer = backupTimeoutHandles.find((handle) => handle.delay === 60_000);
+      assert.ok(initialBackupTimer, "service start should schedule an initial auto-backup");
+      initialBackupTimer.fn(...initialBackupTimer.args);
+      await backupStarted;
+
+      let stopResolved = false;
+      const stopPromise = backupDrainServices[0].stop().then(() => {
+        stopResolved = true;
+      });
+      await Promise.resolve();
+      assert.equal(stopResolved, false, "service stop should wait for an in-flight backup");
+      assert.equal(
+        storeClosedBeforeBackupFinished,
+        false,
+        "service stop should not close stores before in-flight backup finishes",
+      );
+
+      releaseBackup();
+      await stopPromise;
+      assert.equal(stopResolved, true);
+      assert.equal(
+        storeClosedBeforeBackupFinished,
+        false,
+        "service stop should close stores only after in-flight backup finishes",
+      );
+    } finally {
+      __setPluginStateFactoryForTesting__(null);
+      globalThis.setTimeout = originalSetTimeoutForBackupDrain;
+      globalThis.clearTimeout = originalClearTimeoutForBackupDrain;
+      globalThis.setInterval = originalSetIntervalForBackupDrain;
+      globalThis.clearInterval = originalClearIntervalForBackupDrain;
+    }
   }
   __setPluginStateFactoryForTesting__((factoryApi) =>
     createPluginStateForTest(factoryApi, {
