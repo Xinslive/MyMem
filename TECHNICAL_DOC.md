@@ -1008,11 +1008,11 @@ Learning Memory 维护复用现有网关启动/后台维护入口，按 `learnin
 | `mymem_compact` | `tools-management.ts` | 触发手动压缩 |
 | `mymem_explain_rank` | `tools-management.ts` | 解释检索排名 |
 
-管理工具随 `enableManagementTools` 启用（默认 `true`）。
+默认运行时只注册 `mymem_recall`、`mymem_update` 和 `mymem_doctor`。其他管理工具保留在源码中供测试、CLI 或兼容路径使用，不进入默认 OpenClaw 工具面。
 
 ### 16.3 工具注册总入口
 
-`src/tools.ts` 提供 `registerAllMemoryTools()` 函数，统一注册所有工具：
+`src/tools.ts` 提供 `registerAllMemoryTools()` 函数，统一注册默认 OpenClaw 工具：
 
 ```typescript
 export function registerAllMemoryTools(
@@ -1020,10 +1020,10 @@ export function registerAllMemoryTools(
   context: ToolContext,
   options: { enableManagementTools?: boolean }
 ) {
-  // 运行时只注册诊断工具；写入、召回和治理由自动管线处理
-  if (options.enableManagementTools) {
-    registerMemoryDoctorTool(api, context);
-  }
+  void options;
+  registerMemoryRecallTool(api, context);
+  registerMemoryUpdateTool(api, context);
+  registerMemoryDoctorTool(api, context);
 }
 ```
 

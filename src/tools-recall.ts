@@ -126,7 +126,7 @@ export function registerMemoryRecallTool(
             limit: safeLimit,
             scopeFilter,
             source: "manual",
-          }, () => runtimeContext.store.count()), runtimeContext.workspaceBoundary);
+          }, () => runtimeContext.store.count()), runtimeContext.workspaceBoundary) as Awaited<ReturnType<typeof retrieveWithRetry>>;
           const categoryFilteredResults = filterResultsByMemoryCategory(rawResults, category);
 
           const typeFilter: MemoryType | undefined =

@@ -16,16 +16,15 @@
 // ============================================================================
 
 /**
- * Intent categories map to actual stored MemoryEntry categories.
- * Note: "event" is NOT a stored category — event queries route to
- * entity + decision (the categories most likely to contain timeline data).
+ * Intent categories map to the public six-category MemoryEntry categories.
  */
 export type MemoryCategoryIntent =
-  | "preference"
-  | "fact"
-  | "decision"
-  | "entity"
-  | "other";
+  | "profile"
+  | "preferences"
+  | "entities"
+  | "events"
+  | "cases"
+  | "patterns";
 
 export type RecallDepth = "summary" | "full";
 
@@ -75,7 +74,7 @@ const INTENT_RULES: IntentRule[] = [
       /(偏好|喜欢|习惯|风格|惯例|常用|不喜欢|不要用|别用)/,
       /(用\S+比较好|推荐用|倾向于|比较喜欢|更喜欢|最好用|一般用)/,
     ],
-    categories: ["preference", "decision"],
+    categories: ["preferences", "events"],
     depth: "summary",
     memoryType: "knowledge",
   },
@@ -91,7 +90,7 @@ const INTENT_RULES: IntentRule[] = [
       /(上次|上回|之前|以前|记得|还记得|那次|那会|先前)/,
       /(当时|那一次|上次试过|曾经|试过|遇到过|碰到过|踩过坑)/,
     ],
-    categories: ["decision", "fact"],
+    categories: ["events", "cases"],
     depth: "full",
     memoryType: "experience",
   },
@@ -105,7 +104,7 @@ const INTENT_RULES: IntentRule[] = [
       /(为什么选|决定|选择了|取舍|权衡|原因是|当时决定)/,
       /(最终决定|方案是|确定用|定了用|选了|为啥选|为啥用|干嘛用|干吗选)/,
     ],
-    categories: ["decision", "fact"],
+    categories: ["events", "cases"],
     depth: "full",
     memoryType: "experience",
   },
@@ -121,14 +120,12 @@ const INTENT_RULES: IntentRule[] = [
       /(谁是|告诉我关于|详情|联系方式|哪个团队)/,
       /(谁负责|哪个团队在做|联系人是谁|谁在搞|谁弄的|谁写的)/,
     ],
-    categories: ["entity", "fact"],
+    categories: ["entities", "cases"],
     depth: "full",
     memoryType: "knowledge",
   },
 
   // --- Event / Timeline queries ---
-  // Note: "event" is not a stored category. Route to entity + decision
-  // (the categories most likely to contain timeline/incident data).
   {
     label: "event",
     patterns: [
@@ -137,7 +134,7 @@ const INTENT_RULES: IntentRule[] = [
       /(什么时候|发生了什么|时间线|事件|上线|部署|发布|最近)/,
       /(出了什么问题|故障|出了个\s*bug|挂了|崩了|炸了|宕机|报错了)/,
     ],
-    categories: ["entity", "decision"],
+    categories: ["entities", "events"],
     depth: "full",
     memoryType: "experience",
   },
@@ -151,7 +148,7 @@ const INTENT_RULES: IntentRule[] = [
       /(怎么|如何|是什么|解释|文档|规范|配置|安装|架构|接口|原理|规则)/,
       /(怎么用|怎么配|什么作用|怎么实现的|啥意思|干嘛的|有什么用)/,
     ],
-    categories: ["fact", "entity"],
+    categories: ["cases", "entities"],
     depth: "full",
     memoryType: "knowledge",
   },
@@ -228,7 +225,7 @@ export function analyzeIntent(query: string): IntentSignal {
  * @returns Results with adjusted scores, re-sorted
  */
 export function applyCategoryBoost<
-  T extends { entry: { category: string }; score: number },
+  T extends { entry: { category: string }; score?: number },
 >(results: T[], intent: IntentSignal, boostFactor = 1.15): T[] {
   if (intent.categories.length === 0 || intent.confidence === "low") {
     return results; // No intent signal — return as-is
@@ -238,12 +235,13 @@ export function applyCategoryBoost<
 
   const boosted = results.map((r) => {
     if (prioritySet.has(r.entry.category)) {
-      return { ...r, score: Math.min(1, r.score * boostFactor) };
+      const score = typeof r.score === "number" ? r.score : 0;
+      return { ...r, score: Math.min(1, score * boostFactor) };
     }
     return r;
   });
 
-  return boosted.sort((a, b) => b.score - a.score);
+  return boosted.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
 /**
@@ -257,7 +255,7 @@ export function applyCategoryBoost<
  * callback keeps this module free of JSON-parsing and smart-metadata imports.
  */
 export function applyMemoryTypeBoost<
-  T extends { entry: { metadata?: string }; score: number },
+  T extends { entry: { metadata?: string }; score?: number },
 >(
   results: T[],
   intent: IntentSignal,
@@ -270,12 +268,13 @@ export function applyMemoryTypeBoost<
   const boosted = results.map((r) => {
     const type = getMemoryType(r.entry);
     if (type === want) {
-      return { ...r, score: Math.min(1, r.score * boostFactor) };
+      const score = typeof r.score === "number" ? r.score : 0;
+      return { ...r, score: Math.min(1, score * boostFactor) };
     }
     return r;
   });
 
-  return boosted.sort((a, b) => b.score - a.score);
+  return boosted.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
 /**

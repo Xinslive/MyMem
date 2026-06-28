@@ -6,14 +6,14 @@ import type * as LanceDB from "@lancedb/lancedb";
 import { Index as LanceDbIndex } from "@lancedb/lancedb";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, stringifySmartMetadata } from "./smart-metadata.js";
-import { hasActiveRecallSuppression } from "./recall-suppression.js";
-import type { MemoryCategory } from "./memory-categories.js";
+import { MEMORY_CATEGORIES, type MemoryCategory } from "./memory-categories.js";
 import { clampInt } from "./utils.js";
 import { createLogger, type Logger } from "./logger.js";
 import { AuditLogger, type AuditEntry } from "./audit-log.js";
+import { writeJsonFileAtomic, writeTextFileAtomic } from "./file-utils.js";
 
 import type { MemoryEntry, MemorySearchResult, StoreConfig, MetadataPatch, StoreIndexStatus, LanceRow, LanceIndex, MemoryListFilters } from "./store-types.js";
 import {
@@ -35,7 +35,7 @@ import {
   resolveMemoryId,
   assertValidVector,
 } from "./store-sql-utils.js";
-import { toLanceRows, mapRowToMemoryEntry } from "./store-row-mappers.js";
+import { toLanceRows, mapRowToMemoryEntry, normalizeStoredCategory } from "./store-row-mappers.js";
 import { loadLanceDB } from "./lancedb-loader.js";
 
 /** Async stat that returns null instead of throwing on ENOENT. */
@@ -108,6 +108,8 @@ const batchStoreContext = new AsyncLocalStorage<Map<object, MemoryEntry[]>>();
 const METADATA_BATCH_CHUNK_SIZE = 200;
 const FTS_INDEX_VERSION = "ngram-v1";
 const FTS_INDEX_VERSION_FILE = ".mymem-fts-index.version";
+const DEFERRED_VECTOR_INDEX_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+const STATS_SCOPE_SAMPLE_LIMIT = 500;
 /**
  * Persistent marker recording the embedding-model dimensions this store
  * was opened with. Read on startup to detect the "user switched embedding
@@ -134,6 +136,9 @@ export class MemoryStore {
   private scalarIndexedColumns = new Set<string>();
   /** Last FTS error for diagnostics. */
   private _lastFtsError: string | null = null;
+  private _lastDeferredVectorIndexError: string | null = null;
+  private _lastDeferredVectorIndexFailureAt = 0;
+  private _deferredVectorIndexFailureCount = 0;
 
   // Flush-batch: buffer store() calls and write them in a single lock acquisition.
   private _batchBuffer: MemoryEntry[] = [];
@@ -251,9 +256,10 @@ export class MemoryStore {
     if (entries.length === 0) return [];
 
     await this.ensureInitialized();
+    const normalizedEntries = entries.map((entry) => this.normalizeEntryForWrite(entry));
     const written = await this.runWithFileLock(async () => {
       try {
-        await this.table!.add(toLanceRows(entries));
+        await this.table!.add(toLanceRows(normalizedEntries));
       } catch (err: unknown) {
         const code = (err as Record<string, unknown>)?.code || "";
         const message = err instanceof Error ? err.message : String(err);
@@ -262,7 +268,7 @@ export class MemoryStore {
           { cause: err },
         );
       }
-      return entries;
+      return normalizedEntries;
     });
     this._statsCache = null;
     for (const entry of written) {
@@ -324,6 +330,142 @@ export class MemoryStore {
   private async countRowsWithFilter(whereClause?: string): Promise<number> {
     if (!this.table) return 0;
     return whereClause ? this.table.countRows(whereClause) : this.table.countRows();
+  }
+
+  private normalizeEntryForWrite(entry: MemoryEntry): MemoryEntry {
+    return {
+      ...entry,
+      category: normalizeStoredCategory(entry.category, entry.text),
+    };
+  }
+
+  private async countByWhereSuffix(
+    baseWhere: string | undefined,
+    suffix: string | undefined,
+  ): Promise<number> {
+    return this.countRowsWithFilter(combineWhereClauses([baseWhere, suffix]));
+  }
+
+  private async countStoreCategories(baseWhere: string | undefined): Promise<Record<string, number>> {
+    const categoryCounts: Record<string, number> = {};
+    await Promise.all(
+      MEMORY_CATEGORIES.map(async (category) => {
+        const legacyAliases: Record<MemoryCategory, string[]> = {
+          profile: [],
+          preferences: ["preference"],
+          entities: ["entity"],
+          events: ["decision"],
+          cases: ["fact"],
+          patterns: ["other"],
+        };
+        const variants = [category, ...legacyAliases[category]]
+          .map((value) => `category = '${escapeSqlLiteral(value)}'`)
+          .join(" OR ");
+        const count = await this.countByWhereSuffix(baseWhere, `(${variants})`);
+        if (count > 0) categoryCounts[category] = count;
+      }),
+    );
+    const reflectionCount = await this.countByWhereSuffix(baseWhere, `category = 'reflection'`);
+    if (reflectionCount > 0) categoryCounts.reflection = reflectionCount;
+    return categoryCounts;
+  }
+
+  private async countScopes(baseWhere: string | undefined, scopeFilter?: string[]): Promise<Record<string, number>> {
+    const scopeCounts: Record<string, number> = {};
+    const exactScopes = scopeFilter && scopeFilter.length > 0 ? scopeFilter : ["global"];
+
+    await Promise.all(
+      [...new Set(exactScopes)].map(async (scope) => {
+        const count = await this.countByWhereSuffix(
+          baseWhere,
+          scope === "global"
+            ? `(scope = 'global' OR scope IS NULL)`
+            : `scope = '${escapeSqlLiteral(scope)}'`,
+        );
+        if (count > 0) scopeCounts[scope] = count;
+      }),
+    );
+
+    if (scopeFilter && scopeFilter.length > 0) return scopeCounts;
+
+    let query = this.table!
+      .query()
+      .select(["scope"])
+      .limit(STATS_SCOPE_SAMPLE_LIMIT);
+    if (baseWhere) query = query.where(baseWhere);
+    const rows = await query.toArray();
+    for (const row of rows) {
+      const scope = (row.scope as string | undefined) ?? "global";
+      if (scopeCounts[scope] !== undefined) continue;
+      const count = await this.countByWhereSuffix(
+        baseWhere,
+        scope === "global"
+          ? `(scope = 'global' OR scope IS NULL)`
+          : `scope = '${escapeSqlLiteral(scope)}'`,
+      );
+      if (count > 0) scopeCounts[scope] = count;
+    }
+
+    return scopeCounts;
+  }
+
+  private async countHealthSignals(baseWhere: string | undefined): Promise<StatsResult["healthSignals"]> {
+    const [badRecall, suppressed, lowConfidence] = await Promise.all([
+      this.countByWhereSuffix(baseWhere, this.buildListFilterConditions({ quality: "bad_recall" })[0]),
+      this.countByWhereSuffix(
+        baseWhere,
+        combineWhereClauses(this.buildListFilterConditions({ quality: "suppressed" })),
+      ),
+      this.countByWhereSuffix(baseWhere, this.buildListFilterConditions({ quality: "low_confidence" })[0]),
+    ]);
+    return { badRecall, suppressed, lowConfidence };
+  }
+
+  private async countTierDistribution(baseWhere: string | undefined): Promise<Record<string, number>> {
+    const layerConditions: Array<[string, string]> = [
+      ["durable", `(metadata LIKE '%"memory_layer":"durable"%' OR metadata LIKE '%"memory_layer": "durable"%')`],
+      ["working", `(metadata LIKE '%"memory_layer":"working"%' OR metadata LIKE '%"memory_layer": "working"%')`],
+      ["reflection", `(metadata LIKE '%"memory_layer":"reflection"%' OR metadata LIKE '%"memory_layer": "reflection"%')`],
+      ["archive", `(metadata LIKE '%"memory_layer":"archive"%' OR metadata LIKE '%"memory_layer": "archive"%')`],
+    ];
+    const entries = await Promise.all(
+      layerConditions.map(async ([layer, condition]) => {
+        const count = await this.countByWhereSuffix(baseWhere, condition);
+        return [layer, count] as const;
+      }),
+    );
+    const tierDistribution: Record<string, number> = {};
+    let counted = 0;
+    for (const [layer, count] of entries) {
+      if (count > 0) tierDistribution[layer] = count;
+      counted += count;
+    }
+    const unknown = Math.max(0, await this.countRowsWithFilter(baseWhere) - counted);
+    if (unknown > 0) tierDistribution.working = (tierDistribution.working || 0) + unknown;
+    return tierDistribution;
+  }
+
+  private async migrateLegacyTopLevelCategories(table: LanceDB.Table): Promise<void> {
+    const mappings: Array<[legacy: string, category: MemoryCategory]> = [
+      ["preference", "preferences"],
+      ["entity", "entities"],
+      ["decision", "events"],
+      ["fact", "cases"],
+      ["other", "patterns"],
+    ];
+
+    let migrated = 0;
+    for (const [legacy, category] of mappings) {
+      const result = await table.update({
+        where: `category = '${legacy}'`,
+        values: { category },
+      });
+      migrated += Number(result.rowsUpdated ?? 0);
+    }
+
+    if (migrated > 0) {
+      this.log.info(`mymem: migrated ${migrated} legacy top-level categories to six-category schema`);
+    }
   }
 
   private async getIndexStatusInternal(table: LanceDB.Table): Promise<StoreIndexStatus> {
@@ -436,13 +578,29 @@ export class MemoryStore {
 
   private async maybeCreateDeferredVectorIndex(): Promise<void> {
     if (!this.table || this.vectorIndexCreated) return;
+    const now = Date.now();
+    if (
+      this._lastDeferredVectorIndexFailureAt > 0 &&
+      now - this._lastDeferredVectorIndexFailureAt < DEFERRED_VECTOR_INDEX_RETRY_COOLDOWN_MS
+    ) {
+      return;
+    }
     try {
       const totalRows = await this.table.countRows();
       if (totalRows < MIN_VECTOR_INDEX_ROWS) return;
       await this.ensureVectorIndex(this.table, totalRows);
       await this.getIndexStatusInternal(this.table);
+      this._lastDeferredVectorIndexError = null;
+      this._lastDeferredVectorIndexFailureAt = 0;
+      this._deferredVectorIndexFailureCount = 0;
     } catch (error) {
-      this.log.warn(`mymem: deferred vector index creation failed: ${String(error)}`);
+      this._lastDeferredVectorIndexError = error instanceof Error ? error.message : String(error);
+      this._lastDeferredVectorIndexFailureAt = now;
+      this._deferredVectorIndexFailureCount += 1;
+      this.log.warn(
+        `mymem: deferred vector index creation failed ` +
+        `(failures=${this._deferredVectorIndexFailureCount}, retryAfterMs=${DEFERRED_VECTOR_INDEX_RETRY_COOLDOWN_MS}): ${this._lastDeferredVectorIndexError}`,
+      );
     }
   }
 
@@ -750,7 +908,7 @@ export class MemoryStore {
         vector: Array.from({ length: this.config.vectorDim }).fill(
           0,
         ) as number[],
-        category: "other",
+        category: "patterns",
         scope: "global",
         importance: 0,
         timestamp: 0,
@@ -789,6 +947,12 @@ export class MemoryStore {
           ].join(" "),
         );
       }
+    }
+
+    try {
+      await this.migrateLegacyTopLevelCategories(table);
+    } catch (err) {
+      this.log.warn(`could not migrate legacy top-level categories: ${err}`);
     }
 
     // Record the current dimension for next-time mismatch detection. We
@@ -861,10 +1025,9 @@ export class MemoryStore {
       return;
     }
     try {
-      await writeFile(
+      await writeJsonFileAtomic(
         filePath,
-        JSON.stringify({ dimension: this.config.vectorDim, recordedAt: Date.now() }, null, 2),
-        "utf8",
+        { dimension: this.config.vectorDim, recordedAt: Date.now() },
       );
     } catch (err) {
       this.log.warn(`could not write embedding-dimension marker: ${err}`);
@@ -883,7 +1046,7 @@ export class MemoryStore {
 
   private async writeFtsIndexVersion(): Promise<void> {
     try {
-      await writeFile(this.getFtsIndexVersionPath(), `${FTS_INDEX_VERSION}\n`, "utf8");
+      await writeTextFileAtomic(this.getFtsIndexVersionPath(), `${FTS_INDEX_VERSION}\n`);
     } catch (err) {
       this.log.warn(`could not write FTS index version marker: ${err}`);
     }
@@ -962,23 +1125,24 @@ export class MemoryStore {
       timestamp: Date.now(),
       metadata: entry.metadata || "{}",
     };
+    const normalizedEntry = this.normalizeEntryForWrite(fullEntry);
 
     // Async-context batch mode: only the owning flow buffers its own writes.
     const contextBuffer = batchStoreContext.getStore()?.get(this);
     if (contextBuffer) {
-      contextBuffer.push(fullEntry);
-      return fullEntry;
+      contextBuffer.push(normalizedEntry);
+      return normalizedEntry;
     }
 
     // Legacy process-wide batch mode: retained for existing direct callers.
     if (this._batchActive) {
-      this._batchBuffer.push(fullEntry);
-      return fullEntry;
+      this._batchBuffer.push(normalizedEntry);
+      return normalizedEntry;
     }
 
     const stored = await this.runWithFileLock(async () => {
       try {
-        await this.table!.add(toLanceRows([fullEntry]));
+        await this.table!.add(toLanceRows([normalizedEntry]));
       } catch (err: unknown) {
         const code = (err as Record<string, unknown>)?.code || "";
         const message = err instanceof Error ? err.message : String(err);
@@ -987,7 +1151,7 @@ export class MemoryStore {
           { cause: err },
         );
       }
-      return fullEntry;
+      return normalizedEntry;
     });
     this._statsCache = null;
     this.recordAudit({
@@ -1021,10 +1185,11 @@ export class MemoryStore {
         : Date.now(),
       metadata: entry.metadata || "{}",
     };
+    const normalized = this.normalizeEntryForWrite(full);
 
     const imported = await this.runWithFileLock(async () => {
-      await this.table!.add(toLanceRows([full]));
-      return full;
+      await this.table!.add(toLanceRows([normalized]));
+      return normalized;
     });
     this._statsCache = null;
     this.recordAudit({
@@ -1465,49 +1630,26 @@ export class MemoryStore {
       };
     }
 
-    // Phase 2: load lightweight columns (no vector) and use mapRowToMemoryEntry
-    // so that parsed metadata is cached in _parsedMeta for reuse.
-    let query = this.table!.query().select(LIST_ENTRY_COLUMNS as unknown as string[]);
-    if (whereClause) {
-      query = query.where(whereClause);
-    }
-    const results = await query.toArray();
-
-    const scopeCounts: Record<string, number> = {};
-    const categoryCounts: Record<string, number> = {};
-    const memoryCategoryCounts: Record<string, number> = {};
-    const tierDistribution: Record<string, number> = {};
-    let badRecall = 0;
-    let suppressed = 0;
-    let lowConfidence = 0;
-
-    for (const row of results) {
-      const entry = mapRowToMemoryEntry(row, false);
-      const scope = entry.scope;
-      const category = entry.category;
-
-      scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
-      categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-
-      // Use pre-parsed metadata from _parsedMeta (cached by mapRowToMemoryEntry)
-      const meta = entry._parsedMeta!;
-      const memoryCategory = String((meta.memory_category || category) as MemoryCategory);
-      memoryCategoryCounts[memoryCategory] = (memoryCategoryCounts[memoryCategory] || 0) + 1;
-      const tier = String(meta.memory_tier || meta.memory_layer || "unknown");
-      tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
-      if (Number(meta.bad_recall_count || 0) > 0) badRecall++;
-      if (hasActiveRecallSuppression(meta)) suppressed++;
-      if (typeof meta.confidence === "number" && meta.confidence < 0.4) lowConfidence++;
-    }
+    const [
+      scopeCounts,
+      categoryCounts,
+      tierDistribution,
+      healthSignals,
+    ] = await Promise.all([
+      this.countScopes(whereClause, scopeFilter),
+      this.countStoreCategories(whereClause),
+      this.countTierDistribution(whereClause),
+      this.countHealthSignals(whereClause),
+    ]);
 
     const result = {
       totalCount,
       scopeCounts,
       categoryCounts,
-      memoryCategoryCounts,
+      memoryCategoryCounts: categoryCounts,
       recentActivity: { last24h, last7d, last30d },
       tierDistribution,
-      healthSignals: { badRecall, suppressed, lowConfidence },
+      healthSignals,
     };
 
     // Cache the result
@@ -1559,23 +1701,24 @@ export class MemoryStore {
         timestamp: original.timestamp, // preserve original
         metadata: updates.metadata ?? original.metadata,
       };
-      assertValidVector(updated.vector, this.config.vectorDim, "update");
+      const normalizedUpdated = this.normalizeEntryForWrite(updated);
+      assertValidVector(normalizedUpdated.vector, this.config.vectorDim, "update");
 
       // Use LanceDB mergeInsert for atomic upsert — eliminates the
       // delete+add race condition where a failed add could lose data.
       try {
         await this.table!
-          .mergeInsert(["id"])
-          .whenMatchedUpdateAll()
-          .whenNotMatchedInsertAll()
-          .execute(toLanceRows([updated]));
+            .mergeInsert(["id"])
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+          .execute(toLanceRows([normalizedUpdated]));
       } catch (mergeError) {
         throw new Error(
           `Failed to update memory ${id}: ${mergeError instanceof Error ? mergeError.message : String(mergeError)}`,
         );
       }
 
-      return updated;
+      return normalizedUpdated;
     });
 
     this._statsCache = null;
@@ -1798,6 +1941,13 @@ export class MemoryStore {
     this.scalarIndexedColumns.clear();
     this._statsCache = null;
     this._lastFtsError = null;
+    this._lastDeferredVectorIndexError = null;
+    this._lastDeferredVectorIndexFailureAt = 0;
+    this._deferredVectorIndexFailureCount = 0;
+  }
+
+  async flushAuditLog(): Promise<void> {
+    await this.auditLogger?.flush();
   }
 
   async getIndexStatus(): Promise<StoreIndexStatus> {
@@ -1814,10 +1964,17 @@ export class MemoryStore {
   }
 
   /** Get FTS index health status */
-  getFtsStatus(): { available: boolean; lastError: string | null } {
+  getFtsStatus(): {
+    available: boolean;
+    lastError: string | null;
+    lastDeferredVectorIndexError: string | null;
+    deferredVectorIndexFailureCount: number;
+  } {
     return {
       available: this.ftsIndexCreated,
       lastError: this._lastFtsError,
+      lastDeferredVectorIndexError: this._lastDeferredVectorIndexError,
+      deferredVectorIndexFailureCount: this._deferredVectorIndexFailureCount,
     };
   }
 

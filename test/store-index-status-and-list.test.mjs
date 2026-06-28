@@ -27,7 +27,7 @@ describe("MemoryStore index status and list pagination", () => {
           id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
           text: `memory-${i}`,
           vector: [1, 0, 0, 0],
-          category: "fact",
+          category: "cases",
           scope: i % 2 === 0 ? "global" : "agent:main",
           importance: 0.5,
           timestamp: base + i * 1000,
@@ -78,7 +78,7 @@ describe("MemoryStore index status and list pagination", () => {
           id: `10000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
           text: fixtures[i].text,
           vector: [1, 0, 0, 0],
-          category: "fact",
+          category: "cases",
           scope: "global",
           importance: 0.5,
           timestamp: fixtures[i].timestamp,
@@ -119,6 +119,99 @@ describe("MemoryStore index status and list pagination", () => {
       assert.match(store.lastFtsError || "", /simulated FTS failure/);
     } finally {
       MemoryStore.prototype.createFtsIndex = originalCreateFtsIndex;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates legacy top-level categories and stats report six-category counts", async () => {
+    const { dir, store } = makeStore();
+    try {
+      await store.importEntry({
+        id: "20000000-0000-4000-8000-000000000001",
+        text: "legacy preference row",
+        vector: [1, 0, 0, 0],
+        category: "preference",
+        scope: "global",
+        importance: 0.8,
+        timestamp: Date.now(),
+        metadata: "{}",
+      });
+      await store.importEntry({
+        id: "20000000-0000-4000-8000-000000000002",
+        text: "legacy fact row",
+        vector: [1, 0, 0, 0],
+        category: "fact",
+        scope: "agent:main",
+        importance: 0.6,
+        timestamp: Date.now(),
+        metadata: "{}",
+      });
+
+      store.close();
+      const reopened = new MemoryStore({ dbPath: dir, vectorDim: 4, logger: nullLogger });
+      try {
+        const all = await reopened.list(undefined, undefined, 10, 0);
+        assert.deepEqual(
+          new Set(all.map((entry) => entry.category)),
+          new Set(["preferences", "cases"]),
+        );
+
+        const stats = await reopened.stats();
+        assert.equal(stats.categoryCounts.preferences, 1);
+        assert.equal(stats.categoryCounts.cases, 1);
+        assert.equal(stats.categoryCounts.preference, undefined);
+        assert.equal(stats.categoryCounts.fact, undefined);
+        assert.equal(stats.memoryCategoryCounts.preferences, 1);
+        assert.equal(stats.memoryCategoryCounts.cases, 1);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps stats bounded and avoids full-row scans", async () => {
+    const { dir, store } = makeStore(nullLogger);
+    try {
+      store.table = {
+        countRows: async (filter) => {
+          if (!filter) return 1_000;
+          if (filter.includes("timestamp")) return 7;
+          if (filter.includes("category = 'cases'") || filter.includes("category = 'fact'")) return 1_000;
+          if (filter.includes("scope = 'global'") || filter.includes("scope IS NULL")) return 1_000;
+          if (filter.includes('"memory_layer"')) return 0;
+          if (filter.includes("bad_recall_count")) return 0;
+          if (filter.includes("suppressed_until")) return 0;
+          if (filter.includes("confidence")) return 0;
+          return 0;
+        },
+        query: () => {
+          let limitValue = 0;
+          return {
+            select() {
+              return this;
+            },
+            where() {
+              return this;
+            },
+            limit(value) {
+              limitValue = value;
+              return this;
+            },
+            async toArray() {
+              assert.equal(limitValue, 500, "stats scope sampling must stay bounded");
+              return [{ scope: "global" }];
+            },
+          };
+        },
+      };
+
+      const stats = await store.stats();
+      assert.equal(stats.totalCount, 1_000);
+      assert.equal(stats.scopeCounts.global, 1_000);
+      assert.equal(stats.categoryCounts.cases, 1_000);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

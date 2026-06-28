@@ -478,7 +478,7 @@ export function registerMemoryReflectionHook(params: ReflectionHookParams): void
         try { existing = await reflectionStore.vectorSearch(vector, 1, 0.1, [targetScope]); } catch (err) { api.logger.warn(`memory-reflection: mapped memory duplicate pre-check failed, continue store: ${String(err)}`); }
         if (existing.length > 0 && existing[0].score > 0.95) continue;
 
-        const importance = mapped.category === "decision" ? 0.85 : 0.8;
+        const importance = mapped.category === "events" ? 0.85 : 0.8;
         const metadata = JSON.stringify(buildReflectionMappedMetadata({
           mappedItem: mapped, eventId: reflectionEventId, agentId: sourceAgentId, sessionKey,
           sessionId: currentSessionId || "unknown", runAt: nowTs, usedFallback: reflectionGenerated.usedFallback,

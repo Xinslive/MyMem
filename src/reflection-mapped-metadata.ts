@@ -5,7 +5,7 @@ import {
 } from "./reasoning-strategy.js";
 
 export type ReflectionMappedKind = "user-model" | "agent-model" | "lesson" | "decision";
-export type ReflectionMappedCategory = "preference" | "fact" | "decision";
+export type ReflectionMappedCategory = "preferences" | "cases" | "events";
 
 export interface ReflectionMappedMetadata {
   type: "memory-reflection-mapped";

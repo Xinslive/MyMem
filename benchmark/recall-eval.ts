@@ -98,7 +98,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_pref_oolong",
       text: "用户的饮料偏好是热乌龙茶，不喜欢冰美式咖啡。",
-      category: "preference",
+      category: "preferences",
       scope: "global",
       importance: 0.95,
       memoryCategory: "preferences",
@@ -106,7 +106,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_profile_english",
       text: "The user prefers concise answers with the conclusion first.",
-      category: "fact",
+      category: "profile",
       scope: "global",
       importance: 0.9,
       memoryCategory: "profile",
@@ -114,7 +114,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_tag_bench",
       text: "proj:bench team:core deployment latency budget is 20 seconds.",
-      category: "decision",
+      category: "events",
       scope: "agent:main",
       importance: 0.85,
       memoryCategory: "events",
@@ -122,7 +122,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_scope_private",
       text: "agent private planning note for smoke-only workspace.",
-      category: "fact",
+      category: "cases",
       scope: "agent:smoke",
       importance: 0.8,
       memoryCategory: "cases",
@@ -130,7 +130,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_expired_trip",
       text: "The old trip reminder expired yesterday.",
-      category: "decision",
+      category: "events",
       scope: "global",
       importance: 0.8,
       memoryCategory: "events",
@@ -139,7 +139,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_archived_fragment",
       text: "Archived duplicate fragment about the deployment latency budget.",
-      category: "decision",
+      category: "events",
       scope: "global",
       importance: 0.8,
       memoryCategory: "events",
@@ -148,7 +148,7 @@ function evalEntries(): MemoryEntry[] {
     entry({
       id: "eval_low_score_noise",
       text: "unrelated gardening compost note with no retrieval overlap",
-      category: "other",
+      category: "patterns",
       scope: "global",
       importance: 0.2,
       memoryCategory: "patterns",

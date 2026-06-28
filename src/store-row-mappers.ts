@@ -1,5 +1,10 @@
 import type { MemoryEntry, LanceRow } from "./store-types.js";
-import { parseSmartMetadata } from "./smart-metadata.js";
+import { parseSmartMetadata, reverseMapLegacyCategory } from "./smart-metadata.js";
+
+export function normalizeStoredCategory(category: unknown, text = ""): MemoryEntry["category"] {
+  if (category === "reflection") return "reflection";
+  return reverseMapLegacyCategory(typeof category === "string" ? category : undefined, text) as MemoryEntry["category"];
+}
 
 export function toLanceRows(entries: MemoryEntry[]): Record<string, unknown>[] {
   // Strip internal cache fields before writing to LanceDB
@@ -25,7 +30,7 @@ export function mapRowToMemoryEntry(row: LanceRow, includeVector = true): Memory
     id: row.id as string,
     text: row.text as string,
     vector: includeVector ? toNumberVector(row.vector) : [],
-    category: row.category as MemoryEntry["category"],
+    category: normalizeStoredCategory(row.category, row.text as string),
     scope: (row.scope as string | undefined) ?? "global",
     importance: Number(row.importance),
     timestamp: Number(row.timestamp),

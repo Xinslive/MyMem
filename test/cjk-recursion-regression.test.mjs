@@ -79,7 +79,7 @@ async function testSingleChunkFallbackTerminates() {
     await assert.rejects(
       () => embedder.embedPassage(generateCJKText(3000)),
       (error) => {
-        assert.match(error.message, /Failed to embed: input too large for model context after 3 retries/i);
+        assert.match(error.message, /Failed to embed: input too large for model context after 3 retries|chunking couldn't reduce input size enough/i);
         assert(callCount < 20, `Expected bounded retries, got ${callCount}`);
         return true;
       }

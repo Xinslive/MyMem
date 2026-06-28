@@ -22,6 +22,10 @@ import {
 } from "./src/retrieval-explain.js";
 import { startMemoryDashboardServer } from "./src/dashboard-server.js";
 import {
+  normalizeCategory,
+  type MemoryCategory,
+} from "./src/memory-categories.js";
+import {
   filterEntriesByMemoryCategory,
   filterResultsByMemoryCategory,
   toMemoryCategory,
@@ -29,6 +33,7 @@ import {
 import { getDisplayCategoryTag } from "./src/reflection-metadata.js";
 import { runImportMarkdown } from "./src/cli/import-markdown.js";
 import { registerOauthCommands, type OauthCLIContext } from "./src/cli/oauth.js";
+import { sanitizeMemoryWriteText } from "./src/memory-write-sanitizer.js";
 
 export { runImportMarkdown } from "./src/cli/import-markdown.js";
 
@@ -742,21 +747,20 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         for (const memory of data.memories) {
           try {
-            const text = memory.text;
-            if (!text || typeof text !== "string" || text.length < 2) {
+            const rawText = memory.text;
+            if (!rawText || typeof rawText !== "string" || rawText.length < 2) {
               skipped++;
               continue;
             }
 
-            const categoryRaw = memory.category;
-            const category: MemoryEntry["category"] =
-              categoryRaw === "preference" ||
-                categoryRaw === "fact" ||
-                categoryRaw === "decision" ||
-                categoryRaw === "entity" ||
-                categoryRaw === "other"
-                ? categoryRaw
-                : "other";
+            const text = sanitizeMemoryWriteText(rawText);
+            if (text.length < 2) {
+              skipped++;
+              continue;
+            }
+
+            const categoryRaw = typeof memory.category === "string" ? memory.category : undefined;
+            const category: MemoryCategory = normalizeCategory(categoryRaw ?? "") ?? "patterns";
 
             const importanceRaw = Number(memory.importance);
             const importance = Number.isFinite(importanceRaw)

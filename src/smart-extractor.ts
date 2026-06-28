@@ -35,6 +35,7 @@ import {
 import { batchDedup } from "./batch-dedup.js";
 import { stripEnvelopeMetadata } from "./envelope-stripping.js";
 import { redactSecrets } from "./session-utils.js";
+import { sanitizeMemoryWriteText } from "./memory-write-sanitizer.js";
 import {
   deduplicate,
   type DedupContext,
@@ -100,6 +101,10 @@ function normalizeCandidateAbstract(rawAbstract: string, content: string): strin
     return firstCandidateSentence(content);
   }
   return stripped || firstCandidateSentence(content);
+}
+
+function redactedPreview(value: string, maxChars: number): string {
+  return sanitizeMemoryWriteText(value).slice(0, maxChars);
 }
 
 // ============================================================================
@@ -495,7 +500,7 @@ export class SmartExtractor {
       if (!category) {
         invalidCategoryCount++;
         this.debugLog(
-          `mymem：智能提取因分类无效丢弃候选 rawCategory=${JSON.stringify(raw.category ?? "")} 摘要=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`,
+          `mymem：智能提取因分类无效丢弃候选 rawCategory=${JSON.stringify(raw.category ?? "")} 摘要=${JSON.stringify(redactedPreview((raw.abstract ?? "").trim(), 120))}`,
         );
         continue;
       }
@@ -507,14 +512,14 @@ export class SmartExtractor {
       if (!abstract || abstract.length < 5) {
         shortAbstractCount++;
         this.debugLog(
-          `mymem：智能提取因摘要过短丢弃候选 分类=${category} 摘要=${JSON.stringify(abstract)}`,
+          `mymem：智能提取因摘要过短丢弃候选 分类=${category} 摘要=${JSON.stringify(redactedPreview(abstract, 120))}`,
         );
         continue;
       }
       if (isNoise(abstract)) {
         noiseAbstractCount++;
         this.debugLog(
-          `mymem：智能提取因摘要噪声丢弃候选 分类=${category} 摘要=${JSON.stringify(abstract.slice(0, 120))}`,
+          `mymem：智能提取因摘要噪声丢弃候选 分类=${category} 摘要=${JSON.stringify(redactedPreview(abstract, 120))}`,
         );
         continue;
       }
@@ -612,7 +617,7 @@ export class SmartExtractor {
     }
     if (!vector || vector.length === 0) {
       this.log(
-        `mymem：智能提取嵌入返回空向量，跳过此候选（category=${candidate.category}，abstract 前 60 字：${candidate.abstract.slice(0, 60)}）`,
+        `mymem：智能提取嵌入返回空向量，跳过此候选（category=${candidate.category}，abstract 前 60 字：${redactedPreview(candidate.abstract, 60)}）`,
       );
       stats.skipped += 1;
       (stats as { embedFailures?: number }).embedFailures = ((stats as { embedFailures?: number }).embedFailures ?? 0) + 1;
@@ -634,7 +639,7 @@ export class SmartExtractor {
     if (admission?.decision === "reject") {
       stats.rejected = (stats.rejected ?? 0) + 1;
       this.log(
-        `mymem：智能提取准入拒绝 [${candidate.category}] ${candidate.abstract.slice(0, 60)}，原因：${admission.audit.reason}`,
+        `mymem：智能提取准入拒绝 [${candidate.category}] ${redactedPreview(candidate.abstract, 60)}，原因：${admission.audit.reason}`,
       );
       await this.recordRejectedAdmission(
         candidate,
@@ -690,7 +695,7 @@ export class SmartExtractor {
 
       case "skip":
         this.log(
-          `mymem：智能提取跳过 [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+          `mymem：智能提取跳过 [${candidate.category}] ${redactedPreview(candidate.abstract, 60)}`,
         );
         stats.skipped++;
         break;

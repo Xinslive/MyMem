@@ -52,6 +52,7 @@ describe("MemoryStore audit log", () => {
         vector: [0, 1, 0, 0],
       });
       assert.equal(await store.delete(entry.id), true);
+      await store.flushAuditLog();
 
       const entries = await readAuditEntries(join(dir, "audit.jsonl"), 3);
       assert.deepEqual(entries.map((item) => item.op), ["store", "update", "delete"]);

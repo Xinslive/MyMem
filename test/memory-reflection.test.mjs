@@ -1556,27 +1556,27 @@ describe("memory reflection", () => {
       assert.deepEqual(mapped, [
         {
           text: "用户会主动查看系统配置，对技术细节感兴趣",
-          category: "preference",
+          category: "preferences",
           heading: "User model deltas (about the human)",
         },
         {
           text: "用户指令简洁，直接执行，不需要确认",
-          category: "preference",
+          category: "preferences",
           heading: "User model deltas (about the human)",
         },
         {
           text: "下次遇到 Excel 公式问题可以主动提供帮助",
-          category: "preference",
+          category: "preferences",
           heading: "Agent model deltas (about the assistant/system)",
         },
         {
           text: "Gateway launchctl 路径不是旧路径，用户纠正后不要再犯",
-          category: "fact",
+          category: "cases",
           heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
         },
         {
           text: "使用 DashScope 原生 rerank endpoint 修复 400 错误",
-          category: "decision",
+          category: "events",
           heading: "Decisions (durable)",
         },
       ]);
@@ -1586,7 +1586,7 @@ describe("memory reflection", () => {
       const metadata = buildReflectionMappedMetadata({
         mappedItem: {
           text: "User prefers terse incident updates.",
-          category: "preference",
+          category: "preferences",
           heading: "User model deltas (about the human)",
           mappedKind: "user-model",
           ordinal: 0,
@@ -1606,7 +1606,7 @@ describe("memory reflection", () => {
       assert.equal(metadata.reflectionVersion, 4);
       assert.equal(metadata.eventId, "refl-20260307-abc123");
       assert.equal(metadata.mappedKind, "user-model");
-      assert.equal(metadata.mappedCategory, "preference");
+      assert.equal(metadata.mappedCategory, "preferences");
       assert.equal(metadata.ordinal, 0);
       assert.equal(metadata.groupSize, 2);
       assert.equal(metadata.decayMidpointDays, 21);
@@ -1620,7 +1620,7 @@ describe("memory reflection", () => {
       const metadata = buildReflectionMappedMetadata({
         mappedItem: {
           text: "Pitfall: timeout hid the real failure. Fix: rerun the focused test with full logs.",
-          category: "fact",
+          category: "cases",
           heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
           mappedKind: "lesson",
           ordinal: 0,
@@ -1653,7 +1653,7 @@ describe("memory reflection", () => {
       const entries = [
         makeEntry({
           timestamp: now - 1 * day,
-          category: "preference",
+          category: "preferences",
           metadata: {
             type: "memory-reflection-mapped",
             mappedKind: "user-model",
@@ -1668,7 +1668,7 @@ describe("memory reflection", () => {
         }),
         makeEntry({
           timestamp: now - 1 * day,
-          category: "preference",
+          category: "preferences",
           metadata: {
             type: "memory-reflection-mapped",
             mappedKind: "user-model",
@@ -1683,7 +1683,7 @@ describe("memory reflection", () => {
         }),
         makeEntry({
           timestamp: now - 1 * day,
-          category: "decision",
+          category: "events",
           metadata: {
             type: "memory-reflection-mapped",
             mappedKind: "decision",
@@ -1716,11 +1716,11 @@ describe("memory reflection", () => {
     it("keeps ordinary display categories for mapped durable rows", () => {
       assert.equal(
         getDisplayCategoryTag({
-          category: "preference",
+          category: "preferences",
           scope: "global",
           metadata: JSON.stringify({ type: "memory-reflection-mapped", mappedKind: "user-model" }),
         }),
-        "preference:global"
+        "preferences:global"
       );
     });
   });

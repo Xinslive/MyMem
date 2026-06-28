@@ -26,7 +26,7 @@ import type { MemoryEntry } from "./store.js";
 import type { LlmClient } from "./llm-client.js";
 import { buildSmartMetadata, reverseMapLegacyCategory, stringifySmartMetadata } from "./smart-metadata.js";
 import { LLM_COMPACTION_REFINEMENT_SCHEMA } from "./llm-output-schemas.js";
-import type { MemoryCategory } from "./memory-categories.js";
+import { normalizeCategory, type MemoryCategory } from "./memory-categories.js";
 import { cosineSimilarity } from "./utils.js";
 import { writeJsonFileAtomic } from "./file-utils.js";
 export { cosineSimilarity } from "./utils.js";
@@ -118,56 +118,25 @@ function normalizeScope(scope: string | null | undefined): string {
   return scope || "global";
 }
 
-function mapSmartCategoryToStoreCategory(category: MemoryCategory): MemoryEntry["category"] {
-  switch (category) {
-    case "profile":
-    case "cases":
-      return "fact";
-    case "preferences":
-      return "preference";
-    case "entities":
-      return "entity";
-    case "events":
-      return "decision";
-    case "patterns":
-      return "other";
-  }
-}
-
 function normalizeRefinedCategory(
   rawCategory: unknown,
   fallback: ClusterPlan["merged"],
   text: string,
 ): { category: MemoryEntry["category"]; memoryCategory: MemoryCategory } {
   const raw = typeof rawCategory === "string" ? rawCategory.trim().toLowerCase() : "";
-  const smartAliases: Record<string, MemoryCategory> = {
-    profile: "profile",
-    preference: "preferences",
-    preferences: "preferences",
-    entity: "entities",
-    entities: "entities",
-    event: "events",
-    events: "events",
-    decision: "events",
-    case: "cases",
-    cases: "cases",
-    pattern: "patterns",
-    patterns: "patterns",
-    other: "patterns",
-  };
-
-  const smartCategory = smartAliases[raw];
+  const smartCategory = normalizeCategory(raw);
   if (smartCategory) {
     return {
-      category: mapSmartCategoryToStoreCategory(smartCategory),
+      category: smartCategory,
       memoryCategory: smartCategory,
     };
   }
 
   if (raw === "fact") {
+    const memoryCategory = reverseMapLegacyCategory("fact", text);
     return {
-      category: "fact",
-      memoryCategory: reverseMapLegacyCategory("fact", text),
+      category: memoryCategory,
+      memoryCategory,
     };
   }
 
@@ -281,7 +250,7 @@ export function buildMergedEntry(
   for (const m of members) {
     counts.set(m.category, (counts.get(m.category) ?? 0) + 1);
   }
-  let category: MemoryEntry["category"] = "other";
+  let category: MemoryEntry["category"] = "patterns";
   let best = 0;
   for (const [cat, count] of counts) {
     if (count > best) {

@@ -39,7 +39,8 @@ export function buildScopeWhereClause(scopeFilter?: string[]): string | null {
   const scopeConditions = scopeFilter
     .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
     .join(" OR ");
-  return `((${scopeConditions}) OR scope IS NULL)`;
+  const nullScopeCondition = scopeFilter.includes("global") ? " OR scope IS NULL" : "";
+  return `((${scopeConditions})${nullScopeCondition})`;
 }
 
 export function combineWhereClauses(parts: Array<string | null | undefined>): string | undefined {

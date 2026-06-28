@@ -28,7 +28,7 @@ type UserMdExclusiveSlot = "profile" | "name" | "addressing";
 type BoundaryEntryLike = {
   text: string;
   metadata?: string;
-  category?: "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
+  category?: string;
   importance?: number;
   timestamp?: number;
 };

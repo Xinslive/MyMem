@@ -321,7 +321,7 @@ describe("runCompaction", () => {
     assert.ok(typeof meta.compacted_at === "number");
   });
 
-  it("normalizes LLM pattern categories to store category other with smart metadata patterns", async () => {
+  it("normalizes LLM pattern categories to store category patterns with smart metadata patterns", async () => {
     for (const rawCategory of ["pattern", "patterns"]) {
       const a = entry({ id: `${rawCategory}-a`, text: "Use bounded retries for transient failures.", vector: vec(4, 1, 0.01, 0, 0), category: "other" });
       const b = entry({ id: `${rawCategory}-b`, text: "Retry transient failures with a bounded policy.", vector: vec(4, 1, 0.02, 0, 0), category: "other" });
@@ -342,7 +342,7 @@ describe("runCompaction", () => {
       const result = await runCompaction(store, makeEmbedder(), { ...defaultConfig, mergeMode: "llm" }, undefined, undefined, undefined, llm);
 
       assert.equal(result.llmRefined, 1);
-      assert.equal(store.updated[0].entry.category, "other");
+      assert.equal(store.updated[0].entry.category, "patterns");
       const meta = JSON.parse(store.updated[0].entry.metadata);
       assert.equal(meta.memory_category, "patterns");
     }

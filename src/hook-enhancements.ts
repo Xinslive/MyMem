@@ -11,7 +11,7 @@ import type { PluginConfig } from "./plugin-types.js";
 import type { ScopeManager } from "./scopes.js";
 import type { FeedbackLoop } from "./feedback-loop.js";
 import { resolveScopeFilter } from "./scopes.js";
-import type { MemoryEntry, MemorySearchResult, MemoryStore } from "./store.js";
+import type { MemorySearchResult, MemoryStore } from "./store.js";
 import { resolveHookAgentId } from "./config-utils.js";
 import { extractTextContent, redactSecrets } from "./session-utils.js";
 import { isInternalReflectionSessionKey } from "./auto-capture-utils.js";
@@ -902,7 +902,7 @@ export function registerHookEnhancements(params: {
 export function recordInjectedMemoriesForEnhancements(params: {
   state: HookEnhancementState;
   sessionKey: string;
-  memories: Array<Pick<MemoryEntry, "id" | "text" | "scope" | "category">>;
+  memories: Array<{ id: string; text: string; scope: string; category: string }>;
   source?: InjectedSource;
 }): void {
   if (shouldSkipSession(params.sessionKey) || params.memories.length === 0) return;

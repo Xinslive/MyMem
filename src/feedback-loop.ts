@@ -549,11 +549,20 @@ export class FeedbackLoop {
       const newEntry = await this.lessonStore.store({
         text,
         vector: [],
-        category: "other",
+        category: "patterns",
         scope,
         importance: this.config.preventiveLessons.pendingConfidence,
         metadata: stringifySmartMetadata(buildSmartMetadata(
-          { text, category: "other", importance: this.config.preventiveLessons.pendingConfidence, timestamp: now } as MemoryEntry,
+          {
+            id: "",
+            text,
+            vector: [],
+            category: "patterns",
+            scope,
+            importance: this.config.preventiveLessons.pendingConfidence,
+            timestamp: now,
+            metadata: "{}",
+          } as MemoryEntry,
           {
             ...strategyFields,
             memory_category: "patterns",

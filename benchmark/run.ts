@@ -85,7 +85,7 @@ function deterministicVector(text: string, dimensions = 8): number[] {
 function makeBenchmarkEntry(i: number): Omit<MemoryEntry, "id" | "timestamp"> {
   const scope = i % 3 === 0 ? "agent:main" : "global";
   const category: MemoryEntry["category"] =
-    i % 5 === 0 ? "decision" : i % 3 === 0 ? "preference" : "fact";
+    i % 5 === 0 ? "events" : i % 3 === 0 ? "preferences" : "cases";
   const topic = i % 2 === 0 ? "deployment latency budget" : "memory recall retrieval";
   const tag = i % 7 === 0 ? "proj:bench" : "team:core";
   const text = `benchmark memory ${i} ${topic} ${tag} 中文检索 token ${i % 9}`;

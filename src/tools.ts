@@ -6,6 +6,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerMemoryDoctorTool } from "./memory-doctor-tool.js";
 import { registerMemoryRecallTool } from "./tools-recall.js";
+import { registerMemoryUpdateTool } from "./tools-update.js";
 
 // Re-export shared types and utilities
 export { MEMORY_CATEGORIES } from "./memory-categories.js";
@@ -41,5 +42,6 @@ export function registerAllMemoryTools(
 ) {
   void options;
   registerMemoryRecallTool(api, context);
+  registerMemoryUpdateTool(api, context);
   registerMemoryDoctorTool(api, context);
 }

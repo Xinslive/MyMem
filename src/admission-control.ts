@@ -5,6 +5,7 @@ import type { MemorySearchResult, MemoryStore } from "./store.js";
 import { LLM_ADMISSION_UTILITY_SCHEMA } from "./llm-output-schemas.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import { cosineSimilarity } from "./utils.js";
+import { sanitizeMemoryWriteText } from "./memory-write-sanitizer.js";
 
 export interface AdmissionWeights {
   utility: number;
@@ -89,6 +90,20 @@ export interface AdmissionRejectionAuditEntry {
   candidate: CandidateMemory;
   audit: AdmissionAuditRecord & { decision: "reject" };
   conversation_excerpt: string;
+}
+
+export function sanitizeAdmissionRejectionAuditEntry(
+  entry: AdmissionRejectionAuditEntry,
+): AdmissionRejectionAuditEntry {
+  return {
+    ...entry,
+    candidate: {
+      ...entry.candidate,
+      abstract: sanitizeMemoryWriteText(entry.candidate.abstract),
+      content: sanitizeMemoryWriteText(entry.candidate.content),
+    },
+    conversation_excerpt: sanitizeMemoryWriteText(entry.conversation_excerpt),
+  };
 }
 
 export interface ConfidenceSupportBreakdown {

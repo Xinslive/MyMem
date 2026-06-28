@@ -103,7 +103,7 @@ export function shouldCapture(text: string): boolean {
  */
 export function detectCategory(
   text: string,
-): "preference" | "fact" | "decision" | "entity" | "other" {
+): "preferences" | "entities" | "events" | "cases" | "patterns" {
   const lower = text.toLowerCase();
 
   if (
@@ -111,7 +111,7 @@ export function detectCategory(
       lower,
     )
   ) {
-    return "preference";
+    return "preferences";
   }
 
   if (
@@ -119,7 +119,7 @@ export function detectCategory(
       lower,
     )
   ) {
-    return "decision";
+    return "events";
   }
 
   if (
@@ -127,7 +127,7 @@ export function detectCategory(
       lower,
     )
   ) {
-    return "entity";
+    return "entities";
   }
 
   if (
@@ -135,10 +135,10 @@ export function detectCategory(
       lower,
     )
   ) {
-    return "fact";
+    return "cases";
   }
 
-  return "other";
+  return "patterns";
 }
 
 /**

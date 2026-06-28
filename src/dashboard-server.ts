@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Embedder } from "./embedder.js";
 import type { MemoryEntry, MemoryStore, StoreIndexStatus } from "./store.js";
 import { createRetriever, type MemoryRetriever, type RetrievalDiagnostics } from "./retriever.js";
@@ -19,6 +19,7 @@ import { hasActiveRecallSuppression } from "./recall-suppression.js";
 import { redactPII, redactSecrets } from "./session-utils.js";
 import { clampInt } from "./utils.js";
 import type { FeedbackLoopStatus } from "./feedback-loop.js";
+import { writeTextFileAtomic } from "./file-utils.js";
 
 type DashboardStore = Pick<MemoryStore, "stats" | "list" | "hasFtsSupport"> & {
   delete?: MemoryStore["delete"];
@@ -188,8 +189,7 @@ async function resolveAuthToken(
     }
   }
   const generatedToken = randomBytes(24).toString("base64url");
-  await mkdir(dirname(tokenFile), { recursive: true });
-  await writeFile(tokenFile, generatedToken, { encoding: "utf8", mode: 0o600 });
+  await writeTextFileAtomic(tokenFile, generatedToken);
   return { token: generatedToken, tokenFile, generated: true };
 }
 
@@ -238,15 +238,6 @@ const MEMORY_CATEGORY_KEYS = [
   "cases",
   "patterns",
 ];
-
-const MEMORY_CATEGORY_TO_STORE_CATEGORY: Record<string, MemoryEntry["category"]> = {
-  profile: "fact",
-  preferences: "preference",
-  entities: "entity",
-  events: "decision",
-  cases: "fact",
-  patterns: "other",
-};
 
 const MEMORY_TYPE_LABELS: Record<string, string> = {
   knowledge: "知识记忆",
@@ -454,10 +445,6 @@ function displayMemoryText(text: string): string {
 
 function displayCategory(category: string): string {
   return MEMORY_CATEGORY_LABELS[category] ?? category;
-}
-
-function legacyCategoryPrefilter(category: string | undefined): MemoryEntry["category"] | undefined {
-  return category ? MEMORY_CATEGORY_TO_STORE_CATEGORY[category] : undefined;
 }
 
 function displayTier(tier: string): string {
@@ -965,11 +952,10 @@ async function loadDashboardMemories(
   let rawOffset = 0;
   let scanned = 0;
   const maxScanned = Math.min(10_000, (safeOffset + target) * 4 + pageSize);
-  const storeCategory = legacyCategoryPrefilter(filter.category);
   const storeFilters = filter.quality ? { quality: filter.quality } : undefined;
 
   while (collected.length < safeOffset + target && scanned < maxScanned) {
-    const page = await context.store.list(filter.scopeFilter, storeCategory, pageSize, rawOffset, storeFilters);
+    const page = await context.store.list(filter.scopeFilter, undefined, pageSize, rawOffset, storeFilters);
     if (page.length === 0) break;
     rawOffset += page.length;
     scanned += page.length;

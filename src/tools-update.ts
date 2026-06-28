@@ -19,6 +19,7 @@ import {
 import type { MemoryEntry } from "./store.js";
 import { isNoise } from "./noise-filter.js";
 import { resolveScopeFilter } from "./scopes.js";
+import { sanitizeMemoryWriteText } from "./memory-write-sanitizer.js";
 import {
   appendRelation,
   buildSmartMetadata,
@@ -31,7 +32,6 @@ import {
   TEMPORAL_VERSIONED_CATEGORIES,
   type MemoryCategory,
 } from "./memory-categories.js";
-import { mapToStoreCategory } from "./smart-extractor-handlers.js";
 import { buildPositiveUtilityMetadataPatch } from "./learning-memory.js";
 
 export function registerMemoryUpdateTool(
@@ -132,9 +132,10 @@ export function registerMemoryUpdateTool(
           }
 
           // If text changed, re-embed; reject noise
+          const safeText = text ? sanitizeMemoryWriteText(text) : undefined;
           let newVector: number[] | undefined;
-          if (text) {
-            if (isNoise(text)) {
+          if (safeText) {
+            if (isNoise(safeText)) {
               return {
                 content: [
                   {
@@ -145,7 +146,7 @@ export function registerMemoryUpdateTool(
                 details: { action: "noise_filtered" },
               };
             }
-            newVector = await runtimeContext.embedder.embedPassage(text);
+            newVector = await runtimeContext.embedder.embedPassage(safeText);
           }
 
           // Fetch existing entry once when we may need it (text change, or
@@ -173,19 +174,19 @@ export function registerMemoryUpdateTool(
           // --- Temporal supersede guard ---
           // For temporal-versioned categories (preferences/entities), changing
           // text must go through supersede to preserve the history chain.
-          if (text && newVector && existing) {
+          if (safeText && newVector && existing) {
             const meta = parseSmartMetadata(existing.metadata, existing);
             if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
                 const now = Date.now();
                 const factKey =
-                  meta.fact_key ?? deriveFactKey(meta.memory_category, text);
+                  meta.fact_key ?? deriveFactKey(meta.memory_category, safeText);
 
                 // Create new superseding record
                 const newMeta = buildSmartMetadata(
-                  { text, category: existing.category },
+                  { text: safeText, category: existing.category },
                   {
-                    summary: text,
-                    content: text,
+                    summary: safeText,
+                    content: safeText,
                     memory_category: meta.memory_category,
                     tier: meta.tier,
                     access_count: 0,
@@ -201,10 +202,10 @@ export function registerMemoryUpdateTool(
                 );
 
                 const newEntry = await runtimeContext.store.store({
-                  text,
+                  text: safeText,
                   vector: newVector,
                   category: requestedMemoryCategory
-                    ? mapToStoreCategory(requestedMemoryCategory)
+                    ? requestedMemoryCategory
                     : existing.category,
                   scope: existing.scope,
                   importance:
@@ -241,7 +242,7 @@ export function registerMemoryUpdateTool(
                   content: [
                     {
                       type: "text",
-                      text: `Superseded memory ${resolvedId.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}"`,
+                      text: `Superseded memory ${resolvedId.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${safeText.slice(0, 80)}${safeText.length > 80 ? "..." : ""}"`,
                     },
                   ],
                   details: {
@@ -256,27 +257,27 @@ export function registerMemoryUpdateTool(
           // --- End temporal supersede guard ---
 
           const updates: Record<string, unknown> = {};
-          if (text) updates.text = text;
+          if (safeText) updates.text = safeText;
           if (newVector) updates.vector = newVector;
           if (importance !== undefined)
             updates.importance = clamp01(importance, 0.7);
-          if (requestedMemoryCategory) updates.category = mapToStoreCategory(requestedMemoryCategory);
+          if (requestedMemoryCategory) updates.category = requestedMemoryCategory;
 
           // Rebuild smart metadata when text, importance, or memory category changes (#544)
-          if ((text || requestedMemoryCategory) && existing) {
+          if ((safeText || requestedMemoryCategory) && existing) {
             const now = Date.now();
             const meta = parseSmartMetadata(existing.metadata, existing);
             const effectiveCategory: MemoryCategory = requestedMemoryCategory ?? meta.memory_category;
             const updatedMeta = buildSmartMetadata(existing, {
-              ...(text
+              ...(safeText
                 ? {
-                    summary: text,
-                    content: text,
-                    memory_temporal_type: classifyTemporal(text),
+                    summary: safeText,
+                    content: safeText,
+                    memory_temporal_type: classifyTemporal(safeText),
                   }
                 : {}),
               memory_category: effectiveCategory,
-              fact_key: deriveFactKey(effectiveCategory, text ?? meta.summary),
+              fact_key: deriveFactKey(effectiveCategory, safeText ?? meta.summary),
               confidence:
                 importance !== undefined
                   ? clamp01(importance, 0.7)
@@ -286,7 +287,7 @@ export function registerMemoryUpdateTool(
             // Re-derive valid_until from the new text. Explicit override
             // (not via patch.valid_until) so the absence of a new expiry
             // clears any stale value inherited from the previous text.
-            if (text) updatedMeta.valid_until = inferExpiry(text);
+            if (safeText) updatedMeta.valid_until = inferExpiry(safeText);
             updates.metadata = stringifySmartMetadata(updatedMeta);
           } else if (importance !== undefined && existing) {
             // Sync confidence for importance-only changes

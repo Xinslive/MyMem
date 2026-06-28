@@ -16,6 +16,7 @@ import {
   saveOAuthSession,
 } from "./llm-oauth.js";
 import { globalLlmRequestLimiter } from "./concurrency-limiter.js";
+import { redactSecrets } from "./session-utils.js";
 
 export interface LlmClientConfig {
   apiKey?: string;
@@ -73,6 +74,10 @@ function previewText(value: string, maxLen = 200): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLen) return normalized;
   return `${normalized.slice(0, maxLen - 3)}...`;
+}
+
+function redactedPreviewText(value: string, maxLen = 200): string {
+  return redactSecrets(previewText(value, maxLen));
 }
 
 function nextNonWhitespaceChar(text: string, start: number): string | undefined {
@@ -233,7 +238,7 @@ function parseAndValidateJson<T>(
         value: null,
         error:
           `mymem: llm-client [${params.label}] ${params.sourceLabel}schema validation failed${repaired ? " after repair" : ""}: ${schemaError} ` +
-          `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`,
+          `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(redactedPreviewText(jsonStr))})`,
       };
     }
     if (repaired) {
@@ -257,7 +262,7 @@ function parseAndValidateJson<T>(
           error:
             `mymem: llm-client [${params.label}] ${params.sourceLabel}JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; ` +
             `repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)} ` +
-            `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`,
+            `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(redactedPreviewText(jsonStr))})`,
         };
       }
     }
@@ -265,7 +270,7 @@ function parseAndValidateJson<T>(
       value: null,
       error:
         `mymem: llm-client [${params.label}] ${params.sourceLabel}JSON.parse failed: ${err instanceof Error ? err.message : String(err)} ` +
-        `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`,
+        `(jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(redactedPreviewText(jsonStr))})`,
     };
   }
 }
@@ -353,7 +358,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void,
         const jsonStr = extractJsonFromResponse(raw);
         if (!jsonStr) {
           lastError =
-            `mymem: llm-client [${label}] no JSON object found (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
+            `mymem: llm-client [${label}] no JSON object found (chars=${raw.length}, preview=${JSON.stringify(redactedPreviewText(raw))})`;
           log(lastError);
           errorCount++;
           return null;
@@ -508,7 +513,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void, 
           const jsonStr = extractJsonFromResponse(raw);
           if (!jsonStr) {
             lastError =
-              `mymem: llm-client [${label}] no JSON object found in OAuth response (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
+              `mymem: llm-client [${label}] no JSON object found in OAuth response (chars=${raw.length}, preview=${JSON.stringify(redactedPreviewText(raw))})`;
             log(lastError);
             errorCount++;
             return null;

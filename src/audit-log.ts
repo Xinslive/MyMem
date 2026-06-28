@@ -33,6 +33,7 @@ export interface AuditEntry {
 export class AuditLogger {
   private filePath: string | null = null;
   private initPromise: Promise<void> | null = null;
+  private writeTail: Promise<void> = Promise.resolve();
   private enabled = false;
 
   /**
@@ -65,7 +66,14 @@ export class AuditLogger {
   log(entry: AuditEntry): void {
     if (!this.enabled || !this.filePath) return;
     const line = JSON.stringify(entry) + "\n";
-    // Fire-and-forget: do not await; do not block the caller.
-    void appendFile(this.filePath, line, { encoding: "utf8", mode: 0o600 }).catch(() => {});
+    // Queue writes in order without blocking the primary mutation path.
+    this.writeTail = this.writeTail
+      .then(() => appendFile(this.filePath!, line, { encoding: "utf8", mode: 0o600 }))
+      .catch(() => undefined);
+  }
+
+  /** Drain queued writes for tests and shutdown paths that need best-effort completeness. */
+  async flush(): Promise<void> {
+    await this.writeTail;
   }
 }

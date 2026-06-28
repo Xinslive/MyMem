@@ -239,7 +239,7 @@ describe("memory governance tools", () => {
     assert.equal(rejected.details.error, "invalid_category");
   });
 
-  it("updates smart memory_category while deriving the storage category", async () => {
+  it("updates smart memory_category while using six-category storage", async () => {
     const entry = {
       id: "11111111-2222-4333-8444-555555555555",
       text: "Use tavily first",
@@ -287,10 +287,79 @@ describe("memory governance tools", () => {
     const update = createToolSet(context).get("mymem_update");
     const updated = await update.execute(null, { memoryId: entry.id, category: "patterns" });
     assert.equal(updated.details.action, "updated");
-    assert.equal(updated.details.category, "other");
+    assert.equal(updated.details.category, "patterns");
     assert.equal(parseSmartMetadata(entry.metadata, entry).memory_category, "patterns");
 
     const rejected = await update.execute(null, { memoryId: entry.id, category: "other" });
     assert.equal(rejected.details.error, "invalid_category");
+  });
+
+  it("redacts secrets when updating memory text", async () => {
+    const entry = {
+      id: "c1111111-1111-4111-8111-111111111111",
+      text: "Old safe memory",
+      vector: [0.1, 0.2, 0.3],
+      category: "fact",
+      scope: "global",
+      importance: 0.7,
+      timestamp: Date.now(),
+      metadata: stringifySmartMetadata(
+        buildSmartMetadata(
+          { text: "Old safe memory", category: "fact", importance: 0.7 },
+          {
+            summary: "Old safe memory",
+            content: "Old safe memory",
+            memory_category: "patterns",
+          },
+        ),
+      ),
+    };
+    let embeddedText = "";
+    let updatesSeen = null;
+
+    const context = {
+      agentId: "main",
+      workspaceDir: "/tmp",
+      mdMirror: null,
+      scopeManager: {
+        getAccessibleScopes: () => ["global"],
+        isAccessible: () => true,
+        getDefaultScope: () => "global",
+      },
+      retriever: {
+        async retrieve() { return []; },
+        getConfig() { return { mode: "hybrid" }; },
+      },
+      store: {
+        async count() { return 1; },
+        async getById() { return entry; },
+        async update(_id, updates) {
+          updatesSeen = updates;
+          Object.assign(entry, updates);
+          return entry;
+        },
+      },
+      embedder: {
+        async embedPassage(text) {
+          embeddedText = text;
+          return [0.1, 0.2, 0.3];
+        },
+      },
+    };
+
+    const update = createToolSet(context).get("mymem_update");
+    const secret = "sk-1234567890abcdefghijklmnop";
+    const result = await update.execute(null, {
+      memoryId: entry.id,
+      text: `New memory with apiKey: ${secret}`,
+    });
+
+    assert.equal(result.details.action, "updated");
+    assert.ok(updatesSeen);
+    assert.ok(!entry.text.includes(secret));
+    assert.ok(!embeddedText.includes(secret));
+    assert.ok(!result.content[0].text.includes(secret));
+    assert.match(entry.text, /\[REDACTED/);
+    assert.match(parseSmartMetadata(entry.metadata, entry).summary, /\[REDACTED/);
   });
 });

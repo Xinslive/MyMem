@@ -1,4 +1,5 @@
 import {
+  MEMORY_CATEGORIES,
   TEMPORAL_VERSIONED_CATEGORIES,
   classifyMemoryType,
   type MemoryCategory,
@@ -7,17 +8,9 @@ import {
 } from "./memory-categories.js";
 import type { DecayableMemory } from "./decay-engine.js";
 
-type LegacyStoreCategory =
-  | "preference"
-  | "fact"
-  | "decision"
-  | "entity"
-  | "other"
-  | "reflection";
-
 type EntryLike = {
   text?: string;
-  category?: LegacyStoreCategory;
+  category?: string;
   importance?: number;
   timestamp?: number;
   metadata?: string;
@@ -237,9 +230,12 @@ function deriveDefaultLayer(
 }
 
 export function reverseMapLegacyCategory(
-  oldCategory: LegacyStoreCategory | undefined,
+  oldCategory: string | undefined,
   text = "",
 ): MemoryCategory {
+  if (oldCategory && (MEMORY_CATEGORIES as readonly string[]).includes(oldCategory)) {
+    return oldCategory as MemoryCategory;
+  }
   switch (oldCategory) {
     case "preference":
       return "preferences";

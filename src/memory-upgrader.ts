@@ -15,7 +15,7 @@
 
 import type { MemoryStore, MemoryEntry } from "./store.js";
 import type { LlmClient } from "./llm-client.js";
-import type { MemoryCategory } from "./memory-categories.js";
+import { normalizeCategory, type MemoryCategory } from "./memory-categories.js";
 import type { MemoryTier } from "./memory-categories.js";
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { LLM_MEMORY_UPGRADE_SCHEMA } from "./llm-output-schemas.js";
@@ -74,9 +74,11 @@ interface EnrichedMetadata {
  * With LLM, the enrichment prompt will determine the correct category.
  */
 function reverseMapCategory(
-  oldCategory: MemoryEntry["category"],
+  oldCategory: string,
   text: string,
 ): MemoryCategory {
+  const category = normalizeCategory(oldCategory);
+  if (category) return category;
   switch (oldCategory) {
     case "preference":
       return "preferences";

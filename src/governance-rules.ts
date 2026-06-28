@@ -1,5 +1,5 @@
 type GovernanceMemoryCategory = "preferences" | "patterns";
-type GovernanceStoreCategory = "preference" | "other";
+type GovernanceStoreCategory = GovernanceMemoryCategory;
 type GovernancePolarity = "prefer" | "avoid" | "neutral";
 
 export interface GovernanceRule {
@@ -30,7 +30,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:single-agent",
     text: "Do not use multiple agents unless the user explicitly asks for delegation.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "avoid",
     confidence: 0.96,
     patterns: [
@@ -43,7 +43,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:single-agent",
     text: "Use multiple agents by default.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "prefer",
     confidence: 0.86,
     patterns: [
@@ -56,7 +56,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:avoid-generic-advice",
     text: "Avoid generic or boilerplate advice; stay specific to the user's constraints.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "avoid",
     confidence: 0.94,
     patterns: [
@@ -69,7 +69,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:avoid-generic-advice",
     text: "Generic high-level advice is acceptable.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "prefer",
     confidence: 0.82,
     patterns: [
@@ -82,7 +82,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:constraints-first",
     text: "Ground the response in the user's concrete constraints before proposing a solution.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "prefer",
     confidence: 0.92,
     patterns: [
@@ -96,7 +96,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "style:concise-direct",
     text: "Keep responses concise and direct.",
     memoryCategory: "preferences",
-    storeCategory: "preference",
+    storeCategory: "preferences",
     polarity: "prefer",
     confidence: 0.9,
     patterns: [
@@ -109,7 +109,7 @@ const KNOWN_GOVERNANCE_RULES: KnownGovernanceRule[] = [
     topic: "workflow:avoid-reconfirm",
     text: "Avoid repeated confirmation loops; make a reasonable assumption and proceed unless the risk is high.",
     memoryCategory: "patterns",
-    storeCategory: "other",
+    storeCategory: "patterns",
     polarity: "avoid",
     confidence: 0.95,
     patterns: [
@@ -219,7 +219,7 @@ function buildFallbackRule(
     canonicalId: `rule:${normalized.slice(0, 120)}`,
     topic: `rule:${normalized.slice(0, 120)}`,
     memoryCategory: inferredCategory,
-    storeCategory: inferredCategory === "preferences" ? "preference" : "other",
+    storeCategory: inferredCategory,
     polarity,
     confidence: 0.62,
   };

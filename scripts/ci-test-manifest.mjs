@@ -9,6 +9,7 @@ export const CI_TEST_GROUPS = [
 export const CI_TEST_MANIFEST = [
   { group: "storage-and-schema", runner: "node", file: "test/access-tracker-retry.test.mjs" },
   { group: "storage-and-schema", runner: "node", file: "test/access-tracker.test.mjs", args: ["--test"] },
+  { group: "core-regression", runner: "node", file: "test/admission-rejection-audit-redaction.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/auto-capture-cleanup.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/auto-recall-abort-regression.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/auto-recall-query-length.test.mjs", args: ["--test"] },
@@ -59,6 +60,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/memory-update-supersede.test.mjs" },
   { group: "core-regression", runner: "node", file: "test/memory-upgrader-diagnostics.test.mjs" },
   { group: "core-regression", runner: "node", file: "test/maintenance-state-atomic.test.mjs", args: ["--test"] },
+  { group: "core-regression", runner: "node", file: "test/manual-write-redaction.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/migrate-legacy-schema.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/mmr-diversity.test.mjs", args: ["--test"] },
   { group: "llm-clients-and-auth", runner: "node", file: "test/nvidia-nim-provider-profile.test.mjs", args: ["--test"] },
@@ -83,6 +85,7 @@ export const CI_TEST_MANIFEST = [
   { group: "core-regression", runner: "node", file: "test/rrf-fusion.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/runtime-write-policy.test.mjs", args: ["--test"] },
   { group: "storage-and-schema", runner: "node", file: "test/scope-access-undefined.test.mjs", args: ["--test"] },
+  { group: "storage-and-schema", runner: "node", file: "test/scope-null-isolation.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-compressor.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-recovery-paths.test.mjs", args: ["--test"] },
   { group: "core-regression", runner: "node", file: "test/session-summary-before-reset.test.mjs", args: ["--test"] },

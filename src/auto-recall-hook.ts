@@ -45,7 +45,7 @@ interface RecallResult {
   score?: number;
 }
 
-type LegacyStoreCategory = "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
+type StoredCategory = string;
 
 type RecallHookResult = { prependContext: string; ephemeral: boolean };
 
@@ -57,25 +57,16 @@ interface RecallSelection {
   entry: RecallResult["entry"];
 }
 
-function isLegacyStoreCategory(category: string | undefined): category is LegacyStoreCategory {
-  return category === "preference" ||
-    category === "fact" ||
-    category === "decision" ||
-    category === "entity" ||
-    category === "other" ||
-    category === "reflection";
-}
-
 function toSmartMetadataEntry(entry: RecallResult["entry"]): {
   text: string;
-  category?: LegacyStoreCategory;
+  category?: StoredCategory;
   importance: number;
   timestamp: number;
   metadata?: string;
 } {
   return {
     text: entry.text,
-    category: isLegacyStoreCategory(entry.category) ? entry.category : undefined,
+    category: entry.category,
     importance: entry.importance,
     timestamp: entry.timestamp,
     metadata: entry.metadata,
@@ -499,12 +490,12 @@ export function registerAutoRecallHook(params: {
         overFetchMultiplier: 4,
         degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
         deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
-      }), config.workspaceBoundary);
+      }), config.workspaceBoundary) as RecallResult[];
       throwIfAborted();
 
       let reasoningStrategies: RecallSelection[] = [];
       if (reasoningStrategyEnabled) {
-        const strategyResults = filterUserMdExclusiveRecallResults(await retrieveWithRetry({
+        const strategyResults = (filterUserMdExclusiveRecallResults(await retrieveWithRetry({
           query: recallQuery,
           limit: reasoningStrategyCandidatePoolSize,
           scopeFilter: accessibleScopes,
@@ -514,7 +505,7 @@ export function registerAutoRecallHook(params: {
           overFetchMultiplier: 6,
           degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
           deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
-        }), config.workspaceBoundary)
+        }), config.workspaceBoundary) as RecallResult[])
           .filter((result) => isReasoningStrategyResult(result))
           .filter((result) => (result.score ?? 0) >= reasoningStrategyMinScore)
           .slice(0, reasoningStrategyMaxItems);
@@ -737,7 +728,7 @@ export function registerAutoRecallHook(params: {
             id: item.entry.id,
             text: item.entry.text,
             scope: item.entry.scope,
-            category: isLegacyStoreCategory(item.entry.category) ? item.entry.category : "other",
+            category: item.entry.category,
           })),
         });
       }

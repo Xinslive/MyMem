@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { Logger } from "./logger.js";
 import type { SmartMemoryMetadata } from "./smart-metadata.js";
+import { MEMORY_CATEGORIES } from "./memory-categories.js";
 
 // ============================================================================
 // LanceDB Type Stubs
@@ -29,13 +30,11 @@ export interface LanceIndex {
 }
 
 export const STORE_CATEGORY_VALUES = [
-  "preference",
-  "fact",
-  "decision",
-  "entity",
-  "other",
+  ...MEMORY_CATEGORIES,
   "reflection",
 ] as const;
+
+export type StoreCategory = (typeof STORE_CATEGORY_VALUES)[number];
 
 export const MemoryEntrySchema = Type.Object({
   id: Type.String(),

@@ -57,27 +57,27 @@ describe("shouldCapture", () => {
 
 describe("detectCategory", () => {
   it("detects preference patterns", () => {
-    assert.strictEqual(detectCategory("I prefer dark mode"), "preference");
-    assert.strictEqual(detectCategory("我喜欢喝咖啡"), "preference");
+    assert.strictEqual(detectCategory("I prefer dark mode"), "preferences");
+    assert.strictEqual(detectCategory("我喜欢喝咖啡"), "preferences");
   });
 
   it("detects decision patterns", () => {
-    assert.strictEqual(detectCategory("we decided to use React"), "decision");
-    assert.strictEqual(detectCategory("我们决定用Python"), "decision");
+    assert.strictEqual(detectCategory("we decided to use React"), "events");
+    assert.strictEqual(detectCategory("我们决定用Python"), "events");
   });
 
   it("detects entity patterns", () => {
-    assert.strictEqual(detectCategory("my email is test@example.com"), "entity");
-    assert.strictEqual(detectCategory("我的名字是小明"), "entity");
+    assert.strictEqual(detectCategory("my email is test@example.com"), "entities");
+    assert.strictEqual(detectCategory("我的名字是小明"), "entities");
   });
 
   it("detects fact patterns", () => {
-    assert.strictEqual(detectCategory("the server is running"), "fact");
-    assert.strictEqual(detectCategory("it always has issues"), "fact");
+    assert.strictEqual(detectCategory("the server is running"), "cases");
+    assert.strictEqual(detectCategory("it always has issues"), "cases");
   });
 
   it("defaults to other", () => {
-    assert.strictEqual(detectCategory("hello world"), "other");
+    assert.strictEqual(detectCategory("hello world"), "patterns");
   });
 });
 

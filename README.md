@@ -246,7 +246,7 @@ Learning Memory 默认开启，普通部署不需要额外配置。需要临时�
 
 如果 OpenClaw 环境对工具做白名单控制，推荐允许：
 
-`mymem_recall`、`mymem_doctor`
+`mymem_recall`、`mymem_update`、`mymem_doctor`
 
 反思和反馈循环会自动把长期偏好、经验、可复用做法和预防性教训写入 MyMem 记忆库，无需额外人工工具入口。
 

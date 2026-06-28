@@ -308,7 +308,6 @@ try {
   for (const hiddenTool of [
     "mymem_store",
     "mymem_forget",
-    "mymem_update",
     "mymem_stats",
     "mymem_debug",
     "mymem_explain",
@@ -345,6 +344,15 @@ try {
     recallToolDefinition.description,
     /Fallback manual memory recall/,
     "mymem_recall should be registered as a fallback manual recall tool",
+  );
+  const updateToolDefinition = api.toolFactories.mymem_update({
+    agentId: "main",
+    sessionKey: "agent:main:test",
+  });
+  assert.match(
+    updateToolDefinition.description,
+    /Correct or revise an existing memory/,
+    "mymem_update should be registered for explicit memory correction",
   );
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;

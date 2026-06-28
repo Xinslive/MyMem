@@ -132,7 +132,7 @@ async function runTests() {
     console.log("Test 1: similar preference memories trigger auto-supersede...");
     const store = makeMockStore();
     const oldId = "old-pref-1";
-    const oldEntry = makeOldEntry(oldId, "I like Python", "preference");
+    const oldEntry = makeOldEntry(oldId, "I like Python", "preferences");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -150,7 +150,7 @@ async function runTests() {
     console.log("Test 2: old memory metadata has invalidated_at and superseded_by...");
     const store = makeMockStore();
     const oldId = "old-pref-2";
-    const oldEntry = makeOldEntry(oldId, "I like tea", "preference");
+    const oldEntry = makeOldEntry(oldId, "I like tea", "preferences");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -169,7 +169,7 @@ async function runTests() {
     console.log("Test 3: new memory metadata has supersedes field...");
     const store = makeMockStore();
     const oldId = "old-pref-3";
-    const oldEntry = makeOldEntry(oldId, "My favorite color is blue", "preference");
+    const oldEntry = makeOldEntry(oldId, "My favorite color is blue", "preferences");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -187,7 +187,7 @@ async function runTests() {
     console.log("Test 4: new memory preserves canonical fields and drops legacy l1_overview...");
     const store = makeMockStore();
     const oldId = "old-pref-4";
-    const oldEntry = makeOldEntry(oldId, "I prefer dark mode", "preference");
+    const oldEntry = makeOldEntry(oldId, "I prefer dark mode", "preferences");
     // Patch old entry with specific canonical fields
     const oldMeta = parseSmartMetadata(oldEntry.metadata, oldEntry);
     oldMeta.memory_category = "preferences";
@@ -216,7 +216,7 @@ async function runTests() {
     console.log("Test 5: decision category is NOT auto-superseded...");
     const store = makeMockStore();
     const oldId = "old-dec-1";
-    const oldEntry = makeOldEntry(oldId, "Decided to use React", "decision");
+    const oldEntry = makeOldEntry(oldId, "Decided to use React", "events");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -248,7 +248,7 @@ async function runTests() {
     console.log("Test 7: entity category is eligible for auto-supersede...");
     const store = makeMockStore();
     const oldId = "old-ent-1";
-    const oldEntry = makeOldEntry(oldId, "Alice works at Google", "entity");
+    const oldEntry = makeOldEntry(oldId, "Alice works at Google", "entities");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
@@ -265,32 +265,32 @@ async function runTests() {
     console.log("Test 8: different categories do not trigger cross-category supersede...");
     const store = makeMockStore();
     const oldId = "old-pref-cross";
-    const oldEntry = makeOldEntry(oldId, "I enjoy hiking", "preference");
+    const oldEntry = makeOldEntry(oldId, "I enjoy hiking", "preferences");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
-    // Store as "entity" not "preference" → different category
+    // Store as "entities" not "preferences" → different category
     const res = await tool.execute(null, { text: "I enjoy hiking", category: "entities" });
 
     assert.equal(res.details.action, "created", "cross-category should not supersede");
     console.log("  ✅ cross-category similarities do not trigger supersede");
   }
 
-  // Test 9: fact category is NOT eligible (aligns with TEMPORAL_VERSIONED only)
+  // Test 9: cases category is NOT eligible (aligns with TEMPORAL_VERSIONED only)
   {
-    console.log("Test 9: fact category is NOT eligible for auto-supersede...");
+    console.log("Test 9: cases category is NOT eligible for auto-supersede...");
     const store = makeMockStore();
     const oldId = "old-fact-1";
-    const oldEntry = makeOldEntry(oldId, "The API endpoint is /v1/users", "fact");
+    const oldEntry = makeOldEntry(oldId, "The API endpoint is /v1/users", "cases");
     store.seed(oldEntry);
     store.setNextSearchResults([{ entry: oldEntry, score: 0.96 }]);
 
     const tool = createTool(registerMemoryStoreTool, makeContext(store));
     const res = await tool.execute(null, { text: "The API endpoint is /v2/users", category: "cases" });
 
-    assert.equal(res.details.action, "created", "facts should not be auto-superseded");
-    console.log("  ✅ facts are not auto-superseded (only preference/entity)");
+    assert.equal(res.details.action, "created", "cases should not be auto-superseded");
+    console.log("  ✅ cases are not auto-superseded (only preferences/entities)");
   }
 
   // Test 10: /lesson pitfall format is marked as preventive reasoning strategy

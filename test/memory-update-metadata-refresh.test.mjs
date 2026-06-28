@@ -382,7 +382,7 @@ async function runTests() {
 
     assert.equal(result5.action, "updated");
     const after5 = await store.getById(entry5.id, scopeFilter);
-    assert.equal(after5.category, "decision", "category should be updated");
+    assert.equal(after5.category, "events", "category should be updated and normalized");
     const meta5 = parseSmartMetadata(after5.metadata, after5);
     // summary/content should be unchanged since text was not modified
     assert.equal(meta5.summary, origText5, "summary should be preserved");

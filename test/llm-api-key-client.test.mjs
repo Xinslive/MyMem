@@ -143,6 +143,38 @@ describe("LLM api-key client", () => {
     assert.match(llm.getLastError() || "", /schema validation failed/);
   });
 
+  it("redacts secrets from JSON preview errors", async () => {
+    const secret = "sk-1234567890abcdefghijklmnop";
+    server = http.createServer(async (req, res) => {
+      for await (const _chunk of req) {
+        // Drain request body before responding.
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: `{"memories":[{"category":"patterns","abstract":"token ${secret}","content":"x"}]`,
+            },
+          },
+        ],
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+
+    const llm = createLlmClient({
+      auth: "api-key",
+      apiKey: "test-api-key",
+      model: "gpt-4o-mini",
+      baseURL: `http://127.0.0.1:${port}/v1`,
+    });
+
+    assert.equal(await llm.completeJson("hello", "api-key-redaction"), null);
+    assert.doesNotMatch(llm.getLastError() || "", new RegExp(secret));
+    assert.match(llm.getLastError() || "", /\[REDACTED\]/);
+  });
+
   it("limits concurrent provider requests across client calls", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

@@ -7,10 +7,10 @@ import type { Embedder } from "../embedder.js";
 import type { MemoryStore } from "../store.js";
 import {
   buildSmartMetadata,
-  reverseMapLegacyCategory,
   stringifySmartMetadata,
 } from "../smart-metadata.js";
 import { clampInt } from "../utils.js";
+import { sanitizeMemoryWriteText } from "../memory-write-sanitizer.js";
 
 export async function runImportMarkdown(
   ctx: { embedder?: Embedder; store: MemoryStore },
@@ -183,7 +183,7 @@ export async function runImportMarkdown(
 
     for (const line of lines) {
       if (!/^[-*+]\s/.test(line)) continue;
-      const text = line.slice(2).trim();
+      const text = sanitizeMemoryWriteText(line.slice(2).trim());
       if (text.length < minTextLength) {
         skipped++;
         continue;
@@ -218,13 +218,13 @@ export async function runImportMarkdown(
           text,
           vector,
           importance: importanceDefault,
-          category: "other",
+          category: "patterns",
           scope: effectiveScope,
           metadata: stringifySmartMetadata(
             buildSmartMetadata(
-              { text, category: "other", importance: importanceDefault },
+              { text, category: "patterns", importance: importanceDefault },
               {
-                memory_category: reverseMapLegacyCategory("other", text),
+                memory_category: "patterns",
                 source: "manual",
                 state: "confirmed",
                 importedFrom: filePath,

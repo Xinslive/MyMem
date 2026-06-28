@@ -5,7 +5,7 @@ export interface ReflectionSlices {
 
 export interface ReflectionMappedMemory {
   text: string;
-  category: "preference" | "fact" | "decision";
+  category: "preferences" | "cases" | "events";
   heading: string;
 }
 
@@ -254,31 +254,31 @@ function extractReflectionMappedMemoryItemsWithSanitizer(
   const mappedSections: Array<{
     heading: string;
     aliases?: string[];
-    category: "preference" | "fact" | "decision";
+    category: "preferences" | "cases" | "events";
     mappedKind: ReflectionMappedKind;
   }> = [
     {
       heading: "User model deltas (about the human)",
       aliases: ["用户偏好", "用户偏好（确认）", "用户偏好(确认)", "用户习惯", "用户画像"],
-      category: "preference",
+      category: "preferences",
       mappedKind: "user-model",
     },
     {
       heading: "Agent model deltas (about the assistant/system)",
       aliases: ["潜在改进", "改进方向", "助手改进", "系统改进"],
-      category: "preference",
+      category: "preferences",
       mappedKind: "agent-model",
     },
     {
       heading: "Lessons & pitfalls (symptom / cause / fix / prevention)",
       aliases: ["核心教训", "问题与修复", "问题和修复", "错误与修复"],
-      category: "fact",
+      category: "cases",
       mappedKind: "lesson",
     },
     {
       heading: "Decisions (durable)",
       aliases: ["关键决策", "决策", "持久决策"],
-      category: "decision",
+      category: "events",
       mappedKind: "decision",
     },
   ];

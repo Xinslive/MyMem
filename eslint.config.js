@@ -19,8 +19,9 @@ export default tseslint.config(
       }],
       // Prefer const
       "prefer-const": "error",
-      // Warn on any — remaining instances in hook/CLI code need gradual cleanup
-      "@typescript-eslint/no-explicit-any": "warn",
+      // Keep ordinary source strict; dynamic runtime-boundary files opt out below
+      // with an explicit allowlist so `any` cannot keep spreading silently.
+      "@typescript-eslint/no-explicit-any": "error",
       // Disable rules that conflict with existing patterns
       "@typescript-eslint/no-non-null-assertion": "off", // Used extensively in store.ts initialization
       "@typescript-eslint/no-inferrable-types": "off",
@@ -32,6 +33,25 @@ export default tseslint.config(
       "no-useless-escape": "warn",
       // preserve-caught-error requires attaching cause to all re-throws
       "preserve-caught-error": "off",
+    },
+  },
+  {
+    files: [
+      "index.ts",
+      "cli.ts",
+      "src/auto-capture-hook.ts",
+      "src/auto-recall-hook.ts",
+      "src/cli/oauth.ts",
+      "src/hook-enhancements.ts",
+      "src/plugin-singleton.ts",
+      "src/reflection-hook.ts",
+    ],
+    rules: {
+      // These files sit directly on OpenClaw hook payloads, Commander option
+      // objects, OAuth JSON, and plugin singleton boundaries whose external
+      // shapes are still dynamic. Keep the exception centralized instead of
+      // emitting dozens of background warnings on every lint run.
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
   {

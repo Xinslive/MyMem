@@ -229,7 +229,7 @@ export class MemoryMigrator {
           id: legacy.id,
           text: legacy.text,
           vector: legacy.vector,
-          category: legacy.category,
+          category: reverseMapLegacyCategory(legacy.category, legacy.text),
           scope: legacy.scope || defaultScope,
           importance: legacy.importance,
           timestamp: Number.isFinite(legacy.createdAt) ? legacy.createdAt : Date.now(),

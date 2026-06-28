@@ -10,7 +10,11 @@ import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { sortFileNamesByMtimeDesc } from "./file-utils.js";
 import { getDefaultMdMirrorDir } from "./path-utils.js";
-import { resolveRejectedAuditFilePath } from "./admission-control.js";
+import {
+  resolveRejectedAuditFilePath,
+  sanitizeAdmissionRejectionAuditEntry,
+} from "./admission-control.js";
+import { sanitizeMemoryWriteText } from "./memory-write-sanitizer.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig, AgentWorkspaceMap } from "./plugin-types.js";
 import type { AdmissionRejectionAuditEntry } from "./admission-control.js";
@@ -158,11 +162,11 @@ export function createMdMirrorWriter(
       const filePath = join(mirrorDir, `${dateStr}.md`);
       const agentLabel = meta?.agentId ? ` agent=${meta.agentId}` : "";
       const sourceLabel = meta?.source ? ` source=${meta.source}` : "";
-      const safeText = entry.text.replace(/\n/g, " ").slice(0, 500);
+      const safeText = sanitizeMemoryWriteText(entry.text).replace(/\n/g, " ").slice(0, 500);
       const line = `- ${ts.toISOString()} [${entry.category}:${entry.scope}]${agentLabel}${sourceLabel} ${safeText}\n`;
 
       await mkdir(mirrorDir, { recursive: true });
-      await appendFile(filePath, line, "utf8");
+      await appendFile(filePath, line, { encoding: "utf8", mode: 0o600 });
     } catch (err) {
       api.logger.warn(`mdMirror: write failed: ${String(err)}`);
     }
@@ -191,7 +195,11 @@ export function createAdmissionRejectionAuditWriter(
   return async (entry: AdmissionRejectionAuditEntry) => {
     try {
       await mkdir(dirname(filePath), { recursive: true });
-      await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+      const safeEntry = sanitizeAdmissionRejectionAuditEntry(entry);
+      await appendFile(filePath, `${JSON.stringify(safeEntry)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
     } catch (err) {
       api.logger.warn(`mymem: admission rejection audit write failed: ${String(err)}`);
     }

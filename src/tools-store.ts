@@ -16,6 +16,7 @@ import {
 } from "./tools-shared.js";
 import { mapToStoreCategory } from "./smart-extractor-handlers.js";
 import { stripEnvelopeMetadata } from "./smart-extractor.js";
+import { sanitizeMemoryWriteText } from "./memory-write-sanitizer.js";
 import { isNoise } from "./noise-filter.js";
 import { isSystemBypassId } from "./scopes.js";
 import {
@@ -84,6 +85,8 @@ export function registerMemoryStoreTool(
             };
           }
 
+          const safeText = sanitizeMemoryWriteText(stripped);
+
           const agentId = runtimeContext.agentId;
           // Determine target scope
           let targetScope = scope;
@@ -122,7 +125,7 @@ export function registerMemoryStoreTool(
           }
 
           // Reject noise before wasting an embedding API call
-          if (isNoise(text)) {
+          if (isNoise(safeText)) {
             return {
               content: [
                 {
@@ -130,7 +133,7 @@ export function registerMemoryStoreTool(
                   text: `Skipped: text detected as noise (greeting, boilerplate, or meta-question)`,
                 },
               ],
-              details: { action: "noise_filtered", text: text.slice(0, 60) },
+              details: { action: "noise_filtered", text: safeText.slice(0, 60) },
             };
           }
 
@@ -168,20 +171,20 @@ export function registerMemoryStoreTool(
             };
           }
           const storeCategory = mapToStoreCategory(memoryCategory);
-          const manualStrategyFields = detectLessonReasoningStrategy(stripped);
-          const vector = await runtimeContext.embedder.embedPassage(stripped);
+          const manualStrategyFields = detectLessonReasoningStrategy(safeText);
+          const vector = await runtimeContext.embedder.embedPassage(safeText);
 
           // Temporal awareness: classify and infer expiry
-          const temporalType = classifyTemporal(stripped);
-          const validUntil = inferExpiry(stripped);
+          const temporalType = classifyTemporal(safeText);
+          const validUntil = inferExpiry(safeText);
           // Check for duplicates / supersede candidates using raw vector similarity
           // (bypasses importance/recency weighting).
           // Fail-open by design: dedup must never block a legitimate memory write.
           // excludeInactive: superseded historical records must not block new writes.
-          // Align with TEMPORAL_VERSIONED_CATEGORIES: only preference and entity
+          // Align with TEMPORAL_VERSIONED_CATEGORIES: only preferences and entities
           // are semantically version-controlled.
           const SUPERSEDE_ELIGIBLE: ReadonlySet<string> = new Set([
-            "preference", "entity",
+            "preferences", "entities",
           ]);
           let existing: Awaited<ReturnType<import("./store.js").MemoryStore["vectorSearch"]>> = [];
           try {
@@ -228,15 +231,15 @@ export function registerMemoryStoreTool(
             const oldMeta = parseSmartMetadata(oldEntry.metadata, oldEntry);
             const now = Date.now();
             const factKey =
-              oldMeta.fact_key ?? deriveFactKey(oldMeta.memory_category, text);
+              oldMeta.fact_key ?? deriveFactKey(oldMeta.memory_category, safeText);
 
             // Store new memory with supersedes link, preserving canonical fields
             // from the old entry (aligns with mymem_update supersede path).
             const newMeta = buildSmartMetadata(
-              { text, category: storeCategory, importance: safeImportance },
+              { text: safeText, category: storeCategory, importance: safeImportance },
               {
-                summary: text,
-                content: text,
+                summary: safeText,
+                content: safeText,
                 memory_category: oldMeta.memory_category,
                 ...defaultLearningKindPatch(oldMeta.memory_category),
                 tier: oldMeta.tier,
@@ -260,7 +263,7 @@ export function registerMemoryStoreTool(
             );
 
             const newEntry = await runtimeContext.store.store({
-              text,
+              text: safeText,
               vector,
               importance: safeImportance,
               category: storeCategory,
@@ -294,7 +297,7 @@ export function registerMemoryStoreTool(
             if (context.mdMirror) {
               try {
                 await context.mdMirror(
-                  { text, category: storeCategory, scope: targetScope, timestamp: newEntry.timestamp },
+                  { text: safeText, category: storeCategory, scope: targetScope, timestamp: newEntry.timestamp },
                   { source: "mymem_store", agentId },
                 );
               } catch (mirrorErr) {
@@ -308,7 +311,7 @@ export function registerMemoryStoreTool(
               content: [
                 {
                   type: "text",
-                  text: `Superseded memory ${oldEntry.id.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}"`,
+                  text: `Superseded memory ${oldEntry.id.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${safeText.slice(0, 80)}${safeText.length > 80 ? "..." : ""}"`,
                 },
               ],
               details: {
@@ -325,7 +328,7 @@ export function registerMemoryStoreTool(
           }
 
           const entry = await runtimeContext.store.store({
-            text,
+            text: safeText,
             vector,
             importance: safeImportance,
             category: storeCategory,
@@ -333,13 +336,13 @@ export function registerMemoryStoreTool(
             metadata: stringifySmartMetadata(
               buildSmartMetadata(
                 {
-                  text,
+                  text: safeText,
                   category: storeCategory,
                   importance: safeImportance,
                 },
                 {
-                  summary: text,
-                  content: text,
+                  summary: safeText,
+                  content: safeText,
                   memory_category: memoryCategory,
                   ...defaultLearningKindPatch(memoryCategory),
                   source: "manual",
@@ -360,7 +363,7 @@ export function registerMemoryStoreTool(
           if (context.mdMirror) {
             try {
               await context.mdMirror(
-                { text, category: storeCategory, scope: targetScope, timestamp: entry.timestamp },
+                { text: safeText, category: storeCategory, scope: targetScope, timestamp: entry.timestamp },
                 { source: "mymem_store", agentId },
               );
             } catch (mirrorErr) {
@@ -374,7 +377,7 @@ export function registerMemoryStoreTool(
             content: [
               {
                 type: "text",
-                text: `Stored: "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}" in scope '${targetScope}'`,
+                text: `Stored: "${safeText.slice(0, 100)}${safeText.length > 100 ? "..." : ""}" in scope '${targetScope}'`,
               },
             ],
             details: {

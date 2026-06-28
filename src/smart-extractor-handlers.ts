@@ -28,7 +28,7 @@ import { redactSecrets } from "./session-utils.js";
 // Context
 // ============================================================================
 
-type StoreCategory = "preference" | "fact" | "decision" | "entity" | "other";
+type StoreCategory = MemoryCategory;
 
 export interface HandlerContext {
   store: MemoryStore;
@@ -54,27 +54,12 @@ export interface HandlerContext {
 // ============================================================================
 
 /**
- * Map 6-category to existing 5-category store type for backward compatibility.
+ * Store the public six-category taxonomy directly in the main memory table.
  */
 export function mapToStoreCategory(
   category: MemoryCategory,
-): "preference" | "fact" | "decision" | "entity" | "other" {
-  switch (category) {
-    case "profile":
-      return "fact";
-    case "preferences":
-      return "preference";
-    case "entities":
-      return "entity";
-    case "events":
-      return "decision";
-    case "cases":
-      return "fact";
-    case "patterns":
-      return "other";
-    default:
-      return "other";
-  }
+): MemoryCategory {
+  return category;
 }
 
 /**

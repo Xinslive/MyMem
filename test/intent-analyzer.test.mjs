@@ -9,7 +9,7 @@ describe("analyzeIntent", () => {
     assert.ok(result.label.includes("preference"));
     assert.equal(result.confidence, "high");
     assert.equal(result.depth, "full"); // deepest of summary (pref) + full (fact)
-    assert.ok(result.categories.includes("preference"));
+    assert.ok(result.categories.includes("preferences"));
   });
 
   it("detects preference intent (Chinese)", () => {
@@ -23,7 +23,7 @@ describe("analyzeIntent", () => {
     assert.equal(result.label, "decision");
     assert.equal(result.confidence, "high");
     assert.equal(result.depth, "full");
-    assert.ok(result.categories.includes("decision"));
+    assert.ok(result.categories.includes("events"));
   });
 
   it("detects decision intent (Chinese)", () => {
@@ -36,7 +36,7 @@ describe("analyzeIntent", () => {
     const result = analyzeIntent("Who is the project lead for auth service?");
     assert.equal(result.label, "entity");
     assert.equal(result.confidence, "high");
-    assert.ok(result.categories.includes("entity"));
+    assert.ok(result.categories.includes("entities"));
   });
 
   it("detects entity intent (Chinese)", () => {
@@ -53,14 +53,13 @@ describe("analyzeIntent", () => {
     assert.notEqual(component.label, "entity");
   });
 
-  it("detects event intent and routes to entity+decision categories", () => {
+  it("detects event intent and routes to entities+events categories", () => {
     const result = analyzeIntent("What happened during last week's deploy?");
     assert.equal(result.label, "event");
     assert.equal(result.confidence, "high");
     assert.equal(result.depth, "full");
-    // event is not a stored category — should route to entity + decision
-    assert.ok(result.categories.includes("entity"));
-    assert.ok(result.categories.includes("decision"));
+    assert.ok(result.categories.includes("entities"));
+    assert.ok(result.categories.includes("events"));
     assert.ok(!result.categories.includes("event"));
   });
 
@@ -151,21 +150,21 @@ describe("analyzeIntent", () => {
 
 describe("applyCategoryBoost", () => {
   const mockResults = [
-    { entry: { category: "fact" }, score: 0.8 },
-    { entry: { category: "preference" }, score: 0.75 },
-    { entry: { category: "entity" }, score: 0.7 },
+    { entry: { category: "cases" }, score: 0.8 },
+    { entry: { category: "preferences" }, score: 0.75 },
+    { entry: { category: "entities" }, score: 0.7 },
   ];
 
   it("boosts matching categories and re-sorts", () => {
     const intent = {
-      categories: ["preference"],
+      categories: ["preferences"],
       depth: "summary",
       confidence: "high",
       label: "preference",
     };
     const boosted = applyCategoryBoost(mockResults, intent);
-    // preference entry (0.75 * 1.15 = 0.8625) should now rank first
-    assert.equal(boosted[0].entry.category, "preference");
+    // preferences entry (0.75 * 1.15 = 0.8625) should now rank first
+    assert.equal(boosted[0].entry.category, "preferences");
     assert.ok(boosted[0].score > 0.75);
   });
 
@@ -177,15 +176,15 @@ describe("applyCategoryBoost", () => {
       label: "broad",
     };
     const result = applyCategoryBoost(mockResults, intent);
-    assert.equal(result[0].entry.category, "fact"); // original order preserved
+    assert.equal(result[0].entry.category, "cases"); // original order preserved
   });
 
   it("caps boosted scores at 1.0", () => {
     const highScoreResults = [
-      { entry: { category: "preference" }, score: 0.95 },
+      { entry: { category: "preferences" }, score: 0.95 },
     ];
     const intent = {
-      categories: ["preference"],
+      categories: ["preferences"],
       depth: "summary",
       confidence: "high",
       label: "preference",
@@ -198,28 +197,28 @@ describe("applyCategoryBoost", () => {
 describe("formatAtDepth", () => {
   const entry = {
     text: "User prefers TypeScript over JavaScript for all new projects. This was decided after the migration incident in Q3 where type errors caused a production outage.",
-    category: "preference",
+    category: "preferences",
     scope: "global",
   };
 
   it("summary: returns compact one-line summary", () => {
     const line = formatAtDepth(entry, "summary", 0.85, 0);
     assert.ok(line.length < entry.text.length + 30); // shorter than full
-    assert.ok(line.includes("[preference]"));
+    assert.ok(line.includes("[preferences]"));
     assert.ok(line.includes("85%"));
     assert.ok(!line.includes("global")); // summary omits scope
   });
 
   it("full: returns medium detail with scope", () => {
     const line = formatAtDepth(entry, "full", 0.72, 1);
-    assert.ok(line.includes("[preference:global]"));
+    assert.ok(line.includes("[preferences:global]"));
     assert.ok(line.includes("72%"));
   });
 
   it("full: returns complete text", () => {
     const line = formatAtDepth(entry, "full", 0.9, 0);
     assert.ok(line.includes(entry.text));
-    assert.ok(line.includes("[preference:global]"));
+    assert.ok(line.includes("[preferences:global]"));
   });
 
   it("includes BM25 and rerank source tags", () => {
@@ -229,7 +228,7 @@ describe("formatAtDepth", () => {
   });
 
   it("handles short text without truncation", () => {
-    const short = { text: "Use tabs.", category: "preference", scope: "global" };
+    const short = { text: "Use tabs.", category: "preferences", scope: "global" };
     const summary = formatAtDepth(short, "summary", 0.9, 0);
     assert.ok(summary.includes("Use tabs."));
   });
@@ -237,7 +236,7 @@ describe("formatAtDepth", () => {
   it("splits CJK sentences correctly at summary depth", () => {
     const cjk = {
       text: "第一句结束。第二句开始，这里有更多内容需要处理。",
-      category: "fact",
+      category: "cases",
       scope: "global",
     };
     const summary = formatAtDepth(cjk, "summary", 0.8, 0);
@@ -249,7 +248,7 @@ describe("formatAtDepth", () => {
   it("applies sanitize function when provided", () => {
     const malicious = {
       text: '<script>alert("xss")</script> normal text',
-      category: "fact",
+      category: "cases",
       scope: "global",
     };
     const sanitize = (t) => t.replace(/<[^>]*>/g, "").trim();
