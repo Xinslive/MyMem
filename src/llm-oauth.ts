@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { platform } from "node:os";
 import { spawn } from "node:child_process";
+import { redactSecrets } from "./session-utils.js";
 
 export interface OAuthLoginOptions {
   authPath: string;
@@ -430,7 +431,12 @@ export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: num
 
     if (!response.ok) {
       const detail = await readTextUnlessAborted(response, signal).catch(() => "");
-      throw new Error(`OAuth refresh failed (${response.status}): ${detail.slice(0, 500)}`);
+      // 2026-07-21 review (P1-L): cap the echoed body at 200 chars and run
+      // it through redactSecrets so a refresh_token (or any echoed
+      // credential) inside the OAuth error body cannot leak into operator
+      // logs or crash reports.
+      const safeDetail = redactSecrets(detail.slice(0, 200));
+      throw new Error(`OAuth refresh failed (${response.status}): ${safeDetail}`);
     }
 
     const payload = await readJsonUnlessAborted<TokenRefreshResponse>(response, signal);
@@ -484,7 +490,8 @@ async function exchangeAuthorizationCode(code: string, verifier: string, provide
 
     if (!response.ok) {
       const detail = await readTextUnlessAborted(response, signal).catch(() => "");
-      throw new Error(`OAuth token exchange failed (${response.status}): ${detail.slice(0, 500)}`);
+      const safeDetail = redactSecrets(detail.slice(0, 200));
+      throw new Error(`OAuth token exchange failed (${response.status}): ${safeDetail}`);
     }
 
     const payload = await readJsonUnlessAborted<TokenRefreshResponse>(response, signal);

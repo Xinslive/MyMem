@@ -95,6 +95,83 @@ export function setSingletonState(state: PluginSingletonState | null): void {
   _singletonState = state;
 }
 
+/**
+ * Tear down a singleton state: await all background task sets, flush the
+ * write queue and audit log, close the main + reflection LanceDB handles,
+ * and clear the prune interval.
+ *
+ * 2026-07-21 review (P1-A): used by `index.ts` before re-initialising the
+ * plugin so an OpenClaw hot-reload that hands the plugin a new `api`
+ * instance cannot leave the previous `MemoryStore` writing to the same
+ * LanceDB directory in parallel. Errors from each drain step are logged
+ * via the singleton's logger (or `console.warn` as a fallback) so a
+ * partial teardown never blocks the next register() call.
+ */
+export async function teardownSingleton(state: PluginSingletonState): Promise<void> {
+  const safeWarn = (msg: string) => {
+    try {
+      // PluginSingletonState does not carry a logger handle directly; use
+      // console.warn which OpenClaw already routes through its plugin host
+      // log when stderr is captured.
+      console.warn(msg);
+    } catch {
+      // Best effort — never throw from teardown.
+    }
+  };
+
+  const drainSet = async (set: Set<Promise<void>>, label: string) => {
+    if (set.size === 0) return;
+    try {
+      await Promise.allSettled([...set]);
+    } catch (err) {
+      safeWarn(`mymem: teardown drain ${label} failed: ${String(err)}`);
+    }
+  };
+
+  await drainSet(state.reflectionBackgroundTasks, "reflectionBackgroundTasks");
+  await drainSet(state.autoCaptureBackgroundTasks, "autoCaptureBackgroundTasks");
+  await drainSet(state.autoRecallBackgroundTasks, "autoRecallBackgroundTasks");
+  await drainSet(state.hookEnhancementBackgroundTasks, "hookEnhancementBackgroundTasks");
+
+  // Flush auto-recall metadata accumulator so pending debounce flushes land.
+  for (const acc of state.autoRecallMetadataAccumulators) {
+    try {
+      await acc.flushNow();
+    } catch (err) {
+      safeWarn(`mymem: teardown flushNow accumulator failed: ${String(err)}`);
+    }
+  }
+
+  // Clear the session prune interval if it survived.
+  if (state.sessionPruneInterval) {
+    clearInterval(state.sessionPruneInterval as unknown as NodeJS.Timeout);
+  }
+
+  // Drain stores: flush writes, audit log, then close handles.
+  try {
+    await state.store.flushWrites();
+    await state.store.flushAuditLog();
+  } catch (err) {
+    safeWarn(`mymem: teardown main store flush failed: ${String(err)}`);
+  }
+  try {
+    await state.reflectionStore.flushWrites();
+    await state.reflectionStore.flushAuditLog();
+  } catch (err) {
+    safeWarn(`mymem: teardown reflection store flush failed: ${String(err)}`);
+  }
+  try {
+    await state.store.close();
+  } catch (err) {
+    safeWarn(`mymem: teardown main store close failed: ${String(err)}`);
+  }
+  try {
+    await state.reflectionStore.close();
+  } catch (err) {
+    safeWarn(`mymem: teardown reflection store close failed: ${String(err)}`);
+  }
+}
+
 /** Test-only: reset singleton state so each test gets a fresh init. */
 export function __resetSingletonForTesting__(): void {
   _singletonState = null;
@@ -290,31 +367,18 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
   let feedbackLoop: FeedbackLoop | null = null;
   if (config.smartExtraction !== false) {
     try {
-      const llmAuth = config.llm?.auth || "api-key";
-      const llmApiKey = llmAuth === "oauth"
-        ? undefined
-        : config.llm?.apiKey
-          ? resolveEnvVars(config.llm.apiKey)
-          : resolveFirstApiKey(config.embedding.apiKey);
-      const llmBaseURL = llmAuth === "oauth"
-        ? (config.llm?.baseURL ? resolveEnvVars(config.llm.baseURL) : undefined)
-        : config.llm?.baseURL
-          ? resolveEnvVars(config.llm.baseURL)
-          : config.embedding.baseURL;
-      const llmModel = config.llm?.model || "openai/gpt-oss-120b";
-      const llmOauthPath = llmAuth === "oauth"
-        ? resolveOptionalPathWithEnv(api, config.llm?.oauthPath, ".mymem/oauth.json")
-        : undefined;
-      const llmOauthProvider = llmAuth === "oauth" ? config.llm?.oauthProvider : undefined;
-      const llmTimeoutMs = resolveLlmTimeoutMs(config);
+      // 2026-07-21 review (P1-I): share the LlmClient config resolution with
+      // the CLI adapter inside index.ts via resolveLlmClientOptions so the
+      // two paths cannot drift on auth / baseURL / model defaults.
+      const llmOptions = resolveLlmClientOptions(
+        {
+          llm: config.llm,
+          embedding: config.embedding,
+        },
+        api,
+      );
       const llmClient = createLlmClient({
-        auth: llmAuth,
-        apiKey: llmApiKey,
-        model: llmModel,
-        baseURL: llmBaseURL,
-        oauthProvider: llmOauthProvider,
-        oauthPath: llmOauthPath,
-        timeoutMs: llmTimeoutMs,
+        ...llmOptions,
         log: (msg: string) => api.logger.debug(msg),
         warnLog: (msg: string) => api.logger.warn(msg),
       });
@@ -352,9 +416,9 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
 
       (isCliMode() ? api.logger.debug : api.logger.info)(
         "mymem：智能提取已启用（LLM模型："
-        + llmModel
+        + llmOptions.model
         + "，超时："
-        + llmTimeoutMs
+        + llmOptions.timeoutMs
         + "ms）",
       );
 
@@ -480,5 +544,66 @@ export function initPluginState(api: OpenClawPluginApi): PluginSingletonState {
     autoCaptureBackgroundTasks,
     hookEnhancementBackgroundTasks,
     reflectionBackgroundTasks,
+  };
+}
+
+/**
+ * Resolve the LlmClient configuration from a plugin config + api. Shared by
+ * the smart-extractor construction inside `initPluginState` and the CLI
+ * adapter inside `index.ts`, which previously inlined two near-identical
+ * copies of this logic.
+ *
+ * 2026-07-21 review (P1-I): de-duplicates the LlmClient construction so a
+ * future change (e.g. add oauth refresh retry, swap baseURL resolution)
+ * only has to land in one place.
+ */
+export function resolveLlmClientOptions(
+  config: {
+    llm?: {
+      auth?: string;
+      apiKey?: string;
+      baseURL?: string;
+      oauthProvider?: string;
+      oauthPath?: string;
+      model?: string;
+      timeoutMs?: number;
+    };
+    embedding: { apiKey?: string | string[]; baseURL?: string };
+  },
+  api: OpenClawPluginApi,
+): {
+  auth: "api-key" | "oauth";
+  apiKey?: string;
+  model: string;
+  baseURL?: string;
+  oauthProvider?: string;
+  oauthPath?: string;
+  timeoutMs: number;
+} {
+  const llmAuth: "api-key" | "oauth" = config.llm?.auth === "oauth" ? "oauth" : "api-key";
+  const llmApiKey = llmAuth === "oauth"
+    ? undefined
+    : config.llm?.apiKey
+      ? resolveEnvVars(config.llm.apiKey)
+      : config.embedding.apiKey
+        ? resolveFirstApiKey(config.embedding.apiKey)
+        : undefined;
+  const llmBaseURL = llmAuth === "oauth"
+    ? (config.llm?.baseURL ? resolveEnvVars(config.llm.baseURL) : undefined)
+    : config.llm?.baseURL
+      ? resolveEnvVars(config.llm.baseURL)
+      : config.embedding.baseURL;
+  const llmOauthPath = llmAuth === "oauth"
+    ? resolveOptionalPathWithEnv(api, config.llm?.oauthPath, ".mymem/oauth.json")
+    : undefined;
+  const llmOauthProvider = llmAuth === "oauth" ? config.llm?.oauthProvider : undefined;
+  return {
+    auth: llmAuth,
+    apiKey: llmApiKey,
+    model: config.llm?.model || "openai/gpt-oss-120b",
+    baseURL: llmBaseURL,
+    oauthProvider: llmOauthProvider,
+    oauthPath: llmOauthPath,
+    timeoutMs: resolveLlmTimeoutMs({ llm: config.llm }),
   };
 }

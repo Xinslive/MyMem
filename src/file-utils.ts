@@ -68,3 +68,67 @@ export async function writeTextFileAtomic(filePath: string, content: string): Pr
 export async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
   await writeTextFileAtomic(filePath, JSON.stringify(value));
 }
+
+// ============================================================================
+// Per-path write-queue serialization (2026-07-21 review P1-H)
+// ============================================================================
+
+const writeQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Serializes async work that targets a specific file path. Concurrent calls
+ * with the same path are processed in submission order; calls to different
+ * paths run independently. The queue self-cleans once the last action resolves
+ * so process-global state stays bounded.
+ *
+ * Used by mdMirror and admission-rejection writers so JSONL appends from
+ * concurrent store() calls or admission rejections cannot tear lines or
+ * starve each other on slow disks.
+ */
+export async function withWriteQueue<T>(
+  filePath: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve();
+  let release: ((value: unknown) => void) | undefined;
+  const lock = new Promise<unknown>((resolve) => {
+    release = resolve;
+  });
+  const next = previous.then(() => lock);
+  writeQueues.set(filePath, next);
+
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release?.(undefined);
+    if (writeQueues.get(filePath) === next) {
+      writeQueues.delete(filePath);
+    }
+  }
+}
+
+/**
+ * Wait for all in-flight writes registered against the given paths to settle.
+ * Used by shutdown drain to avoid losing buffered JSONL entries when the
+ * process is about to exit.
+ */
+export async function flushWriteQueues(filePaths: string[]): Promise<void> {
+  const uniquePaths = [...new Set(filePaths)];
+  // Snapshot the queue entries; tail-chase so writes appended during the
+  // drain still complete before this returns.
+  const seen = new Set<string>();
+  while (true) {
+    const pending: Promise<unknown>[] = [];
+    for (const filePath of uniquePaths) {
+      if (seen.has(filePath)) continue;
+      const entry = writeQueues.get(filePath);
+      if (entry) {
+        pending.push(entry);
+        seen.add(filePath);
+      }
+    }
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }
+}

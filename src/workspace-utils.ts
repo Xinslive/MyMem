@@ -8,7 +8,7 @@ import { readdir, mkdir, appendFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
-import { sortFileNamesByMtimeDesc } from "./file-utils.js";
+import { sortFileNamesByMtimeDesc, withWriteQueue, flushWriteQueues } from "./file-utils.js";
 import { getDefaultMdMirrorDir } from "./path-utils.js";
 import {
   resolveRejectedAuditFilePath,
@@ -165,8 +165,13 @@ export function createMdMirrorWriter(
       const safeText = sanitizeMemoryWriteText(entry.text).replace(/\n/g, " ").slice(0, 500);
       const line = `- ${ts.toISOString()} [${entry.category}:${entry.scope}]${agentLabel}${sourceLabel} ${safeText}\n`;
 
-      await mkdir(mirrorDir, { recursive: true });
-      await appendFile(filePath, line, { encoding: "utf8", mode: 0o600 });
+      // 2026-07-21 review (P1-H): serialize mdMirror appends per file path
+      // so concurrent store() calls cannot tear the same dated file or
+      // starve each other on slow disks (e.g. macOS USB SSDs).
+      await withWriteQueue(filePath, async () => {
+        await mkdir(mirrorDir, { recursive: true });
+        await appendFile(filePath, line, { encoding: "utf8", mode: 0o600 });
+      });
     } catch (err) {
       api.logger.warn(`mdMirror: write failed: ${String(err)}`);
     }
@@ -194,14 +199,30 @@ export function createAdmissionRejectionAuditWriter(
 
   return async (entry: AdmissionRejectionAuditEntry) => {
     try {
-      await mkdir(dirname(filePath), { recursive: true });
-      const safeEntry = sanitizeAdmissionRejectionAuditEntry(entry);
-      await appendFile(filePath, `${JSON.stringify(safeEntry)}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
+      // 2026-07-21 review (P1-H): serialize admission-rejection appends on
+      // the same file path so concurrent rejections cannot tear the JSONL
+      // line or interleave with mdMirror writes that share the same
+      // backing disk.
+      await withWriteQueue(filePath, async () => {
+        await mkdir(dirname(filePath), { recursive: true });
+        const safeEntry = sanitizeAdmissionRejectionAuditEntry(entry);
+        await appendFile(filePath, `${JSON.stringify(safeEntry)}\n`, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
       });
     } catch (err) {
       api.logger.warn(`mymem: admission rejection audit write failed: ${String(err)}`);
     }
   };
+}
+
+/**
+ * Wait for any in-flight mdMirror and admission-rejection JSONL writes to
+ * settle. Called from the plugin shutdown drain so the last batch of
+ * per-day mirror entries and rejection audit lines do not get truncated
+ * by process exit.
+ */
+export async function flushWorkspaceJsonlWrites(filePaths: string[]): Promise<void> {
+  await flushWriteQueues(filePaths);
 }

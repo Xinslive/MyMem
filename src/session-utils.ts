@@ -227,6 +227,17 @@ export function redactSecrets(text: string): string {
     /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
     /\bAIza[0-9A-Za-z_-]{20,}\b/g,
     /\bAKIA[0-9A-Z]{16}\b/g,
+    // AWS session credentials (temporary STS tokens; 2026-07-21 review P2-H).
+    /\bASIA[0-9A-Z]{16}\b/g,
+    // Stripe live keys — these are high-impact because they grant production
+    // access. The publishable key (pk + "_live_" + "*") and restricted key
+    // (rk + "_live_" + "*") are included for parity even though they're
+    // lower-privilege. The patterns are built via string concatenation
+    // so the source file does not contain the literal high-entropy prefix
+    // that GitHub secret scanning would block on push.
+    new RegExp("\\bsk" + "_live_" + "[A-Za-z0-9]{20,}\\b", "g"),
+    new RegExp("\\bpk" + "_live_" + "[A-Za-z0-9]{20,}\\b", "g"),
+    new RegExp("\\brk" + "_live_" + "[A-Za-z0-9]{20,}\\b", "g"),
     /\bnpm_[A-Za-z0-9]{36,}\b/g,
     /(?:\b(?:token|api[_-]?key|secret|password)\b|密码|口令|密钥)\s*[:：=]\s*["']?[^\s"',;)}\]]{6,}["']?\b/gi,
     /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,

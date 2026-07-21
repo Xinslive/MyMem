@@ -510,32 +510,51 @@ export function registerAutoRecallHook(params: {
       }
 
       throwIfAborted();
-      const results = filterUserMdExclusiveRecallResults(await retrieveWithRetry({
+
+      // 2026-07-21 review (P1-G): fire the general and reasoning-strategy
+      // retrievals in parallel. Previously these were two sequential
+      // await points, each running a full embed + BM25 + vector + RRF +
+      // rerank + MMR + decay pipeline; on the user-visible prompt-build
+      // path that doubled auto-recall wall-time even though the query,
+      // scope filter, and signal were identical. The two calls also hit
+      // the embedding cache for the same query string, so the duplicate
+      // embedQuery network round-trip is avoided without further plumbing.
+      const generalRequest = {
         query: recallQuery,
         limit: retrieveLimit,
         scopeFilter: accessibleScopes,
-        source: "auto-recall",
+        source: "auto-recall" as const,
         signal,
         candidatePoolSize: autoRecallCandidatePoolSize,
         overFetchMultiplier: 4,
         degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
         deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
-      }), config.workspaceBoundary) as RecallResult[];
+      };
+      const strategyRequest = reasoningStrategyEnabled
+        ? {
+            query: recallQuery,
+            limit: reasoningStrategyCandidatePoolSize,
+            scopeFilter: accessibleScopes,
+            source: "auto-recall" as const,
+            signal,
+            candidatePoolSize: reasoningStrategyCandidatePoolSize,
+            overFetchMultiplier: 6,
+            degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
+            deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
+          }
+        : null;
+
+      const [generalRaw, strategyRaw] = await Promise.all([
+        retrieveWithRetry(generalRequest),
+        strategyRequest ? retrieveWithRetry(strategyRequest) : Promise.resolve([]),
+      ]);
+
       throwIfAborted();
 
+      const results = filterUserMdExclusiveRecallResults(generalRaw, config.workspaceBoundary) as RecallResult[];
       let reasoningStrategies: RecallSelection[] = [];
-      if (reasoningStrategyEnabled) {
-        const rawStrategyResults = filterUserMdExclusiveRecallResults(await retrieveWithRetry({
-          query: recallQuery,
-          limit: reasoningStrategyCandidatePoolSize,
-          scopeFilter: accessibleScopes,
-          source: "auto-recall",
-          signal,
-          candidatePoolSize: reasoningStrategyCandidatePoolSize,
-          overFetchMultiplier: 6,
-          degradeAfterMs: AUTO_RECALL_DEGRADE_AFTER_MS,
-          deadlineAt: Date.now() + AUTO_RECALL_TIMEOUT_MS,
-        }), config.workspaceBoundary) as RecallResult[];
+      if (strategyRequest) {
+        const rawStrategyResults = filterUserMdExclusiveRecallResults(strategyRaw, config.workspaceBoundary) as RecallResult[];
         throwIfAborted();
         const strategyResults = rawStrategyResults
           .filter((result) => isReasoningStrategyResult(result))

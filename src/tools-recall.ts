@@ -65,6 +65,12 @@ export function registerMemoryRecallTool(
         type: Type.Optional(
           stringEnum(["knowledge", "experience", "both"] as const),
         ),
+        includeReflection: Type.Optional(
+          Type.Boolean({
+            description:
+              "Include rows whose memory_layer === 'reflection'. Defaults to false: reflection rows live in a separate pipeline and must not bleed into durable-knowledge recall.",
+          }),
+        ),
       }),
       async execute(_toolCallId, params) {
         const {
@@ -75,6 +81,7 @@ export function registerMemoryRecallTool(
           scope,
           category,
           type,
+          includeReflection = false,
         } = params as {
           query: string;
           limit?: number;
@@ -83,6 +90,7 @@ export function registerMemoryRecallTool(
           scope?: string;
           category?: string;
           type?: "knowledge" | "experience" | "both";
+          includeReflection?: boolean;
         };
 
         try {
@@ -131,12 +139,25 @@ export function registerMemoryRecallTool(
 
           const typeFilter: MemoryType | undefined =
             type === "knowledge" || type === "experience" ? type : undefined;
-          const results = typeFilter
+          const typeFilteredResults = typeFilter
             ? categoryFilteredResults.filter(
                 (r) =>
                   parseSmartMetadata(r.entry.metadata, r.entry).memory_type === typeFilter,
               )
             : categoryFilteredResults;
+
+          // 2026-07-21 review (P1-F): mymem_recall must hide reflection-tier
+          // rows by default. The auto-recall hook already filters on
+          // memory_layer, but the explicit tool path did not. A reflection
+          // row in the main store (legacy migration, manual write, or any
+          // future path that mistakenly sets memory_layer) would otherwise
+          // surface to the agent as durable knowledge.
+          const results = includeReflection
+            ? typeFilteredResults
+            : typeFilteredResults.filter((r) => {
+                const layer = parseSmartMetadata(r.entry.metadata, r.entry).memory_layer;
+                return layer !== "reflection";
+              });
 
           if (results.length === 0) {
             return {

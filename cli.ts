@@ -909,7 +909,11 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
         const sourceDbPath = options.sourceDb as string;
         const batchSize = clampInt(parseInt(options.batchSize, 10) || 32, 1, 128);
-        const limit = options.limit ? clampInt(parseInt(options.limit, 10) || 0, 1, 1000000) : undefined;
+        // 2026-07-21 review (P2-J): cap --limit at a sane ceiling so a typo
+        // does not try to materialize a multi-GB Arrow result into memory.
+        // The upper bound 100k still allows full re-embed for very large
+        // personal databases while preventing runaway scans.
+        const limit = options.limit ? clampInt(parseInt(options.limit, 10) || 0, 1, 100_000) : undefined;
         const dryRun = options.dryRun === true;
         const skipExisting = options.skipExisting === true;
         const force = options.force === true;

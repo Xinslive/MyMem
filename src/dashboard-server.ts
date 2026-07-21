@@ -92,6 +92,15 @@ type DashboardFilter = {
   scopeFilter?: string[];
   category?: string;
   quality?: DashboardQualityFilter;
+  /**
+   * When true, rows whose memory_layer === "reflection" are surfaced in the
+   * dashboard listing. Defaults to false so operator visibility does not
+   * imply that reflection rows are first-class knowledge — they live in a
+   * separate pipeline. 2026-07-21 review (P1-F) closes the read-time gap
+   * that allowed reflection rows to surface via /api/memories even though
+   * the auto-recall hook filters them out.
+   */
+  includeReflection?: boolean;
 };
 
 type DashboardQualityFilter = "bad_recall" | "suppressed" | "low_confidence" | "inactive";
@@ -316,10 +325,12 @@ function resolveFilter(url: URL): DashboardFilter {
     ? rawCategory
     : undefined;
   const quality = normalizeQualityFilter(singleParam(url, "quality"));
+  const includeReflection = singleParam(url, "includeReflection") === "true";
   return {
     scopeFilter: scope ? [scope] : undefined,
     category,
     quality,
+    includeReflection,
   };
 }
 
@@ -981,6 +992,21 @@ async function loadDashboardMemories(
       const serialized = serializeMemory(entry);
       if (filter.category && serialized.category !== filter.category) continue;
       if (filter.quality && !serialized.qualityFlags.includes(filter.quality)) continue;
+      // 2026-07-21 review (P1-F): default to hiding reflection-tier rows
+      // from the dashboard listing. Operators must opt in explicitly via
+      // ?includeReflection=true. Matches the auto-recall hook filter on
+      // memory_layer === "reflection" so the dashboard agrees with the
+      // runtime recall path.
+      if (!filter.includeReflection) {
+        let layer: string | undefined;
+        try {
+          const meta = entry.metadata ? JSON.parse(entry.metadata) : {};
+          layer = typeof meta.memory_layer === "string" ? meta.memory_layer : undefined;
+        } catch {
+          layer = undefined;
+        }
+        if (layer === "reflection") continue;
+      }
       collected.push(serialized);
     }
     if (page.length < pageSize) break;
@@ -1212,9 +1238,38 @@ export async function startMemoryDashboardServer(
   };
 }
 
+/**
+ * Force-close the HTTP server. Calls `closeAllConnections` first when
+ * available (Node 18.2+) so keep-alive sockets do not block shutdown for
+ * up to keepAliveTimeout (default 5s, sometimes longer). Bounded by a
+ * 2s timeout race to prevent plugin `stop()` from hanging indefinitely.
+ *
+ * 2026-07-21 review (P1-D): without this, the dashboard server can keep
+ * the process alive for tens of seconds while idle browser connections
+ * drain naturally — preventing a clean plugin reload.
+ */
 function closeServer(server: Server): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
+  // Force-close any open keep-alive sockets first. closeAllConnections
+  // was added in Node 18.2 and is optional in older typings.
+  const maybeForceClose = server as Server & {
+    closeAllConnections?: () => void;
+  };
+  if (typeof maybeForceClose.closeAllConnections === "function") {
+    try {
+      maybeForceClose.closeAllConnections();
+    } catch {
+      // Best effort; fall through to server.close() regardless.
+    }
+  }
+  return new Promise((resolve) => {
+    const settle = () => resolve();
+    server.close((error) => {
+      if (error) settle();
+      else settle();
+    });
+    // 2s ceiling so the stop path cannot hang forever even if a socket
+    // is stuck mid-handshake.
+    setTimeout(settle, 2_000).unref?.();
   });
 }
 

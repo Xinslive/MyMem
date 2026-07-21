@@ -326,6 +326,11 @@ export class AccessTracker {
 
   /**
    * Tear down the tracker — cancel timers and best-effort flush pending state.
+   *
+   * @deprecated 2026-07-21: prefer `close()` which performs a bounded retry
+   * drain and reports `droppedOnShutdownCount` on failure. `destroy()` is
+   * kept for backwards compatibility with external callers but is no longer
+   * invoked by the plugin lifecycle. Will be removed in a future release.
    */
   destroy(): void {
     this.clearTimer();

@@ -14,7 +14,7 @@ const isCliMode = () => process.env.OPENCLAW_CLI === "1";
 
 // Import extracted utilities
 import { extractTextContent, shouldSkipReflectionMessage } from "./src/session-utils.js";
-import { resolveEnvVars, resolveFirstApiKey, resolveOptionalPathWithEnv, pruneMapIfOver, resolveLlmTimeoutMs } from "./src/config-utils.js";
+import { pruneMapIfOver } from "./src/config-utils.js";
 import { getDefaultWorkspaceDir, getDefaultMdMirrorDir } from "./src/path-utils.js";
 import { AUTO_CAPTURE_MAP_MAX_ENTRIES, buildAutoCaptureConversationKeyFromIngress } from "./src/auto-capture-utils.js";
 import { parsePluginConfig } from "./src/plugin-config-parser.js";
@@ -46,6 +46,8 @@ import {
   getSingletonState,
   setSingletonState,
   __resetSingletonForTesting__,
+  resolveLlmClientOptions,
+  teardownSingleton,
 } from "./src/plugin-singleton.js";
 
 // ============================================================================
@@ -101,7 +103,27 @@ const myMemPlugin = {
     // the same singleton via destructuring. This prevents:
     //   - Memory heap growth from repeated resource creation (~9 calls/process)
     //   - Accumulated session Maps being lost on re-registration
+    //
+    // 2026-07-21 review (P1-A): if a previous singleton exists (e.g. after
+    // OpenClaw hot-reloaded the plugin and handed us a new api while the
+    // previous api's singleton is still around), schedule a teardown of
+    // the previous state so we do not end up with two MemoryStores writing
+    // to the same LanceDB directory in parallel. The OpenClaw register()
+    // contract is synchronous, so the teardown is fire-and-forget — the
+    // new singleton initializes immediately and the old one closes in
+    // the background. The OS file-lock + the singleton's own _serialChain
+    // serialize concurrent writes; teardown just releases the second
+    // LanceDB handle once the in-flight writes drain.
     // ========================================================================
+    const previousState = getSingletonState();
+    if (previousState) {
+      setSingletonState(null);
+      void teardownSingleton(previousState).catch((err) => {
+        api.logger.warn(
+          `mymem: hot-reload teardown of previous singleton failed: ${String(err)}`,
+        );
+      });
+    }
     if (!getSingletonState()) { setSingletonState(_pluginStateFactory(api)); }
     const {
       config,
@@ -261,9 +283,6 @@ const myMemPlugin = {
         workspaceBoundary: config.workspaceBoundary,
         telemetry: telemetryStore,
       },
-      {
-        enableManagementTools: config.enableManagementTools,
-      }
     );
 
     registerGatewayMaintenance({
@@ -291,32 +310,16 @@ const myMemPlugin = {
         embedder,
         llmClient: smartExtractor ? (() => {
           try {
-            const llmAuth = config.llm?.auth || "api-key";
-            const llmApiKey = llmAuth === "oauth"
-              ? undefined
-              : config.llm?.apiKey
-                ? resolveEnvVars(config.llm.apiKey)
-                : resolveFirstApiKey(config.embedding.apiKey);
-            const llmBaseURL = llmAuth === "oauth"
-              ? (config.llm?.baseURL ? resolveEnvVars(config.llm.baseURL) : undefined)
-              : config.llm?.baseURL
-                ? resolveEnvVars(config.llm.baseURL)
-                : config.embedding.baseURL;
-            const llmOauthPath = llmAuth === "oauth"
-              ? resolveOptionalPathWithEnv(api, config.llm?.oauthPath, ".mymem/oauth.json")
-              : undefined;
-            const llmOauthProvider = llmAuth === "oauth"
-              ? config.llm?.oauthProvider
-              : undefined;
-            const llmTimeoutMs = resolveLlmTimeoutMs(config);
+            // 2026-07-21 review (P1-I): share LlmClient config resolution
+            // with the smart-extractor construction in plugin-singleton.ts
+            // so the two paths cannot drift on auth / baseURL / model
+            // defaults.
+            const llmOptions = resolveLlmClientOptions(
+              { llm: config.llm, embedding: config.embedding },
+              api,
+            );
             return createLlmClient({
-              auth: llmAuth,
-              apiKey: llmApiKey,
-              model: config.llm?.model || "openai/gpt-oss-120b",
-              baseURL: llmBaseURL,
-              oauthProvider: llmOauthProvider,
-              oauthPath: llmOauthPath,
-              timeoutMs: llmTimeoutMs,
+              ...llmOptions,
               log: (msg: string) => api.logger.debug(msg),
             });
           } catch { return undefined; }

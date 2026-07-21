@@ -36,7 +36,7 @@
   "license": "MIT",
   "scripts": {
     "test": "npm run test:smoke",
-    "test:smoke": "node --test test/config-utils.test.mjs test/capture-detection.test.mjs test/runtime-write-policy.test.mjs && node test/plugin-manifest-regression.mjs && node test/cli-smoke.mjs",
+    "test:smoke": "node --test test/config-utils.test.mjs test/capture-detection.test.mjs test/runtime-write-policy.test.mjs test/scope-null-isolation.test.mjs test/admission-rejection-audit-redaction.test.mjs test/write-redaction-smoke.test.mjs && node test/plugin-manifest-regression.mjs && node test/cli-smoke.mjs",
     "version": "node scripts/sync-plugin-version.mjs openclaw.plugin.json package.json && git add openclaw.plugin.json",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src/ index.ts cli.ts",

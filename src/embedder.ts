@@ -371,7 +371,8 @@ export class Embedder {
       if (!response.ok) {
         const body = await this.readNativeFetchBody(() => response.text(), signal).catch(() => "");
         throw new Error(
-          `Ollama batch embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
+          `Ollama batch embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`,
+          { cause: new Error(`HTTP ${response.status} ${response.statusText}`) }
         );
       }
 
@@ -414,7 +415,8 @@ export class Embedder {
     if (!response.ok) {
       const body = await this.readNativeFetchBody(() => response.text(), signal).catch(() => "");
       throw new Error(
-        `Ollama embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`
+        `Ollama embedding failed: ${response.status} ${response.statusText}: ${body.slice(0, 200)}`,
+        { cause: new Error(`HTTP ${response.status} ${response.statusText}`) }
       );
     }
 
