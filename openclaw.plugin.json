@@ -127,11 +127,6 @@
           }
         }
       },
-      "enableManagementTools": {
-        "type": "boolean",
-        "default": true,
-        "description": "Legacy compatibility flag. Default runtime tool registration includes mymem_recall, mymem_update, and mymem_doctor; memory capture and governance are otherwise handled automatically."
-      },
       "sessionStrategy": {
         "type": "string",
         "enum": [
@@ -1926,11 +1921,6 @@
     "scopes.agentAccess": {
       "label": "Agent Access Control",
       "help": "Define which scopes each agent can access",
-      "advanced": true
-    },
-    "enableManagementTools": {
-      "label": "Management Tools",
-      "help": "Legacy compatibility flag. Default runtime tool registration includes mymem_recall, mymem_update, and mymem_doctor.",
       "advanced": true
     },
     "mdMirror.enabled": {

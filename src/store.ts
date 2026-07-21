@@ -24,6 +24,7 @@ import {
   escapeSqlLiteral,
   isExplicitDenyAllScopeFilter,
   buildScopeWhereClause,
+  buildScopeEqualityWithLegacyFallback,
   combineWhereClauses,
   prefixWhereClause,
   isVectorIndexType,
@@ -406,9 +407,14 @@ export class MemoryStore {
       [...new Set(exactScopes)].map(async (scope) => {
         const count = await this.countByWhereSuffix(
           baseWhere,
-          scope === "global"
-            ? `(scope = 'global' OR scope IS NULL)`
-            : `scope = '${escapeSqlLiteral(scope)}'`,
+          // 2026-07-21 review (P0-C): gate the legacy NULL-scope fallback on
+          // scopeFilter.includes("global") so countScopes agrees with
+          // buildScopeWhereClause — the audit/CR-3 invariant that NULL-scope
+          // rows are only surfaced to callers whose filter explicitly
+          // includes global. Without this gate, an agent with a non-global
+          // ACL could see legacy NULL rows in dashboard stats while being
+          // correctly hidden from vectorSearch/bm25Search results.
+          buildScopeEqualityWithLegacyFallback(scope, scopeFilter),
         );
         if (count > 0) scopeCounts[scope] = count;
       }),
@@ -427,9 +433,7 @@ export class MemoryStore {
       if (scopeCounts[scope] !== undefined) continue;
       const count = await this.countByWhereSuffix(
         baseWhere,
-        scope === "global"
-          ? `(scope = 'global' OR scope IS NULL)`
-          : `scope = '${escapeSqlLiteral(scope)}'`,
+        buildScopeEqualityWithLegacyFallback(scope, scopeFilter),
       );
       if (count > 0) scopeCounts[scope] = count;
     }

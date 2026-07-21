@@ -8,7 +8,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const allowedRuntimeStoreFiles = new Set([
   "src/store.ts",
-  "src/tools-store.ts",
   "src/tools-update.ts",
   "src/smart-extractor-handlers.ts",
   "src/reflection-hook.ts",
@@ -25,7 +24,6 @@ describe("runtime memory write policy", () => {
     const files = [
       "cli.ts",
       "index.ts",
-      "src/tools-store.ts",
       "src/tools-update.ts",
       "src/smart-extractor-handlers.ts",
       "src/reflection-hook.ts",

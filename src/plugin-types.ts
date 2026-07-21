@@ -145,7 +145,6 @@ export interface PluginConfig {
     definitions?: Record<string, { description: string }>;
     agentAccess?: Record<string, string[]>;
   };
-  enableManagementTools?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionMemory?: { enabled?: boolean; messageCount?: number };
   memoryReflection?: {

@@ -315,7 +315,6 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 8,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 12000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as PluginConfig["scopes"] : undefined,
-    enableManagementTools: cfg.enableManagementTools !== false,
     sessionStrategy,
     memoryReflection: memoryReflectionRaw
       ? {

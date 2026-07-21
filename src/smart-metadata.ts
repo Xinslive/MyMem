@@ -51,17 +51,6 @@ function recordCorruptParse(raw: string, err: unknown): void {
   };
 }
 
-export interface ParseSmartMetadataOptions {
-  /**
-   * Called when rawMetadata is non-empty but JSON.parse fails. The first
-   * argument is the raw string, the second is the parse error. Defaults to
-   * recording into the module-level corrupt counter exposed via
-   * `getCorruptMetadataStats()`. Supply a custom handler for unit tests or
-   * when the caller wants to forward the event to a structured logger.
-   */
-  onCorrupt?: (raw: string, error: unknown) => void;
-}
-
 export interface MemoryRelation {
   type: string;
   targetId: string;
@@ -339,6 +328,10 @@ export interface ParseSmartMetadataOptions {
    * argument is the raw string, the second is the parse error. Listeners
    * should at minimum emit a structured log entry so corrupt rows become
    * visible instead of silently being treated as empty metadata.
+   *
+   * 2026-07-21: this is the sole declaration of the interface — a previous
+   * duplicate further up the file was removed because TypeScript silently
+   * merged the two declarations, masking the fact that the JSDoc diverged.
    */
   onCorrupt?: (raw: string, error: unknown) => void;
 }

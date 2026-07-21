@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AdmissionController, AdmissionTypePriors, AdmissionControlConfig, AdmissionRejectionAuditEntry } from "./admission-control.js";
+import { sanitizeAdmissionRejectionAuditEntry } from "./admission-control.js";
 import { MEMORY_CATEGORIES } from "./memory-categories.js";
 import { resolveRejectedAuditFilePath } from "./admission-control.js";
 import type { MemoryEntry } from "./store.js";
@@ -464,7 +465,16 @@ export class FeedbackLoop {
 
   private async writeRejectionAuditEntry(filePath: string, entry: AdmissionRejectionAuditEntry): Promise<void> {
     await mkdir(dirname(filePath), { recursive: true });
-    await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+    // CR-1 redaction: reject audit entries carry the last 1200 chars of
+    // conversation text plus LLM-extracted candidate abstract/content. Pass
+    // through the same sanitizer workspace-utils uses before persistence so
+    // a leaky conversation excerpt or echoed secret cannot reach the JSONL
+    // log even if the upstream extraction chain regresses.
+    const safeEntry = sanitizeAdmissionRejectionAuditEntry(entry);
+    await appendFile(filePath, `${JSON.stringify(safeEntry)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
   /** Drain the in-memory rejection buffer into the file once context is known. */

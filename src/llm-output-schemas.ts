@@ -16,6 +16,12 @@ export const LLM_DEDUP_DECISION_SCHEMA = Type.Object({
   decision: Type.String(),
   reason: Type.String(),
   match_index: Type.Optional(Type.Number()),
+  // 2026-07-21 review (P0-B.L2): LLM must also return the first 8 hex chars
+  // of the matched memory's id when match_index is supplied. The server
+  // re-verifies the prefix against topSimilar[idx-1].entry.id so a prompt
+  // injection that echoes an arbitrary match_index cannot manipulate the
+  // chosen memory without also guessing a valid 32-bit id prefix.
+  match_id_prefix: Type.Optional(Type.String()),
   context_label: Type.Optional(Type.String()),
 });
 

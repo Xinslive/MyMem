@@ -43,6 +43,26 @@ export function buildScopeWhereClause(scopeFilter?: string[]): string | null {
   return `((${scopeConditions})${nullScopeCondition})`;
 }
 
+/**
+ * Build a SQL `scope = '<scope>' [OR scope IS NULL]` predicate for a single
+ * scope value. The legacy NULL fallback is only attached when the requesting
+ * scope filter actually contains `global` — mirroring buildScopeWhereClause
+ * so the count/aggregate path agrees with the read path.
+ *
+ * Used by MemoryStore.countScopes so the dashboard/stats view can never
+ * surface legacy NULL-scope rows to a caller whose filter does not include
+ * `global`.
+ */
+export function buildScopeEqualityWithLegacyFallback(
+  scope: string,
+  scopeFilter?: string[],
+): string {
+  const escaped = `scope = '${escapeSqlLiteral(scope)}'`;
+  const allowLegacyNull =
+    Array.isArray(scopeFilter) && scopeFilter.length > 0 && scopeFilter.includes("global");
+  return allowLegacyNull ? `(${escaped} OR scope IS NULL)` : escaped;
+}
+
 export function combineWhereClauses(parts: Array<string | null | undefined>): string | undefined {
   const filtered = parts
     .map((part) => (typeof part === "string" ? part.trim() : ""))
