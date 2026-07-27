@@ -63,6 +63,11 @@ export interface RetrievalConfig {
    * Set 0 to disable. (default: 300)
    */
   lengthNormAnchor: number;
+  /** MMR cosine similarity threshold (default: 0.85). Above this, the
+   *  lower-scored result is deferred rather than removed. Lower for
+   *  CJK / low-dim embeddings where 0.85 conflates semantically
+   *  different memories. */
+  mmrSimilarityThreshold?: number;
   /**
    * Hard cutoff after rerank: discard results below this score.
    * Applied after all scoring stages (rerank, recency, importance, length norm).
@@ -237,6 +242,7 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   reinforcementFactor: 0.5,
   maxHalfLifeMultiplier: 3,
   tagPrefixes: ["proj", "env", "team", "scope"],
+  mmrSimilarityThreshold: 0.85,
 };
 
 // ============================================================================

@@ -17,10 +17,41 @@ import type { MemoryScopeManager } from "./scopes.js";
 /**
  * Parse the CLAWTEAM_MEMORY_SCOPE env var value into a list of scope names.
  * Supports comma-separated values, trims whitespace, and filters empty strings.
+ *
+ * P2-3 hardening: also filters out entries that do not match the known
+ * scope-naming pattern (`team:*`, `project:*`, `custom:*`). Misspelled
+ * entries are dropped with a one-time console.warn so an operator can spot
+ * the typo without accidentally widening everyone's ACL. To suppress for
+ * unusual-but-valid custom names, set MYMEM_CLAWTEAM_ALLOW_ANY=1.
  */
+const KNOWN_CLAWTEAM_SCOPE_PREFIXES = ["team:", "project:", "custom:"] as const;
+const ALLOW_ANY = process.env["MYMEM_CLAWTEAM_ALLOW_ANY"] === "1";
+const warnedScopes = new Set<string>();
+
+function isKnownClawteamScopeName(scope: string): boolean {
+  if (ALLOW_ANY) return true;
+  return KNOWN_CLAWTEAM_SCOPE_PREFIXES.some((prefix) => scope.startsWith(prefix));
+}
+
 export function parseClawteamScopes(envValue: string | undefined): string[] {
   if (!envValue) return [];
-  return envValue.split(",").map(s => s.trim()).filter(Boolean);
+  const raw = envValue.split(",").map(s => s.trim()).filter(Boolean);
+  const accepted: string[] = [];
+  for (const scope of raw) {
+    if (!isKnownClawteamScopeName(scope)) {
+      if (!warnedScopes.has(scope)) {
+        warnedScopes.add(scope);
+        console.warn(
+          `[mymem] CLAWTEAM_MEMORY_SCOPE: dropping "${scope}" — must start with one of ` +
+            KNOWN_CLAWTEAM_SCOPE_PREFIXES.join(", ") +
+            ` (set MYMEM_CLAWTEAM_ALLOW_ANY=1 to bypass).`,
+        );
+      }
+      continue;
+    }
+    accepted.push(scope);
+  }
+  return accepted;
 }
 
 /**

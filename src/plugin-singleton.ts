@@ -146,16 +146,26 @@ export async function teardownSingleton(state: PluginSingletonState): Promise<vo
   if (state.sessionPruneInterval) {
     clearInterval(state.sessionPruneInterval as unknown as NodeJS.Timeout);
   }
+  // P1-1 fix: await a microtask so an in-flight prune callback that was
+  // already mid-iteration over sessionMapsToPrune can finish before we
+  // close the underlying store. Without this, hot-reload can race the
+  // prune loop and crash on "Map iteration while tearing down".
+  await new Promise<void>((resolve) => setImmediate(resolve));
 
-  // Drain stores: flush writes, audit log, then close handles.
+  // Drain stores: flush writes, batch buffer, audit log, then close handles.
+  // P0-3 fix: flushBatch() must run before close() — close() releases
+  // the LanceDB handles and will drop any batched entries that the
+  // runBatch() AsyncLocalStorage context has not yet drained.
   try {
     await state.store.flushWrites();
+    await state.store.flushBatch();
     await state.store.flushAuditLog();
   } catch (err) {
     safeWarn(`mymem: teardown main store flush failed: ${String(err)}`);
   }
   try {
     await state.reflectionStore.flushWrites();
+    await state.reflectionStore.flushBatch();
     await state.reflectionStore.flushAuditLog();
   } catch (err) {
     safeWarn(`mymem: teardown reflection store flush failed: ${String(err)}`);

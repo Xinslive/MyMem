@@ -121,22 +121,30 @@ function stripLeadingRuntimeWrappers(text: string): string {
 }
 
 export function stripAutoCaptureInjectedPrefix(role: string, text: string): string {
-  if (role !== "user") {
-    return text.trim();
-  }
-
   let normalized = text.trim();
-  normalized = normalized.replace(/<relevant-memories>\s*[\s\S]*?<\/relevant-memories>\s*/gi, "");
-  normalized = normalized.replace(
-    /\[UNTRUSTED DATA[^\n]*\][\s\S]*?\[END UNTRUSTED DATA\]\s*/gi,
-    "",
-  );
-  normalized = stripAutoCaptureSessionResetPrefix(normalized);
-  normalized = stripLeadingInboundMetadata(normalized);
-  normalized = stripAutoCaptureAddressingPrefix(normalized);
-  normalized = stripLeadingRuntimeWrappers(normalized);
-  normalized = stripLeadingInboundMetadata(normalized);
-  normalized = normalized.replace(/\n{3,}/g, "\n\n");
+  if (role === "user") {
+    // User-side: strip the auto-injection prefix chain (<relevant-memories>,
+    // [UNTRUSTED DATA] blocks, session reset prefix, addressing, etc).
+    normalized = normalized.replace(/<relevant-memories>\s*[\s\S]*?<\/relevant-memories>\s*/gi, "");
+    normalized = normalized.replace(
+      /\[UNTRUSTED DATA[^\n]*\][\s\S]*?\[END UNTRUSTED DATA\]\s*/gi,
+      "",
+    );
+    normalized = stripAutoCaptureSessionResetPrefix(normalized);
+    normalized = stripLeadingInboundMetadata(normalized);
+    normalized = stripAutoCaptureAddressingPrefix(normalized);
+    normalized = stripLeadingRuntimeWrappers(normalized);
+    normalized = stripLeadingInboundMetadata(normalized);
+    normalized = normalized.replace(/\n{3,}/g, "\n\n");
+  } else {
+    // P2-4 fix: assistant/system/tool messages can also carry platform
+    // envelope metadata when a sub-agent echoes inbound metadata back into
+    // its own response. Run a conservative envelope-only pass (no user-side
+    // injection stripping, which is the role that actually emits those
+    // tags). The leading-inbound-metadata detector is safe for all roles
+    // because it only matches IM platform headers, not normal text.
+    normalized = stripLeadingInboundMetadata(normalized);
+  }
   return normalized.trim();
 }
 

@@ -92,10 +92,20 @@ export function _resetLegacyFallbackWarningState(): void {
 
 /**
  * Extract agentId from an OpenClaw session key.
+/**
+ * Parse the agent ID from a session key.
+ *
  * Supports both formats:
  *   - "agent:main:discord:channel:123" (with trailing segments)
  *   - "agent:main" (two-segment, no trailing colon)
+ *
  * Returns undefined for missing keys, non-agent keys, or reserved bypass IDs.
+ *
+ * P2-1 hardening: a malformed key like "agent::foo" (empty agent segment)
+ * is also returned as undefined, with a debug-level warn so the operator
+ * can see the producer-side typo. Callers that fall back to "main" should
+ * log this case explicitly via the warn prefix in their own telemetry.
+ *
  * This is the single canonical implementation — do not duplicate inline.
  */
 export function parseAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
@@ -107,6 +117,10 @@ export function parseAgentIdFromSessionKey(sessionKey: string | undefined): stri
   const colonIdx = rest.indexOf(":");
   const candidate = (colonIdx === -1 ? rest : rest.slice(0, colonIdx)).trim();
   if (!candidate || isSystemBypassId(candidate)) {
+    if (typeof console !== "undefined" && process.env["MYMEM_DEBUG_SCOPE_PARSE"] === "1") {
+      // Opt-in debug only; do not spam production logs.
+      console.warn(`[mymem] parseAgentIdFromSessionKey: empty/bypass agent id in ${JSON.stringify(sk)}`);
+    }
     return undefined;
   }
   return candidate;

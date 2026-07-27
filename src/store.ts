@@ -755,27 +755,48 @@ export class MemoryStore {
   }
 
   private async mergeInsertEntriesInChunks(entries: MemoryEntry[]): Promise<void> {
+    // P1-5 fix: LanceDB has no cross-chunk transaction. If chunk N fails,
+    // chunks 0..N-1 are already committed. We track the last successful
+    // index and re-throw with that context so callers can decide whether
+    // to attempt a compensating update or accept the best-effort outcome.
+    let lastAppliedChunkEnd = 0;
     for (let i = 0; i < entries.length; i += METADATA_BATCH_CHUNK_SIZE) {
       const chunk = entries.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
       if (chunk.length === 0) continue;
-      await this.table!
-        .mergeInsert(["id"])
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute(toLanceRows(chunk));
+      try {
+        await this.table!
+          .mergeInsert(["id"])
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(toLanceRows(chunk));
+        lastAppliedChunkEnd = i + chunk.length;
+      } catch (err) {
+        const wrapped = err instanceof Error ? err : new Error(String(err));
+        wrapped.message = `${wrapped.message} (mergeInsert: ${lastAppliedChunkEnd}/${entries.length} entries applied before failure at chunk starting at index ${i})`;
+        throw wrapped;
+      }
     }
   }
 
   private async updateMetadataValuesInChunks(entries: Array<Pick<MemoryEntry, "id" | "metadata">>): Promise<number> {
     let updatedCount = 0;
+    // P1-5 fix: same best-effort tracking as mergeInsertEntriesInChunks.
+    let lastAppliedIndex = 0;
     for (let i = 0; i < entries.length; i += METADATA_BATCH_CHUNK_SIZE) {
       const chunk = entries.slice(i, i + METADATA_BATCH_CHUNK_SIZE);
       for (const entry of chunk) {
-        const result = await this.table!.update({
-          where: `id = '${escapeSqlLiteral(entry.id)}'`,
-          values: { metadata: entry.metadata ?? "{}" },
-        });
-        updatedCount += Number(result.rowsUpdated ?? 0);
+        try {
+          const result = await this.table!.update({
+            where: `id = '${escapeSqlLiteral(entry.id)}'`,
+            values: { metadata: entry.metadata ?? "{}" },
+          });
+          updatedCount += Number(result.rowsUpdated ?? 0);
+          lastAppliedIndex = i;
+        } catch (err) {
+          const wrapped = err instanceof Error ? err : new Error(String(err));
+          wrapped.message = `${wrapped.message} (updateMetadata: ${lastAppliedIndex}/${entries.length} entries processed before failure at index ${i})`;
+          throw wrapped;
+        }
       }
     }
     return updatedCount;
@@ -1912,6 +1933,16 @@ export class MemoryStore {
     return updatedCount;
   }
 
+  /**
+   * P1-6 note: bulkDelete is a SQL-level operator that trusts the caller
+   * to provide a safe scopeFilter. It does NOT perform per-row agent
+   * access checks — that responsibility lives at the caller (typically
+   * the CLI layer, which resolves scopeFilter via MemoryScopeManager
+   * before invoking). The pre-flight check at the bottom of this method
+   * refuses to run with an empty filter, but a malicious or buggy caller
+   * could still pass `["global"]` and wipe shared state. The interface
+   * is intentionally raw; do not expose it to untrusted entry points.
+   */
   async bulkDelete(scopeFilter: string[], beforeTimestamp?: number): Promise<number> {
     await this.ensureInitialized();
 
@@ -1951,10 +1982,28 @@ export class MemoryStore {
     return result;
   }
 
-  /** Release database and table references, clearing caches. */
+  /**
+   * Release database and table references, clearing caches.
+   *
+   * P0-3 note: close() does NOT await batch-buffer flush. Callers that
+   * may have outstanding runBatch() entries should call flushBatch()
+   * first (and await it). The hot-reload teardown path in
+   * src/plugin-singleton.ts already does so; this is a defensive
+   * fire-and-forget that warns on failure for any direct caller.
+   */
   close(): void {
     const table = this.table;
     const db = this.db;
+
+    if (this._batchBuffer.length > 0 || this._batchActive) {
+      void this.flushBatch().catch((err) => {
+        this.log.warn(
+          `store.close: dropped ${this._batchBuffer.length} unflushed batch entries: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
 
     try {
       table?.close();

@@ -34,6 +34,19 @@ import type { Logger } from "./logger.js";
 // Re-export for backward compat
 export { formatEmbeddingProviderError };
 
+// P3-2 fix: wrap a thrown error with a context message while preserving
+// the original as `cause`. Without `cause`, the retry loop in Embedder
+// silently discards upstream 4xx/5xx bodies and stack frames, making
+// dashboard diagnostics show only a bare "embedding failed" message.
+function wrapWithContext(originalError: unknown, context: string): Error {
+  if (originalError instanceof Error) {
+    return new Error(`${context}: ${originalError.message}`, { cause: originalError });
+  }
+  return new Error(`${context}: ${String(originalError)}`, {
+    cause: new Error(String(originalError)),
+  });
+}
+
 const CONTEXT_LIMIT_ERROR_RE = /context[_.\s-]*(?:length|window|limit|size|tokens?)|context_length|token[_.\s-]*limit|too\s+(?:long|many\s+tokens)|max(?:imum)?[_.\s-]*(?:context|tokens?|input)|input\s+length\s+exceeds/i;
 const EMBEDDING_HTTP_AGENT = new UndiciAgent({
   connections: 8,
@@ -535,7 +548,7 @@ export class Embedder {
     for (let retry = 0; retry < maxRetries; retry++) {
       // Don't retry if externally cancelled
       if (signal?.aborted) {
-        throw originalError instanceof Error ? originalError : new Error(String(originalError));
+        throw wrapWithContext(originalError, "embedding aborted before retry");
       }
 
       // Exponential backoff with jitter: 1s, 2s, 4s ± 25%
@@ -551,7 +564,7 @@ export class Embedder {
 
       // Don't retry if externally cancelled during sleep
       if (signal?.aborted) {
-        throw originalError instanceof Error ? originalError : new Error(String(originalError));
+        throw wrapWithContext(originalError, "embedding aborted during backoff");
       }
 
       try {
@@ -559,21 +572,21 @@ export class Embedder {
       } catch (error) {
         // If externally aborted during retry, throw original error
         if (isAbortError(error) && signal?.aborted) {
-          throw error;
+          throw wrapWithContext(error, "embedding aborted during retry");
         }
         // If last retry, throw
         if (retry === maxRetries - 1) {
-          throw error;
+          throw wrapWithContext(error, "embedding failed after retries");
         }
         // Continue retrying for network/timeout errors
         if (!isNetworkError(error) && !isAbortError(error)) {
-          throw error;
+          throw wrapWithContext(error, "embedding failed (non-retryable)");
         }
       }
     }
 
     // Should not reach here, but throw original error as fallback
-    throw originalError instanceof Error ? originalError : new Error(String(originalError));
+    throw wrapWithContext(originalError, "embedding retry loop exited unexpectedly");
   }
 
   private delayUnlessAborted(ms: number, signal: AbortSignal | undefined, originalError: unknown): Promise<void> {

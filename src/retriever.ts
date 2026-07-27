@@ -467,7 +467,13 @@ export class MemoryRetriever {
     // consume rerank budget.
     if (trace) trace.startStage("mmr_diversity", learningRanked.map((r) => r.entry.id));
     learningRanked.sort((a, b) => b.score - a.score);
-    const deduplicated = applyMMRDiversity(learningRanked);
+    // P1-8 fix: honour the configured mmrSimilarityThreshold. CJK /
+    // low-dim embedding models often produce cosine > 0.85 for
+    // semantically different memories; operators can lower this.
+    const deduplicated = applyMMRDiversity(
+      learningRanked,
+      this.config.mmrSimilarityThreshold ?? 0.85,
+    );
     if (trace) trace.endStage(deduplicated.map((r) => r.entry.id), deduplicated.map((r) => r.score));
     if (diagnostics) diagnostics.stageCounts.afterDiversity = deduplicated.length;
 
@@ -615,8 +621,13 @@ export class MemoryRetriever {
     const candidatePoolSize = Math.max(this.config.candidatePoolSize, limit * 2);
 
     trace?.startStage("bm25_search", []);
+    // P1-4 fix: when tag tokens (e.g. `proj:AIF`) are present, build a
+    // tag-focused BM25 query so the FTS index can match the tag token
+    // directly instead of being diluted by the rest of the query. The
+    // substr mustContain filter below is kept as a safety net.
+    const bm25Query = tagTokens.length > 0 ? tagTokens.join(" ") : query;
     const bm25Results = await this.store.bm25Search(
-      query,
+      bm25Query,
       candidatePoolSize,
       scopeFilter,
       { excludeInactive: true },
@@ -1028,10 +1039,14 @@ export class MemoryRetriever {
     category?: string,
     overFetchMultiplier?: number,
   ): Promise<Array<MemorySearchResult & { rank: number }>> {
+    // P1-2 fix: honor the configured minScore in the hybrid path. Previously
+    // this was hardcoded to 0.1, which silently diverged from the
+    // vector-only path (which uses this.config.minScore) and made user
+    // tightening of retrieval.minScore a no-op for hybrid retrieval.
     const results = await this.store.vectorSearch(
       queryVector,
       limit,
-      0.1,
+      this.config.minScore,
       scopeFilter,
       { excludeInactive: true, overFetchMultiplier },
     );

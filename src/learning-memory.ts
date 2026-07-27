@@ -97,7 +97,16 @@ export function applyLearningPolicy(
       const explorationBoost = cfg.exploration.enabled
         ? cfg.exploration.weight * Math.sqrt(logTrials / Math.max(1, trialCount + 1))
         : 0;
-      const badRecallPenalty = Math.min(0.35, badRecallCount * 0.08);
+      // P1-7 fix: avoid double-counting bad_recall when utility is already
+      // low. The utility signal already absorbs negative feedback into
+      // utility_score; penalising it again with bad_recall_penalty stacks
+      // -0.47 on memories the user explicitly rejected. Only apply
+      // bad_recall_penalty to memories whose utility is still above the
+      // neutral midpoint — those are the cases where a "previously
+      // good" memory is now consistently being marked bad.
+      const badRecallPenalty = utility > 0.5
+        ? Math.min(0.35, badRecallCount * 0.08)
+        : 0;
       const finalScore = Math.max(0, result.score + utilityBoost + explorationBoost - badRecallPenalty);
       const breakdown: LearningScoreBreakdown = {
         originalScore: result.score,

@@ -212,6 +212,49 @@ function collectRecallMessageCacheKeys(params: {
   return [...keys];
 }
 
+/**
+ * P2-5 fix: strict variant that does NOT fall back to "default" when no
+ * identity fields are present. Use for WRITES to lastRawUserMessage so
+ * that a producer-side sessionKey-less event does not poison the shared
+ * "default" cache key that other sessions might read from. Reads can
+ * still use collectRecallMessageCacheKeys() (the legacy "default"
+ * fallback is safe for reads: a stale hit at worst produces a slightly
+ * out-of-context recall, never a write).
+ */
+function collectStrictRecallMessageCacheKeys(params: {
+  channelId?: unknown;
+  conversationId?: unknown;
+  sessionId?: unknown;
+  sessionKey?: unknown;
+}): string[] {
+  const keys = new Set<string>();
+  const push = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (trimmed) keys.add(trimmed);
+  };
+
+  const ingressKey = buildAutoCaptureConversationKeyFromIngress(
+    typeof params.channelId === "string" ? params.channelId : undefined,
+    typeof params.conversationId === "string" ? params.conversationId : undefined,
+  );
+  if (ingressKey) {
+    push(ingressKey);
+  } else {
+    push(params.channelId);
+    push(params.conversationId);
+  }
+
+  const sessionKey = typeof params.sessionKey === "string"
+    ? buildAutoCaptureConversationKeyFromSessionKey(params.sessionKey)
+    : null;
+  if (sessionKey) push(sessionKey);
+
+  push(params.sessionId);
+
+  return [...keys];
+}
+
 function getCachedRawUserMessage(
   lastRawUserMessage: Map<string, string>,
   params: Parameters<typeof collectRecallMessageCacheKeys>[0],
@@ -396,13 +439,20 @@ export function registerAutoRecallHook(params: {
     if (!text) return;
     const maxCachedRawMessageLength = config.autoRecallMaxQueryLength ?? 2_000;
     const cachedText = truncateAutoRecallQuery(text, maxCachedRawMessageLength);
-    for (const cacheKey of collectRecallMessageCacheKeys({
+    // P2-5 fix: use the strict key collector (no "default" fallback) for
+    // writes. A sessionKey-less event must not poison the shared "default"
+    // key that other sessions might later read from. If the strict path
+    // produces no keys (truly anonymous event), skip the cache write.
+    const writeKeys = collectStrictRecallMessageCacheKeys({
       channelId: ctx?.channelId,
       conversationId: ctx?.conversationId,
       sessionId: ctx?.sessionId,
       sessionKey: ctx?.sessionKey,
-    })) {
-      params.lastRawUserMessage.set(cacheKey, cachedText);
+    });
+    if (writeKeys.length > 0) {
+      for (const cacheKey of writeKeys) {
+        params.lastRawUserMessage.set(cacheKey, cachedText);
+      }
     }
   });
 
@@ -818,8 +868,14 @@ export function registerAutoRecallHook(params: {
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
+      // P0-2 fix: attach a terminal .catch to the recallWork chain so that
+      // when the timeout branch of Promise.race wins (resolves undefined),
+      // the still-in-flight recallWork rejection does not surface as
+      // unhandledRejection if abort() makes embedder/retriever throw.
       const result = await Promise.race([
-        recallWork(abortController.signal).then((r) => { clearTimeout(timeoutId); return r; }),
+        recallWork(abortController.signal)
+          .then((r) => { clearTimeout(timeoutId); return r; })
+          .catch(() => undefined),
         new Promise<undefined>((resolve) => {
           timeoutId = setTimeout(() => {
             abortController.abort(new Error("auto-recall timeout"));

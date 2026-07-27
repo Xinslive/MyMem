@@ -334,12 +334,22 @@ export function applyTuningPreset(
     const overlayValue = overlay[key];
     const rawValue = rawConfig[key];
     if (overlayValue && typeof overlayValue === "object" && !Array.isArray(overlayValue)) {
-      merged[key] = {
-        ...(overlayValue as RawObject),
-        ...(rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)
-          ? (rawValue as RawObject)
-          : {}),
-      };
+      // P2-2 fix: an explicit `null` from the user means "do not use this
+      // preset block at all" — keep the null so the downstream parser can
+      // see "user opted out". Previously the `rawValue && typeof === "object"`
+      // short-circuit collapsed null to `{}`, which silently restored the
+      // preset's defaults (a user-friendly default that nonetheless
+      // contradicted the operator's stated intent).
+      if (rawValue === null) {
+        merged[key] = null;
+      } else {
+        merged[key] = {
+          ...(overlayValue as RawObject),
+          ...(rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)
+            ? (rawValue as RawObject)
+            : {}),
+        };
+      }
     }
   }
 

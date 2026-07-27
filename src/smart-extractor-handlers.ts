@@ -434,11 +434,32 @@ export async function handleSupersede(
     }),
   });
 
-  await ctx.store.update(
-    matchId,
-    { metadata: stringifySmartMetadata(invalidatedMetadata) },
-    scopeFilter,
-  );
+  // P1-9 fix: roll back the create when the update fails so the
+  // superseded_by relationship stays symmetric. Without this, a transient
+  // store failure leaves a new memory with `supersedes: matchId` while
+  // the old memory still has no `superseded_by`, and list views will
+  // show both. The delete is best-effort: if it also fails, surface a
+  // combined error so the operator can reconcile manually.
+  try {
+    await ctx.store.update(
+      matchId,
+      { metadata: stringifySmartMetadata(invalidatedMetadata) },
+      scopeFilter,
+    );
+  } catch (updateErr) {
+    try {
+      await ctx.store.delete(created.id, scopeFilter);
+    } catch (rollbackErr) {
+      const wrapped = new Error(
+        `supersede: failed to update old memory ${matchId} and rollback delete of new ${created.id}: ${String(updateErr)} / ${String(rollbackErr)}`,
+      );
+      throw wrapped;
+    }
+    const wrapped = new Error(
+      `supersede: rolled back new memory ${created.id} after update of ${matchId} failed: ${String(updateErr)}`,
+    );
+    throw wrapped;
+  }
 
   ctx.log.info(
     `mymem：智能提取替换旧记忆 [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`,

@@ -334,6 +334,11 @@ export class FeedbackLoop {
         this.config.priorAdaptation.adaptationIntervalMs,
       );
     }
+    // Unref timers so a long-lived FeedbackLoop does not keep a one-shot
+    // CLI process (e.g. `openclaw mymem stats`) alive past main()'s return.
+    // The plugin-singleton's _pruneInterval uses the same pattern.
+    this.drainTimer?.unref?.();
+    this.adaptationTimer?.unref?.();
 
     this.debugLog("feedback-loop: started");
   }

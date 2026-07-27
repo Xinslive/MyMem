@@ -156,6 +156,10 @@ function buildContradictionPlans(rows: RowContext[]): Map<string, { reason: stri
       : null;
 
     for (const older of sorted.slice(1)) {
+      // Already-superseded memories are not candidates for further
+      // contradiction analysis: the supersede relationship itself
+      // already implies the older fact is invalidated. Archival of
+      // superseded rows is handled in the supersede path above, not here.
       if (older.meta.superseded_by) continue;
       const olderConfidence = Number(older.meta.confidence ?? 0.7);
       const newerConfidence = Number(newest.meta.confidence ?? 0.7);

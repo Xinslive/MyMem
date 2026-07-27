@@ -44,6 +44,10 @@ export function applyMMRDiversity(
   // avoiding repeated Array.from() and sqrt() on every pairwise cosine comparison.
   const vectorCache = new Map<string, number[]>();
   const normCache = new Map<string, number>();
+  // P1-8 fix: per-call latch so we warn about dimension mismatches at most
+  // once per applyMMRDiversity() invocation. Repeated mismatches across
+  // candidate pairs would otherwise spam logs in mixed-model stores.
+  let dimensionMismatchWarned = false;
   for (const r of results) {
     const converted = getOrConvertVector(r.entry.vector);
     if (converted) {
@@ -66,6 +70,19 @@ export function applyMMRDiversity(
         const sArr = vectorCache.get(s.entry.id);
         const sNorm = normCache.get(s.entry.id);
         if (sArr && sNorm) {
+          // P1-8 fix: dimension mismatch is a silent miscalculation hazard
+          // (mixed-model migration, store corruption). Skip the comparison
+          // and treat as "not similar" rather than producing a meaningless
+          // cosine value. One warn per call is enough.
+          if (sArr.length !== cArr.length) {
+            if (!dimensionMismatchWarned) {
+              dimensionMismatchWarned = true;
+              console.warn(
+                `[mymem] MMR: dimension mismatch detected (${sArr.length} vs ${cArr.length}); skipping cosine comparison for affected pairs`,
+              );
+            }
+            continue;
+          }
           const denom = sNorm * cNorm;
           if (denom > 0) {
             let dot = 0;

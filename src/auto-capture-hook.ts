@@ -66,15 +66,29 @@ export function registerAutoCaptureHook(params: {
   if (config.autoCapture === false) return;
 
   const sessionRuns = new Map<string, Promise<void>>();
+  // P1-3 fix: each enqueueSessionRun call gets a monotonically increasing
+  // id per sessionKey. The finally cleanup only clears the Map entry if
+  // it is still the most-recent run — otherwise a slow in-flight run
+  // would clobber the freshly enqueued next run's Map entry and leak the
+  // previous run's promise into backgroundTasks.
+  const sessionRunCounter = new Map<string, number>();
 
   const enqueueSessionRun = (sessionKey: string, run: () => Promise<void>): Promise<void> => {
     const previous = sessionRuns.get(sessionKey) ?? Promise.resolve();
+    const myId = (sessionRunCounter.get(sessionKey) ?? 0) + 1;
+    sessionRunCounter.set(sessionKey, myId);
     const next = previous.catch(() => undefined).then(run);
     sessionRuns.set(sessionKey, next);
     params.backgroundTasks?.add(next);
     void next.finally(() => {
-      if (sessionRuns.get(sessionKey) === next) {
-        sessionRuns.delete(sessionKey);
+      // Only the most recent run for this sessionKey is allowed to clear
+      // the Map entry. If a newer run has been enqueued, leave the entry
+      // alone so its .finally can manage the lifecycle.
+      if (sessionRunCounter.get(sessionKey) === myId) {
+        if (sessionRuns.get(sessionKey) === next) {
+          sessionRuns.delete(sessionKey);
+        }
+        sessionRunCounter.delete(sessionKey);
       }
       params.backgroundTasks?.delete(next);
     });
@@ -169,11 +183,21 @@ export function registerAutoCaptureHook(params: {
           : eligibleItems;
         let newItems = unseenEligibleItems;
         if (pendingIngressTexts.length > 0) {
+          // P2-6 fix: include ALL unseen eligible items (not just assistant
+          // role). The previous filter dropped user-role messages that
+          // arrived in the same window as the pending ingress, which then
+          // silently bypassed capture because previousSeenCount was already
+          // advanced to eligibleTexts.length below.
           newItems = [
             ...pendingIngressTexts.map((text) => ({ role: "user" as const, text })),
-            ...unseenEligibleItems.filter((item) => item.role === "assistant"),
+            ...unseenEligibleItems,
           ];
         }
+        // seenAdvance equals eligibleTexts.length: pendingIngressTexts is
+        // already cleared above (line 167) so it won't re-appear next time.
+        // We previously over-counted by adding pending.length, which could
+        // cause the next agent_end to skip legitimate new items when
+        // eligibleItems grew by fewer than pending.length.
         params.autoCaptureSeenTextCount.set(sessionKey, eligibleTexts.length);
 
         let captureItems: CaptureItem[] = [];
